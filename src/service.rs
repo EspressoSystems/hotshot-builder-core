@@ -12,15 +12,22 @@
 //!     c. Decide Event
 //!
 
-// Utilities
-fn process_da_proposal(){
 
+#[derive(clap::Args, Default)]
+pub struct Options {
+    #[clap(short, long, env = "ESPRESSO_BUILDER_PORT")]
+    pub port: u16
 }
 
-fn process_qc_proposal(){
-
-}
-
-fn process_decide_event(){
-
+/// Run an instance of the default Espresso builder service.
+pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementation<Types>, D>(
+    options: Options,
+    data_source: D, // contains both the tx's and blocks local pool
+    mut hotshot: SystemContextHandle<Types, I>,
+) -> Result<(), Error>
+//where
+    //Payload<Types>: availability::QueryablePayload
+    // Might need to bound D with something...// TODO
+{
+    todo!();
 }
