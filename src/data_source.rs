@@ -11,15 +11,12 @@
 //!     b. Quorum Proposal
 //!     c. Decide Event
 //! 
-// Utilities
-fn process_da_proposal(){
+
+// Used by the third API service i.e. to submit a transaction externally (priavate mempool)
+fn process_external_transaction(){
 
 }
 
-fn process_qc_proposal(){
-
-}
-
-fn process_decide_event(){
+fn process_hotshot_transaction(){
 
 }
