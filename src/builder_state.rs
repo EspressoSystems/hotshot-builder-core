@@ -16,7 +16,7 @@
 pub trait BuilderState {
     
     // external facing with Proposer 
-    async fn process_proposer_p1_request(&self, parent_block_hash:) -> Result<(), Error>;
+    async fn process_proposer_p1_request(&self, parent_block_hash:_) -> Result<(), Error>;
     async fn process_proposer_p2_request(&self) -> Result<(), Error>;
     
     // core internal services
@@ -28,3 +28,5 @@ pub trait BuilderState {
     async fn process_external_transaction(&self) -> Result<(), Error>;
     async fn process_hotshot_transaction(&self) -> Result<(), Error>;
 }
+
+

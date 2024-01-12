@@ -12,6 +12,36 @@
 //!     c. Decide Event
 //!
 
+use hotshot::{traits::NodeImplementation, types::Event, SystemContext, SystemContextHandle};
+use async_compatibility_layer::channel::UnboundedStream;
+use async_lock::RwLock;
+use commit::Committable;
+use futures::Stream;
+use hotshot_task::{
+    boxed_sync,
+    event_stream::{ChannelStream, EventStream, StreamId},
+    global_registry::GlobalRegistry,
+    task::FilterEvent,
+    BoxSyncFuture,
+};
+use hotshot_task_impls::events::HotShotEvent;
+use hotshot_types::simple_vote::QuorumData;
+use hotshot_types::{
+    consensus::Consensus,
+    error::HotShotError,
+    event::EventType,
+    message::{MessageKind, SequencingMessage},
+    traits::{
+        election::Membership, node_implementation::NodeType, state::ConsensusTime, storage::Storage,
+    },
+};
+use hotshot_types::{data::Leaf, simple_certificate::QuorumCertificate};
+
+use std::sync::Arc;
+use tracing::error;
+
+
+use hotshot_task::task::FilterEvent;
 
 #[derive(clap::Args, Default)]
 pub struct Options {
@@ -19,15 +49,91 @@ pub struct Options {
     pub port: u16
 }
 
+
+// async fn process_events() -> Result<(), Error> {
+//     loop {
+//         // wait for an event
+//         // process the event
+//         // if the event is a transaction, then process it
+//         // if the event is a DA proposal, then process it
+//         // if the event is a QC proposal, then process it
+//         // if the event is a decide event, then process it
+//     }
+// }
+
+
+
 /// Run an instance of the default Espresso builder service.
 pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementation<Types>, D>(
     options: Options,
     data_source: D, // contains both the tx's and blocks local pool
     mut hotshot: SystemContextHandle<Types, I>,
 ) -> Result<(), Error>
-//where
+//where //TODO
     //Payload<Types>: availability::QueryablePayload
-    // Might need to bound D with something...// TODO
+    // Might need to bound D with something...
 {
-    todo!();
+
+        // hear out for events from the context handle and execute them
+        let (mut event_stream, _streamid) = hotshot.get_event_stream(FilterEvent::default()).await;
+
+        loop {
+            match event_stream.next().await {
+                None => {
+                    //TODO should we panic here?
+                    //TODO or should we just continue just because we might trasaxtions from private mempool
+                    panic!("Didn't receive any event from the HotShot event stream");
+                }
+                Some(event) => {
+                    match event {
+                        // error event
+                        EventType::Error{err} => {
+                            error!("Error event in HotShot: {:?}", err);
+                        }
+                        // tx event
+                        EventType::Transaction(tx) => {
+                            // process the transaction
+                            //process_external_transaction(tx, data_source.clone()).await?;
+                            
+                            // lauch a task for this transaction
+                        }
+                        // DA proposal event
+                        EventType::DAProposal(da_proposal) => {
+                            // process the DA proposal
+                            // process_da_proposal(da_proposal, data_source.clone()).await?;
+                            
+                            // launch a task for this DA proposal
+
+                        }
+                        // QC proposal event
+                        EventType::QCProposal(qc_proposal) => {
+                            // process the QC proposal
+                            // process_qc_proposal(qc_proposal, data_source.clone()).await?;
+                            
+                            // launch a task for this QC proposal
+                        }
+                        // decide event
+                        EventType::Decide {
+                            leaf_chain,
+                            quorum_certificate,
+                            block_size
+                        } => {
+                            // process the decide event
+                            // process_decide_event(decide_event, data_source.clone()).await?;
+                            
+                            // launch a task for this decide event
+
+                        }
+                        // not sure whether we need it or not //TODO
+                        EventType::ViewFinished => {
+                            
+                        }
+                        _ => {
+                            unimplemented!();
+                        }
+                    }
+                }
+            }
+        }
+        
 }

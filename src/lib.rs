@@ -20,7 +20,6 @@ fn process_da_proposal(){
 fn process_qc_proposal(){
 
 }
-
 fn process_decide_event(){
 
 }
