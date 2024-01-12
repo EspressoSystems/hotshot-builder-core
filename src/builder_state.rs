@@ -12,6 +12,50 @@
 //!     c. Decide Event
 //!
 
+use unix_time::Instant;
+use std::collections::BTreeMap;
+pub trait BuilderType {
+    type TransactionID;
+    type Transaction;
+    type TransactionCommit;
+    type Block;
+    type BlockHeader;
+    type BlockPayload;
+    type BlockCommit;
+    type ViewNum;
+}
+
+enum TransactionType {
+    External,
+    HotShot,
+}
+// Structure of a tx according to the Builder
+pub struct Transaction<BuilderType>{
+    tx_ID: BuilderType::TransactionID,
+    tx: BuilderType::Transaction,
+    tx_commit: BuilderType::TransactionCommit,
+    tx_type: TransactionType,
+}
+pub struct BuilderState<BuilderType>{
+
+    // B-TreeMap for storing the transactions info
+    // Contains all the transactions: nested map, initially keyed by UNIX time (//TODO might need to change)
+    // and then by transaction ID
+    /// Local Transactions Pool
+    transactionspool: Arc<Mutex<BTreeMap<Instant, HashMap<BuilderType:TransactionID, Transaction>>>>,
+    
+    // to store block hash parent and candidate blocks
+    /// contains information about all the blocks that have been processed locally and are ready to be shipped
+    /// to the proposer
+    processed_blocks: Arc<Mutex<HashMap<BuilderType::BlockCommit, Vec<BuilderType::Block>>>>,
+
+
+    // to store the info correspondint to view and blocks
+    /// store all the blocks heard for a particular view
+    processed_views: Arc<Mutex<HashMap<BuilderType::Viewnum, HashSet<BuilderType::Block>>>>,
+
+}
+
 #[async_trait]
 pub trait BuilderState {
     
