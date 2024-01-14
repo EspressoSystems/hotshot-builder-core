@@ -1,4 +1,6 @@
+#![allow(unused_imports)]
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::BuildHasher;
 //use std::error::Error;
 use std::sync::{Arc, Mutex};
 use futures::Future;
@@ -20,28 +22,28 @@ pub trait BuilderType {
     type ViewNum;
 }
 
-pub struct Transaction<TYPES: BuilderType> {
-    tx_id: TYPES::TransactionID,
-    tx: TYPES::Transaction,
-    tx_commit: TYPES::TransactionCommit,
-    tx_type: TransactionType,
-}
+// TODO Instead of Trasaction from here.. let us take from the hotshot
+// pub struct Transaction<T: BuilderType> {
+//     tx_id: T::TransactionID,
+//     tx: T::Transaction,
+//     tx_commit: T::TransactionCommit,
+//     tx_type: TransactionType,
+// }
 
 pub struct BuilderState<T: BuilderType> {
-    transactionspool: Arc<Mutex<BTreeMap<Instant, HashMap<T::TransactionID, Transaction<T>>>>>,
+    transactionspool: Arc<Mutex<BTreeMap<Instant, HashMap<T::TransactionID,T::Transaction>>>>,
     processed_blocks: Arc<Mutex<HashMap<T::BlockCommit, Vec<T::Block>>>>,
     processed_views: Arc<Mutex<HashMap<T::ViewNum, HashSet<T::Block>>>>,
 }
 
-#[async_trait]
-pub trait BuilderService<TYPES: BuilderType> {
-    async fn process_proposer_p1_request(&self, parent_block_hash: TYPES::BlockCommit) -> impl Future<Output=()>;
-    async fn process_proposer_p2_request(&self) -> impl Future<Output=()>;
-    async fn process_da_proposal(&self) -> impl Future<Output=()>;
-    async fn process_qc_proposal(&self) -> impl Future<Output=()>;
-    async fn process_decide_event(&self) -> impl Future<Output=()>;
-    async fn process_external_transaction(&self) -> impl Future<Output=()>;
-    async fn process_hotshot_transaction(&self) -> impl Future<Output=()>;
+impl<T:BuilderType> BuilderState<T>{
+    fn new() -> Self {
+                BuilderState {
+                    transactionspool: Arc::new(Mutex::new(BTreeMap::new())),
+                    processed_blocks: Arc::new(Mutex::new(HashMap::new())),
+                    processed_views: Arc::new(Mutex::new(HashMap::new())),
+                }
+            }
 }
 
 

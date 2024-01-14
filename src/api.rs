@@ -12,18 +12,19 @@
 //!     c. Decide Event
 //! 
 
+// The return types of the API services might differ from internal BuilderType
 
 // Used by the first APT service i.e. to provide blocks information
-fn process_proposer_p1_request(){
+async fn process_proposer_p1_request(){
 
 }
 
 // Used by the second API service i.e to provide full blocks information
-fn process_proposer_p2_request(){
+async fn process_proposer_p2_request(){
 
 }
 
 // Used by the third API service i.e. to submit a transaction externally (priavate mempool)
-fn process_external_transaction(){
+async fn process_external_transaction(){
 
 }

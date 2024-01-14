@@ -13,7 +13,7 @@
 //!
 // TODO no warning for unused imports
 #![allow(unused_imports)]
-use hotshot::{traits::NodeImplementation, types::Event, SystemContext, SystemContextHandle};
+pub use hotshot::{traits::NodeImplementation, types::Event, SystemContext, SystemContextHandle};
 use async_compatibility_layer::channel::UnboundedStream;
 use async_lock::RwLock;
 use commit::Committable;
@@ -41,9 +41,6 @@ use hotshot_types::{data::Leaf, simple_certificate::QuorumCertificate};
 use std::sync::Arc;
 use tracing::error;
 
-
-use hotshot_task::task::FilterEvent;
-
 #[derive(clap::Args, Default)]
 pub struct Options {
     #[clap(short, long, env = "ESPRESSO_BUILDER_PORT")]
@@ -61,15 +58,31 @@ pub struct Options {
 //         // if the event is a decide event, then process it
 //     }
 // }
+use futures::future::ready;
+
+use crate::data_source::process_hotshot_transaction;
 
 
+async fn process_da_proposal(){
+    unimplemented!("Process DA Proposal");
+}
+
+
+async fn process_qc_proposal(){
+    unimplemented!("Process QC Proposal");
+}
+
+
+async fn process_decide_event() {
+   unimplemented!("Process Decide Event");
+}
 
 /// Run an instance of the default Espresso builder service.
 pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementation<Types>, D>(
     options: Options,
     data_source: D, // contains both the tx's and blocks local pool
     mut hotshot: SystemContextHandle<Types, I>,
-) -> Result<(), Error>
+) -> Result<(),()>
 //where //TODO
     //Payload<Types>: availability::QueryablePayload
     // Might need to bound D with something...
@@ -89,12 +102,13 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                     match event {
                         // error event
                         EventType::Error{error  } => {
-                            error!("Error event in HotShot: {:?}", err);
+                            error!("Error event in HotShot: {:?}", error);
                         }
                         // tx event
                         EventType::Transaction(tx) => {
                             // process the transaction
                             //process_external_transaction(tx, data_source.clone()).await
+                            process_hotshot_transaction(event_stream, handle).await;
                         }
                         // DA proposal event
                         EventType::DAProposal(da_proposal) => {
@@ -102,7 +116,7 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                             // process_da_proposal(da_proposal, data_source.clone()).await?;
                             
                             // launch a task for this DA proposal
-
+                            process_da_proposal().await;
                         }
                         // QC proposal event
                         EventType::QCProposal(qc_proposal) => {
@@ -110,6 +124,7 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                             // process_qc_proposal(qc_proposal, data_source.clone()).await?;
                             
                             // launch a task for this QC proposal
+                            process_qc_proposal().await;
                         }
                         // decide event
                         EventType::Decide {
@@ -121,7 +136,7 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                             // process_decide_event(decide_event, data_source.clone()).await?;
                             
                             // launch a task for this decide event
-
+                            process_decide_event().await;
                         }
                         // not sure whether we need it or not //TODO
                         EventType::ViewFinished => {

@@ -11,24 +11,35 @@
 //!     b. Quorum Proposal
 //!     c. Decide Event
 //! 
+#![allow(unused_imports)]
 
-// Used by the third API service i.e. to submit a transaction externally (priavate mempool)
-fn process_external_transaction(){
+pub use hotshot::{traits::NodeImplementation, types::Event, SystemContext, SystemContextHandle};
+use async_compatibility_layer::channel::UnboundedStream;
+use async_lock::RwLock;
+use commit::Committable;
 
-}
+use hotshot_task::{
+    boxed_sync,
+    event_stream::{ChannelStream, EventStream, StreamId},
+    global_registry::GlobalRegistry,
+    task::FilterEvent,
+    BoxSyncFuture,
+};
+use hotshot_task_impls::events::HotShotEvent;
+use hotshot_types::simple_vote::QuorumData;
+use hotshot_types::{
+    consensus::Consensus,
+    error::HotShotError,
+    event::EventType,
+    message::{MessageKind, SequencingMessage},
+    traits::{
+        election::Membership, node_implementation::NodeType, state::ConsensusTime, storage::Storage,
+    },
+};
+use hotshot_types::{data::Leaf, simple_certificate::QuorumCertificate};
 
-// fn process_hotshot_transaction(){
-
-// }
-// use hotshot_task::{
-//     boxed_sync,
-//     event_stream::ChannelStream,
-//     task::{FilterEvent, HandleEvent, HandleMessage, HotShotTaskCompleted, HotShotTaskTypes},
-//     task_impls::TaskBuilder,
-//     task_launcher::TaskRunner,
-//     GeneratedStream, Merge,
-// };
-use hotshot_types::traits::node_implementation::{NodeImplementation, NodeType};
+use std::sync::Arc;
+use tracing::error;
 
 
 // process the hotshot transaction event 
@@ -46,4 +57,10 @@ pub async fn process_hotshot_transaction<Types: NodeType, I: NodeImplementation<
             .boxed()
         },
     ));
+}
+
+
+// Used by the third API service i.e. to submit a transaction externally (priavate mempool)
+async fn process_external_transaction(){
+    unimplemented!();
 }
