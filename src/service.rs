@@ -93,9 +93,7 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                         // tx event
                         EventType::Transaction(tx) => {
                             // process the transaction
-                            //process_external_transaction(tx, data_source.clone()).await?;
-                            
-                            // lauch a task for this transaction
+                            //process_external_transaction(tx, data_source.clone()).await
                         }
                         // DA proposal event
                         EventType::DAProposal(da_proposal) => {

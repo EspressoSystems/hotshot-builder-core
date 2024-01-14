@@ -12,14 +12,14 @@
 //!     c. Decide Event
 //!
 
-// Utilities
-fn process_da_proposal(){
+// providing the API services to the external users
+pub mod api;
 
-}
+// providing the core services to support above API services
+pub mod builder_state;
 
-fn process_qc_proposal(){
+// Core interaction with the HotShot network
+pub mod service;
 
-}
-fn process_decide_event(){
-
-}
+// tracking the transactions in both Private and Public mempools
+pub mod data_source;
