@@ -13,6 +13,7 @@
 //!
 // TODO no warning for unused imports
 #![allow(unused_imports)]
+#![allow(unused_variables)]
 pub use hotshot::{traits::NodeImplementation, types::Event, SystemContext, SystemContextHandle};
 use async_compatibility_layer::channel::UnboundedStream;
 use async_lock::RwLock;
@@ -60,20 +61,21 @@ pub struct Options {
 // }
 use futures::future::ready;
 
-use crate::data_source::process_hotshot_transaction;
+use crate::{data_source::process_hotshot_transaction, builder_state::BuilderType};
 
+use crate::builder_state::BuilderState;
 
-async fn process_da_proposal(){
+async fn process_da_proposal<T:BuilderType>(builder_info: &mut BuilderState<T>){
     unimplemented!("Process DA Proposal");
 }
 
 
-async fn process_qc_proposal(){
+async fn process_qc_proposal<T:BuilderType>(builder_info: &mut BuilderState<T>){
     unimplemented!("Process QC Proposal");
 }
 
 
-async fn process_decide_event() {
+async fn process_decide_event<T:BuilderType>(builder_info: &mut BuilderState<T>) {
    unimplemented!("Process Decide Event");
 }
 
