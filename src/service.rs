@@ -11,7 +11,8 @@
 //!     b. Quorum Proposal
 //!     c. Decide Event
 //!
-
+// TODO no warning for unused imports
+#![allow(unused_imports)]
 use hotshot::{traits::NodeImplementation, types::Event, SystemContext, SystemContextHandle};
 use async_compatibility_layer::channel::UnboundedStream;
 use async_lock::RwLock;
@@ -87,7 +88,7 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                 Some(event) => {
                     match event {
                         // error event
-                        EventType::Error{err} => {
+                        EventType::Error{error  } => {
                             error!("Error event in HotShot: {:?}", err);
                         }
                         // tx event
@@ -113,7 +114,7 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                         // decide event
                         EventType::Decide {
                             leaf_chain,
-                            quorum_certificate,
+                            qc,
                             block_size
                         } => {
                             // process the decide event
