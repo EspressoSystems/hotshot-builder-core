@@ -7,8 +7,8 @@ use futures::Future;
 use unix_time::Instant;
 use async_trait::async_trait;
 enum TransactionType {
-    External,
-    HotShot,
+    External, // txn from the external source i.e private mempool
+    HotShot, // txn from the HotShot network i.e public mempool
 }
 
 pub trait BuilderType {
@@ -37,13 +37,33 @@ pub struct BuilderState<T: BuilderType> {
 }
 
 impl<T:BuilderType> BuilderState<T>{
-    fn new() -> Self {
-                BuilderState {
-                    transactionspool: Arc::new(Mutex::new(BTreeMap::new())),
-                    processed_blocks: Arc::new(Mutex::new(HashMap::new())),
-                    processed_views: Arc::new(Mutex::new(HashMap::new())),
-                }
-            }
+    fn new()->BuilderState<T>{
+       BuilderState {
+                   transactionspool: Arc::new(Mutex::new(BTreeMap::new())),
+                   processed_blocks: Arc::new(Mutex::new(HashMap::new())),
+                   processed_views: Arc::new(Mutex::new(HashMap::new())),
+               }
+   }
 }
 
+/*
+/// How to make concrete type for it?
+#[derive(Debug)]
+struct BuilderTypeStruct;
 
+impl BuilderType for BuilderTypeStruct{
+    type TransactionID = String;
+    type Transaction=String;
+    type TransactionCommit=String;
+    type Block=String;
+    type BlockHeader=String;
+    type BlockPayload=String;
+    type BlockCommit=String;
+    type ViewNum=String;
+}
+
+#[test]
+fn test(){
+let builder_state = BuilderState::<BuilderTypeStruct>::new();
+}
+*/
