@@ -15,7 +15,7 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 pub use hotshot::{traits::NodeImplementation, types::Event, SystemContext, SystemContextHandle};
-use async_compatibility_layer::channel::UnboundedStream;
+use async_compatibility_layer::{channel::UnboundedStream, art::async_spawn};
 use async_lock::RwLock;
 use commit::Committable;
 use futures::Stream;
@@ -75,7 +75,7 @@ async fn process_qc_proposal<T:BuilderType>(builder_info: &mut BuilderState<T>){
 }
 
 
-async fn process_decide_event<T:BuilderType>(builder_info: &mut BuilderState<T>) {
+async fn process_decide_event<T:BuilderType>(builder_info: &mut BuilderState<T>, ) {
    unimplemented!("Process Decide Event");
 }
 
@@ -89,11 +89,9 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
     //Payload<Types>: availability::QueryablePayload
     // Might need to bound D with something...
 {
-
         // hear out for events from the context handle and execute them
-        let (mut event_stream, _streamid) = hotshot.get_event_stream(FilterEvent::default()).await;
-
         loop {
+            let (mut event_stream, _streamid) = hotshot.get_event_stream(FilterEvent::default()).await;
             match event_stream.next().await {
                 None => {
                     //TODO should we panic here?
@@ -109,8 +107,11 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                         // tx event
                         EventType::Transaction(tx) => {
                             // process the transaction
-                            //process_external_transaction(tx, data_source.clone()).await
-                            process_hotshot_transaction(event_stream, handle).await;
+                            let handle = async_spawn(async move {
+                                // extract the arguments from the event and pass it below
+                                process_hotshot_transaction(_,_).await
+                                }
+                            );
                         }
                         // DA proposal event
                         EventType::DAProposal(da_proposal) => {
@@ -118,7 +119,12 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                             // process_da_proposal(da_proposal, data_source.clone()).await?;
                             
                             // launch a task for this DA proposal
-                            process_da_proposal().await;
+                            // process the transaction
+                            let handle = async_spawn(async move {
+                                // extract the arguments from the event and pass it below
+                                process_da_proposal(_,_).await
+                                }
+                            );
                         }
                         // QC proposal event
                         EventType::QCProposal(qc_proposal) => {
@@ -126,7 +132,11 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                             // process_qc_proposal(qc_proposal, data_source.clone()).await?;
                             
                             // launch a task for this QC proposal
-                            process_qc_proposal().await;
+                            let handle = async_spawn(async move {
+                                // extract the arguments from the event and pass it below
+                                process_qc_proposal(_,_).await
+                                }
+                            );
                         }
                         // decide event
                         EventType::Decide {
@@ -138,7 +148,11 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                             // process_decide_event(decide_event, data_source.clone()).await?;
                             
                             // launch a task for this decide event
-                            process_decide_event().await;
+                            let handle = async_spawn(async move {
+                                // extract the arguments from the event and pass it below
+                                process_decide_event(_,_).await
+                                }
+                            );
                         }
                         // not sure whether we need it or not //TODO
                         EventType::ViewFinished => {

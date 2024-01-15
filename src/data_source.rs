@@ -64,6 +64,7 @@ pub async fn process_hotshot_transaction<Types: NodeType, I: NodeImplementation<
 
 // Used by the third API service i.e. to submit a transaction externally (priavate mempool)
 async fn process_external_transaction<T:BuilderType>(builder_info: &mut BuilderState<T>, tx_hash: T::TransactionCommit, tx: T::Transaction){
+    
     // go through the builderinfo.transactionspool btree map check if it already exits based on its transaction hash
     // if it does not exist, then add it to the builderinfo.transactionspool btree map
     // if it exists, then ignore it
