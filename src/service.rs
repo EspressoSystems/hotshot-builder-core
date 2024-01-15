@@ -14,7 +14,7 @@
 // TODO no warning for unused imports
 #![allow(unused_imports)]
 #![allow(unused_variables)]
-pub use hotshot::{traits::NodeImplementation, types::Event, SystemContext, SystemContextHandle};
+pub use hotshot::{traits::NodeImplementation, types::Event, SystemContext, types::SystemContextHandle};
 use async_compatibility_layer::{channel::UnboundedStream, art::async_spawn};
 use async_lock::RwLock;
 use commit::Committable;
@@ -162,6 +162,7 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                             unimplemented!();
                         }
                     }
+                    
                 }
             }
         }

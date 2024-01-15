@@ -5,15 +5,50 @@ use std::hash::BuildHasher;
 use std::sync::{Arc, Mutex};
 use futures::Future;
 use hotshot_types::traits::block_contents::Transaction;
-use std::time::Instant;
+//use std::time::Instant;
 use async_trait::async_trait;
+
+
+// Instead of using time, let us try to use a global counter
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+// A struct to hold the globally increasing ID
+pub struct GlobalId {
+    counter: AtomicUsize,
+}
+
+impl GlobalId {
+    // Create a new instance of the generator with an initial value
+    pub fn new(initial_value: usize) -> Self {
+        GlobalId {
+            counter: AtomicUsize::new(initial_value),
+        }
+    }
+
+    // Get the next globally increasing ID
+    pub fn next_id(&self) -> usize {
+        self.counter.fetch_add(1, Ordering::Relaxed)
+    }
+}
+
+/*
+Usage:
+// Create a global ID generator with an initial value
+    let id_generator = GlobalId::new(1000);
+
+    // Generate a few IDs
+    let id1 = id_generator.next_id();
+*/
+
+
+
 enum TransactionType {
     External, // txn from the external source i.e private mempool
     HotShot, // txn from the HotShot network i.e public mempool
 }
 
 pub trait BuilderType {
-    type TransactionID; // currently using the transaction commit as the transaction id
+    type TransactionID; // bound it to globalidgenerator
     type Transaction;
     type TransactionCommit: std::cmp::PartialOrd
     + std::cmp::Ord
@@ -39,20 +74,32 @@ pub trait BuilderType {
 //     tx_type: TransactionType,
 // }
 
+#[derive(Debug, Clone)]
 pub struct BuilderState<T: BuilderType> {
-    pub time_to_txid: Arc<Mutex<BTreeMap<Instant, HashSet<T::TransactionCommit>>>>,
-    pub txid_to_tx: Arc<Mutex<HashMap<T::TransactionCommit,T::Transaction>>>,
-    pub processed_blocks: Arc<Mutex<HashMap<T::BlockCommit, Vec<T::Block>>>>,
-    pub processed_views: Arc<Mutex<HashMap<T::ViewNum, HashSet<T::Block>>>>,
+    // unique id to tx hash
+    pub globalid_to_txid: BTreeMap<GlobalId, T::TransactionCommit>,
+    
+    // transaction hash to transaction
+    pub txid_to_tx: HashMap<T::TransactionCommit,(GlobalId, T::Transaction)>,
+
+    // parent hash to set of block hashes
+    pub parent_hash_to_block_hash: HashMap<T::BlockCommit, HashSet<T::BlockCommit>>,
+    
+    // block hash to the full block
+    pub block_hash_to_block: HashMap<T::BlockCommit, T::Block>,
+
+    // processed views
+    pub processed_views: HashMap<T::ViewNum, HashSet<T::BlockCommit>>,
 }
 
 impl<T:BuilderType> BuilderState<T>{
     fn new()->BuilderState<T>{
        BuilderState {
-                   time_to_txid: Arc::new(Mutex::new(BTreeMap::new())),
-                   txid_to_tx: Arc::new(Mutex::new(HashMap::new())),
-                   processed_blocks: Arc::new(Mutex::new(HashMap::new())),
-                   processed_views: Arc::new(Mutex::new(HashMap::new())),
+                   globalid_to_txid: BTreeMap::new(),
+                   txid_to_tx: HashMap::new(),
+                   parent_hash_to_block_hash: HashMap::new(),
+                   block_hash_to_block: HashMap::new(),
+                   processed_views: HashMap::new(),
                }
    }
 }

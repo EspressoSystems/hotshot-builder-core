@@ -41,8 +41,7 @@ use hotshot_types::{data::Leaf, simple_certificate::QuorumCertificate};
 use std::{sync::Arc, time::Instant, collections::HashSet};
 use tracing::error;
 
-use crate::builder_state::{BuilderState, BuilderType};
-
+use crate::builder_state::{BuilderState, BuilderType, GlobalId};
 
 // process the hotshot transaction event 
 pub async fn process_hotshot_transaction<Types: NodeType, I: NodeImplementation<TYPES>>(
@@ -74,7 +73,8 @@ async fn process_external_transaction<T:BuilderType>(builder_info: &mut BuilderS
             println!("Transaction already exists in the builderinfo.txid_to_tx hashmap");
         } else {
             // get the current time
-            let current_time = Instant::now();
+            //let current_time = Instant::now();
+            let next_global_id = next_id();
             // now check if the current time already exists in the builderinfo.time_to_txid btree map
             if let Ok(mut time_to_txid) = builder_info.time_to_txid.lock(){
                 // if it exists, then add the transaction hash to the existing set
