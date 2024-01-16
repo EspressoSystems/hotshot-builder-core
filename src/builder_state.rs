@@ -78,7 +78,7 @@ pub struct BuilderState<T: BuilderType> {
     pub globalid_to_txid: BTreeMap<GlobalId, T::TransactionCommit>,
     
     // transaction hash to transaction
-    pub txid_to_tx: HashMap<T::TransactionCommit,(GlobalId, T::Transaction)>,
+    pub txid_to_tx: HashMap<T::TransactionCommit,(GlobalId, T::Transaction, TransactionType)>,
 
     // parent hash to set of block hashes
     pub parent_hash_to_block_hash: HashMap<T::BlockCommit, HashSet<T::BlockCommit>>,
@@ -126,9 +126,9 @@ impl<T: BuilderType> BuilderProgress<T> for BuilderState<T>{
         else {
                 // get the global id
                 let tx_global_id = global_id.next_id();
-                // insert into both the maps 
+                // insert into both the maps and mark the Tx type to be External
                 self.globalid_to_txid.insert(tx_global_id, tx_hash.clone());
-                self.txid_to_tx.insert(tx_hash, (tx_global_id, tx));
+                self.txid_to_tx.insert(tx_hash, (tx_global_id, tx, TransactionType::External));
         }
     }
     async fn process_hotshot_transaction(&mut self, tx_hash: T::TransactionCommit, tx: T::Transaction, global_id:GlobalId)
@@ -139,9 +139,9 @@ impl<T: BuilderType> BuilderProgress<T> for BuilderState<T>{
         else {
             // get the global id
             let tx_global_id = global_id.next_id();
-            // insert into both the maps 
+            // insert into both the maps and mark the tx type to be HotShot
             self.globalid_to_txid.insert(tx_global_id, tx_hash.clone());
-            self.txid_to_tx.insert(tx_hash, (tx_global_id, tx));
+            self.txid_to_tx.insert(tx_hash, (tx_global_id, tx, TransactionType::HotShot));
         }
     }
     async fn process_da_proposal(&mut self, block_hash: T::BlockCommit, block: T::Block)
