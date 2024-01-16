@@ -7,7 +7,8 @@ use futures::Future;
 use hotshot_types::traits::block_contents::Transaction;
 //use std::time::Instant;
 use async_trait::async_trait;
-
+use async_compatibility_layer::channel::{unbounded, UnboundedSender, UnboundedStream, UnboundedReceiver};
+use async_lock::RwLock;
 
 // Instead of using time, let us try to use a global counter
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -39,9 +40,6 @@ Usage:
     // Generate a few IDs
     let id1 = id_generator.next_id();
 */
-
-
-
 enum TransactionType {
     External, // txn from the external source i.e private mempool
     HotShot, // txn from the HotShot network i.e public mempool
@@ -90,17 +88,25 @@ pub struct BuilderState<T: BuilderType> {
 
     // processed views
     pub processed_views: HashMap<T::ViewNum, HashSet<T::BlockCommit>>,
+
+    // transaction channels
+    pub tx_channel: UnboundedStream<(T::TransactionCommit, T::Transaction)>,
+    
+    // decide events channels
+    pub decide_channel: UnboundedStream<T::BlockCommit>
 }
 
 impl<T:BuilderType> BuilderState<T>{
     fn new()->BuilderState<T>{
-       BuilderState {
-                   globalid_to_txid: BTreeMap::new(),
-                   txid_to_tx: HashMap::new(),
-                   parent_hash_to_block_hash: HashMap::new(),
-                   block_hash_to_block: HashMap::new(),
-                   processed_views: HashMap::new(),
-               }
+       BuilderState{
+                    globalid_to_txid: BTreeMap::new(),
+                    txid_to_tx: HashMap::new(),
+                    parent_hash_to_block_hash: HashMap::new(),
+                    block_hash_to_block: HashMap::new(),
+                    processed_views: HashMap::new(),
+                    tx_channel: UnboundedStream::new(),
+                    decide_channel: UnboundedStream::new(),
+                } 
    }
 }
 

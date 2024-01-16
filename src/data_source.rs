@@ -13,7 +13,7 @@
 //! 
 #![allow(unused_imports)]
 
-pub use hotshot::{traits::NodeImplementation, types::Event, SystemContext, SystemContextHandle};
+pub use hotshot::{traits::NodeImplementation, types::Event, SystemContext, types::SystemContextHandle};
 use async_compatibility_layer::channel::UnboundedStream;
 use async_lock::RwLock;
 use commit::Committable;
