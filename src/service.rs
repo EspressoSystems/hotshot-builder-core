@@ -106,37 +106,18 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                         }
                         // tx event
                         EventType::Transaction(tx) => {
-                            // process the transaction
-                            let handle = async_spawn(async move {
-                                // extract the arguments from the event and pass it below
-                                process_hotshot_transaction(_,_).await
-                                }
-                            );
+                            // push the message on the tx stream
+                            
                         }
                         // DA proposal event
                         EventType::DAProposal(da_proposal) => {
                             // process the DA proposal
                             // process_da_proposal(da_proposal, data_source.clone()).await?;
-                            
-                            // launch a task for this DA proposal
-                            // process the transaction
-                            let handle = async_spawn(async move {
-                                // extract the arguments from the event and pass it below
-                                process_da_proposal(_,_).await
-                                }
-                            );
                         }
                         // QC proposal event
                         EventType::QCProposal(qc_proposal) => {
                             // process the QC proposal
-                            // process_qc_proposal(qc_proposal, data_source.clone()).await?;
                             
-                            // launch a task for this QC proposal
-                            let handle = async_spawn(async move {
-                                // extract the arguments from the event and pass it below
-                                process_qc_proposal(_,_).await
-                                }
-                            );
                         }
                         // decide event
                         EventType::Decide {
@@ -144,15 +125,7 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                             qc,
                             block_size
                         } => {
-                            // process the decide event
-                            // process_decide_event(decide_event, data_source.clone()).await?;
-                            
-                            // launch a task for this decide event
-                            let handle = async_spawn(async move {
-                                // extract the arguments from the event and pass it below
-                                process_decide_event(_,_).await
-                                }
-                            );
+                           
                         }
                         // not sure whether we need it or not //TODO
                         EventType::ViewFinished => {
