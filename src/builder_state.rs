@@ -238,7 +238,7 @@ impl<T:BuilderType> BuilderState<T>{
         //let combined_stream = self.combined_stream.clone();
         //let mut selected_stream = select_all(vec![Box::pin(combined_stream)]);
         //let mut selected_stream = select_all(vec![Box::pin(BuilderStreamType::TransactionMessage)]);
-        let mut tx_rx = tx_stream.subscribe();
+        //let mut tx_rx = tx_stream.subscribe();
 
         let mut selected_stream = select_all(vec![Box::pin(BuilderStreamType::TransactionStream(self.tx_stream)), 
                                                                                 Box::pin(BuilderStreamType::DecideStream(self.decide_stream)),
