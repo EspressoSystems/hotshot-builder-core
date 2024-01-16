@@ -11,9 +11,15 @@ use async_trait::async_trait;
 use async_compatibility_layer::channel::{unbounded, UnboundedSender, UnboundedStream, UnboundedReceiver};
 use async_lock::RwLock;
 
+use hotshot_task::event_stream::{ChannelStream, EventStream, StreamId};
 // Instead of using time, let us try to use a global counter
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
+use futures::Stream;
 // A struct to hold the globally increasing ID
 pub struct GlobalId {
     counter: AtomicUsize,
@@ -45,6 +51,27 @@ enum TransactionType {
     HotShot, // txn from the HotShot network i.e public mempool
 }
 
+struct TransactionMessage<T:BuilderType>{
+    tx_hash: T::TransactionCommit,
+    tx: T::Transaction,
+    tx_type: TransactionType,
+    tx_global_id: GlobalId,
+}
+
+struct DecideMessage<T:BuilderType>{
+    block_hash: T::BlockCommit,
+}
+
+struct DAProposalMessage<T:BuilderType>{
+    block_hash: T::BlockCommit,
+    block: T::Block,
+}
+
+struct QuorumProposalMessage<T:BuilderType>{
+    block_hash: T::BlockCommit,
+    block: T::Block,
+}
+
 pub trait BuilderType {
     type TransactionID; // bound it to globalidgenerator
     type Transaction;
@@ -60,7 +87,7 @@ pub trait BuilderType {
     type Block;
     type BlockHeader;
     type BlockPayload;
-    type BlockCommit;
+    type BlockCommit : Clone + Sync + Send + 'static;
     type ViewNum;
 }
 
@@ -90,17 +117,18 @@ pub struct BuilderState<T: BuilderType> {
     pub processed_views: HashMap<T::ViewNum, HashSet<T::BlockCommit>>,
 
     // transaction channels
-    pub tx_stream: UnboundedStream<(T::TransactionCommit, T::Transaction)>,
-    
-    // decide events channels
-    pub decide_stream: UnboundedStream<T::BlockCommit>,
+    //pub tx_stream: UnboundedStream<(T::TransactionCommit, T::Transaction)>,
+    pub tx_stream: UnboundedStream<TransactionMessage<T>>,
+
+    // decide event channel
+    pub decide_stream: UnboundedStream<DecideMessage<T>>,
 
     // TODO: Currently make it stremas, but later we might need to change it
     // da proposal event channel
-    pub da_proposal_stream: UnboundedStream<(T::BlockCommit, T::Block)>,
+    pub da_proposal_stream: UnboundedStream<DAProposalMessage<T>>,
 
     // quorum proposal event channel
-    pub quorum_proposal_stream: UnboundedStream<(T::BlockCommit, T::Block)>,
+    pub quorum_proposal_stream: UnboundedStream<QuorumProposalMessage<T>>,
 }
 #[async_trait]
 pub trait BuilderProgress<T: BuilderType> {
@@ -175,22 +203,22 @@ impl<T:BuilderType> BuilderState<T>{
    async fn listen_and_process(&mut self){
     loop{
         select!{
-            (tx_hash, tx, globalId, tx_type) = self.tx_stream.next().await => {
-                if tx_type == TransactionType::HotShot{
-                    self.process_hotshot_transaction(tx_hash, tx, globalId).await;
+            (tx_msg) = self.tx_stream.next().await.unwrap() => {
+                if tx_msg.tx_type == TransactionType::HotShot{
+                    self.process_hotshot_transaction(tx_msg.tx_hash, tx_msg.tx, tx_msg.tx_global_id).await;
                 }
-                else if tx_type == TransactionType::External{
-                    self.process_external_transaction(tx_hash, tx, globalId).await;
+                else if tx_msg.tx_type == TransactionType::External{
+                    self.process_external_transaction(tx_msg.tx_hash, tx_msg.tx, tx_msg.tx_global_id).await;
                 }
             },
-            (block_commit_da, block_da) = self.da_proposal_stream.next().await => {
-                self.process_da_proposal(block_commit_da, block_da).await;
+            da_msg = self.da_proposal_stream.next().await.unwrap() => {
+                self.process_da_proposal(da_msg.block_hash, da_msg.block).await;
             },
-            (block_commit_qc, block_qc) = self.quorum_proposal_stream.next().await => {
-                self.process_quorum_proposal(block_commit_qc, block_qc).await;
+            qc_msg = self.quorum_proposal_stream.next().await.unwrap() => {
+                self.process_quorum_proposal(da_msg.block_hash, da_msg.block).await;
             },
-            block_hash = self.decide_stream.next().await => {
-                self.process_decide_event(block_hash).await;
+            decide_msg = self.decide_stream.next().await.unwrap() => {
+                self.process_decide_event(decide_msg.block).await;
             }
         }
     }
