@@ -67,7 +67,7 @@ async fn process_external_transaction<T:BuilderType>(builder_info: &mut BuilderS
     // go through the builderinfo.transactionspool btree map check if it already exits based on its transaction hash
     // if it does not exist, then add it to the builderinfo.transactionspool btree map
     // if it exists, then ignore it
-
+    
     if let Ok(mut txid_to_tx) = builder_info.txid_to_tx.lock() {
         if txid_to_tx.contains_key(&tx_hash) {
             println!("Transaction already exists in the builderinfo.txid_to_tx hashmap");

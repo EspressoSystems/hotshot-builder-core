@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::BuildHasher;
 //use std::error::Error;
 use std::sync::{Arc, Mutex};
-use futures::Future;
+use futures::{Future, select};
+use async_std::task;
 use hotshot_types::traits::block_contents::Transaction;
 //use std::time::Instant;
 use async_trait::async_trait;
@@ -25,7 +26,6 @@ impl GlobalId {
             counter: AtomicUsize::new(initial_value),
         }
     }
-
     // Get the next globally increasing ID
     pub fn next_id(&self) -> usize {
         self.counter.fetch_add(1, Ordering::Relaxed)
@@ -90,12 +90,73 @@ pub struct BuilderState<T: BuilderType> {
     pub processed_views: HashMap<T::ViewNum, HashSet<T::BlockCommit>>,
 
     // transaction channels
-    pub tx_channel: UnboundedStream<(T::TransactionCommit, T::Transaction)>,
+    pub tx_stream: UnboundedStream<(T::TransactionCommit, T::Transaction)>,
     
     // decide events channels
-    pub decide_channel: UnboundedStream<T::BlockCommit>
-}
+    pub decide_stream: UnboundedStream<T::BlockCommit>,
 
+    // TODO: Currently make it stremas, but later we might need to change it
+    // da proposal event channel
+    pub da_proposal_stream: UnboundedStream<(T::BlockCommit, T::Block)>,
+
+    // quorum proposal event channel
+    pub quorum_proposal_stream: UnboundedStream<(T::BlockCommit, T::Block)>,
+}
+#[async_trait]
+pub trait BuilderProgress<T: BuilderType> {
+    // process the external transaction 
+    async fn process_external_transaction(&mut self, tx_hash: T::TransactionCommit, tx: T::Transaction, global_id:GlobalId);
+    // process the hotshot transaction
+    async fn process_hotshot_transaction(&mut self, tx_hash: T::TransactionCommit, tx: T::Transaction, global_id:GlobalId);
+    // process the DA proposal
+    async fn process_da_proposal(&mut self, block_hash: T::BlockCommit, block: T::Block);
+    // process the quorum proposal
+    async fn process_quorum_proposal(&mut self, block_hash: T::BlockCommit, block: T::Block);
+    // process the decide event
+    async fn process_decide_event(&mut self, block_hash: T::BlockCommit);
+}
+#[async_trait]
+impl<T: BuilderType> BuilderProgress<T> for BuilderState<T>{
+    // all trait functions unimplemented
+    async fn process_external_transaction(&mut self, tx_hash: T::TransactionCommit, tx: T::Transaction, global_id:GlobalId)
+    {
+        if self.txid_to_tx.contains_key(&tx_hash) {
+                println!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
+        }
+        else {
+                // get the global id
+                let tx_global_id = global_id.next_id();
+                // insert into both the maps 
+                self.globalid_to_txid.insert(tx_global_id, tx_hash.clone());
+                self.txid_to_tx.insert(tx_hash, (tx_global_id, tx));
+        }
+    }
+    async fn process_hotshot_transaction(&mut self, tx_hash: T::TransactionCommit, tx: T::Transaction, global_id:GlobalId)
+    {
+        if self.txid_to_tx.contains_key(&tx_hash) {
+            println!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
+        }
+        else {
+            // get the global id
+            let tx_global_id = global_id.next_id();
+            // insert into both the maps 
+            self.globalid_to_txid.insert(tx_global_id, tx_hash.clone());
+            self.txid_to_tx.insert(tx_hash, (tx_global_id, tx));
+        }
+    }
+    async fn process_da_proposal(&mut self, block_hash: T::BlockCommit, block: T::Block)
+    {
+        unimplemented!("process_da_proposal");
+    }
+    async fn process_quorum_proposal(&mut self, block_hash: T::BlockCommit, block: T::Block)
+    {
+        unimplemented!("process_quorum_proposal");
+    }
+    async fn process_decide_event(&mut self, block_hash: T::BlockCommit)
+    {
+       unimplemented!("process_decide_event");
+    }
+}
 impl<T:BuilderType> BuilderState<T>{
     fn new()->BuilderState<T>{
        BuilderState{
@@ -104,11 +165,39 @@ impl<T:BuilderType> BuilderState<T>{
                     parent_hash_to_block_hash: HashMap::new(),
                     block_hash_to_block: HashMap::new(),
                     processed_views: HashMap::new(),
-                    tx_channel: UnboundedStream::new(),
-                    decide_channel: UnboundedStream::new(),
+                    tx_stream: UnboundedStream::new(),
+                    decide_stream: UnboundedStream::new(),
+                    da_proposal_stream: UnboundedStream::new(),
+                    quorum_proposal_stream: UnboundedStream::new(),
                 } 
    }
+
+   async fn listen_and_process(&mut self){
+    loop{
+        select!{
+            (tx_hash, tx, globalId, tx_type) = self.tx_stream.next().await => {
+                if tx_type == TransactionType::HotShot{
+                    self.process_hotshot_transaction(tx_hash, tx, globalId).await;
+                }
+                else if tx_type == TransactionType::External{
+                    self.process_external_transaction(tx_hash, tx, globalId).await;
+                }
+            },
+            (block_commit_da, block_da) = self.da_proposal_stream.next().await => {
+                self.process_da_proposal(block_commit_da, block_da).await;
+            },
+            (block_commit_qc, block_qc) = self.quorum_proposal_stream.next().await => {
+                self.process_quorum_proposal(block_commit_qc, block_qc).await;
+            },
+            block_hash = self.decide_stream.next().await => {
+                self.process_decide_event(block_hash).await;
+            }
+        }
+    }
+    }
+
 }
+
 
 /*
 /// How to make concrete type for it?
