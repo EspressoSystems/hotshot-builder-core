@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::BuildHasher;
 //use std::error::Error;
 use std::sync::{Arc, Mutex};
+use bincode::de;
 use futures::{Future, select};
 use async_std::task;
 use hotshot_types::traits::block_contents::Transaction;
@@ -10,6 +11,9 @@ use hotshot_types::traits::block_contents::Transaction;
 use async_trait::async_trait;
 use async_compatibility_layer::channel::{unbounded, UnboundedSender, UnboundedStream, UnboundedReceiver};
 use async_lock::RwLock;
+
+// implement debug trait for unboundedstream
+
 
 use hotshot_task::event_stream::{ChannelStream, EventStream, StreamId};
 use tokio_stream::StreamExt;
@@ -64,6 +68,7 @@ enum TransactionType {
     HotShot, // txn from the HotShot network i.e public mempool
 }
 
+#[derive(Clone, Debug)]
 enum MessageType<T:BuilderType>{
     TransactionMessage(TransactionMessage<T>),
     DecideMessage(DecideMessage<T>),
@@ -93,9 +98,9 @@ struct QuorumProposalMessage<T:BuilderType>{
 }
 
 
-pub trait BuilderType {
-    type TransactionID; // bound it to globalidgenerator
-    type Transaction;
+pub trait BuilderType: Clone + Debug + Sync + Send + 'static {
+    type TransactionID: std::fmt::Debug; // bound it to globalidgenerator
+    type Transaction: std::fmt::Debug;
     type TransactionCommit: std::cmp::PartialOrd
     + std::cmp::Ord
     + std::cmp::Eq
@@ -104,12 +109,13 @@ pub trait BuilderType {
     + Clone
     + Send
     + Sync
-    + 'static;
-    type Block;
-    type BlockHeader;
-    type BlockPayload;
-    type BlockCommit : Clone + Sync + Send + 'static;
-    type ViewNum;
+    + 'static
+    + std::fmt::Debug;
+    type Block: std::fmt::Debug;
+    type BlockHeader: std::fmt::Debug;
+    type BlockPayload: std::fmt::Debug;
+    type BlockCommit : Clone + Sync + Send + 'static + std::fmt::Debug;
+    type ViewNum: std::fmt::Debug;
 }
 
 // TODO Instead of Trasaction from here.. let us take from the hotshot
@@ -139,19 +145,19 @@ pub struct BuilderState<T: BuilderType> {
 
     // transaction channels
     //pub tx_stream: UnboundedStream<(T::TransactionCommit, T::Transaction)>,
-    pub tx_stream: UnboundedStream<TransactionMessage<T>>,
+    pub tx_stream: Arc<RwLock<UnboundedStream<TransactionMessage<T>>>>,
    //pub tx_stream: UnboundedStream<StreamType>,
 
     // decide event channel
-    pub decide_stream: UnboundedStream<DecideMessage<T>>,
+    pub decide_stream: Arc<RwLock<UnboundedStream<DecideMessage<T>>>>,
     //pub decide_stream: UnboundedStream<StreamType>,
     // TODO: Currently make it stremas, but later we might need to change it
     // da proposal event channel
-    pub da_proposal_stream: UnboundedStream<DAProposalMessage<T>>,
+    pub da_proposal_stream: Arc<RwLock<UnboundedStream<DAProposalMessage<T>>>>,
     //pub da_proposal_stream: UnboundedStream<StreamType>,
 
     // quorum proposal event channel
-    pub qc_stream: UnboundedStream<QuorumProposalMessage<T>>,
+    pub qc_stream: Arc<RwLock<UnboundedStream<QuorumProposalMessage<T>>>>,
     //pub quorum_proposal_stream: UnboundedStream<StreamType>,
 
    // pub combined_stream: CombinedStream<T>,
@@ -228,7 +234,7 @@ impl<T:BuilderType> BuilderState<T>{
                 } 
    }
 
-   async fn listen_and_process(&mut self, tx_stream:UnboundedSender<TransactionMessage<T>>){
+   async fn listen_and_process(&mut self){
         // let mut merged_stream = futures::stream::select_all(
         //     [self.tx_stream,
         //     self.da_proposal_stream,
@@ -238,12 +244,28 @@ impl<T:BuilderType> BuilderState<T>{
         //let combined_stream = self.combined_stream.clone();
         //let mut selected_stream = select_all(vec![Box::pin(combined_stream)]);
         //let mut selected_stream = select_all(vec![Box::pin(BuilderStreamType::TransactionMessage)]);
+        // subscribe case: if we pass tx_stream:UnboundedSender<TransactionMessage<T>> as parameter to this func still it the below subscribe
+        // won't work since async compatibility layer doesn't support subscribe on UnboundedSender
         //let mut tx_rx = tx_stream.subscribe();
-
-        let mut selected_stream = select_all(vec![Box::pin(BuilderStreamType::TransactionStream(self.tx_stream)), 
-                                                                                Box::pin(BuilderStreamType::DecideStream(self.decide_stream)),
-                                                                                Box::pin(BuilderStreamType::DAProposalStream(self.da_proposal_stream)),
-                                                                                Box::pin(BuilderStreamType::QCProposalStream(self.qc_stream))]);
+        // first make a clone of self.tx_stream
+        let tx_rx = Arc::clone(&self.tx_stream);//.read().unwrap();
+        let decide_rx = Arc::clone(&self.decide_stream);//.read().await;
+        let da_rx = Arc::clone(&self.da_proposal_stream);//.read().await;
+        let qc_rx = Arc::clone(&self.qc_stream);//.read().await;
+        // let mut selected_stream = select_all(vec![
+        //     Box::pin(BuilderStreamType::TransactionStream(Arc::try_unwrap(tx_rx).unwrap())),
+        //     Box::pin(BuilderStreamType::TransactionStream(Arc::try_unwrap(decide_rx).unwrap()))
+        // ]);
+        let mut selected_stream = select_all(vec![
+            Box::pin(BuilderStreamType::TransactionStream(Arc::try_unwrap(tx_rx).unwrap().into_inner())),
+            Box::pin(BuilderStreamType::DecideStream(Arc::try_unwrap(decide_rx).unwrap().into_inner())),
+            Box::pin(BuilderStreamType::DAProposalStream(Arc::try_unwrap(da_rx).unwrap().into_inner())),
+            Box::pin(BuilderStreamType::QCProposalStream(Arc::try_unwrap(qc_rx).unwrap().into_inner()))
+        ]);
+        // let mut selected_stream = select_all(vec![Box::pin(BuilderStreamType::TransactionStream(self.tx_stream)), 
+        //                                                                         Box::pin(BuilderStreamType::DecideStream(self.decide_stream)),
+        //                                                                         Box::pin(BuilderStreamType::DAProposalStream(self.da_proposal_stream)),
+        //                                                                         Box::pin(BuilderStreamType::QCProposalStream(self.qc_stream))]);
         
 
         while let Some(item) = selected_stream.next().await {
@@ -332,7 +354,7 @@ let builder_state = BuilderState::<BuilderTypeStruct>::new();
 use futures::stream::select_all;
 
 // Define a custom enum to represent the different stream types
-
+#[derive(Debug, Clone)]
 enum BuilderStreamType<T:BuilderType>{
     TransactionStream(UnboundedStream<TransactionMessage<T>>),
     DecideStream(UnboundedStream<DecideMessage<T>>),
