@@ -59,7 +59,11 @@ pub struct Options {
 //         // if the event is a decide event, then process it
 //     }
 // }
+
+/*
+
 use futures::future::ready;
+
 
 use crate::{data_source::process_hotshot_transaction, builder_state::BuilderType};
 
@@ -141,3 +145,4 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
         }
         
 }
+*/

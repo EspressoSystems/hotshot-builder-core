@@ -43,6 +43,10 @@ use tracing::error;
 
 use crate::builder_state::{BuilderState, BuilderType, GlobalId};
 
+
+/*
+
+
 // process the hotshot transaction event 
 pub async fn process_hotshot_transaction<Types: NodeType, I: NodeImplementation<TYPES>>(
     event_stream: ChannelStream<HotShotEvent<Types>>,
@@ -97,3 +101,6 @@ async fn process_external_transaction<T:BuilderType>(builder_info: &mut BuilderS
         // Code to handle when the transaction hash exists in the map
 }
       
+
+      
+*/
