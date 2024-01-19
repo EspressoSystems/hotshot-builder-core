@@ -71,16 +71,6 @@ pub enum TransactionType {
     HotShot, // txn from the HotShot network i.e public mempool
 }
 
-/*
-#[derive(Clone, Debug)]
-enum MessageType<T: BuilderType>{
-    TransactionMessage(TransactionMessage<T>),
-    DecideMessage(DecideMessage<T>),
-    DAProposalMessage(DAProposalMessage<T>),
-    QuorumProposalMessage(QuorumProposalMessage<T>)
-}
-*/
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct TransactionMessage<T:BuilderType>{
     tx_hash: T::TransactionCommit,
@@ -120,6 +110,9 @@ pub trait BuilderType{
 
 #[derive(Debug, Clone)]
 pub struct BuilderState<T: BuilderType> {
+
+    pub builder_id: usize,
+
     // unique id to tx hash
     //pub globalid_to_txid: BTreeMap<GlobalId, T::TransactionCommit>,
     pub globalid_to_txid: BTreeMap<usize, T::TransactionCommit>,
@@ -214,29 +207,83 @@ impl<T: BuilderType> BuilderProgress<T> for BuilderState<T>{
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum MessageType<T: BuilderType>{
+    TransactionMessage(TransactionMessage<T>),
+    DecideMessage(DecideMessage<T>),
+    DAProposalMessage(DAProposalMessage<T>),
+    QuorumProposalMessage(QuorumProposalMessage<T>)
+}
 
+#[derive(Debug, Clone)]
+struct CustomError{
+    index: usize,
+    error: TryRecvError,
+}
 impl<T:BuilderType> BuilderState<T>{
-    fn new(tx_broadcast_receiver: BroadcastReceiver<TransactionMessage<T>>, decide_braodcast_receiver: BroadcastReceiver<DecideMessage<T>>, da_proposal_stream: BroadcastReceiver<DAProposalMessage<T>>, qc_stream_receiver: BroadcastReceiver<QuorumProposalMessage<T>>)-> Self{
+    fn new(builder_id: usize, tx_broadcast_receiver: BroadcastReceiver<MessageType<T>>, decide_braodcast_receiver: BroadcastReceiver<MessageType<T>>, da_proposal_stream: BroadcastReceiver<MessageType<T>>, qc_stream_receiver: BroadcastReceiver<MessageType<T>>)-> Self{
        BuilderState{
+                    builder_id,
                     globalid_to_txid: BTreeMap::new(),
                     txid_to_tx: HashMap::new(),
                     parent_hash_to_block_hash: HashMap::new(),
                     block_hash_to_block: HashMap::new(),
                     processed_views: HashMap::new(),
-                    tx_stream: tx_broadcast_receiver,
-                    decide_stream: decide_braodcast_receiver,
-                    da_proposal_stream: da_proposal_stream,
-                    qc_stream: qc_stream_receiver,
+                    tx_receiver: tx_broadcast_receiver,
+                    decide_receiver: decide_braodcast_receiver,
+                    da_proposal_receiver: da_proposal_stream,
+                    qc_receiver: qc_stream_receiver,
                     //combined_stream: CombinedStream::new(),
                 } 
    }
 
+   
+   async fn do_selection_over_receivers(&mut self) -> Result<MessageType<T>, CustomError>
+   where
+         MessageType<T>: Clone,
+    {
+    // make a vector of all the receivers
+    if let Ok(received_msg) = self.tx_receiver.try_recv(){
+        return Ok(received_msg);
+    }
+    else if let Ok(received_msg) = self.decide_receiver.try_recv(){
+        return Ok(received_msg);
+    }
+    else if let Ok(received_msg) = self.da_proposal_receiver.try_recv(){
+        return Ok(received_msg);
+    }
+    else if let Ok(received_msg) = self.qc_receiver.try_recv(){
+        return Ok(received_msg);
+    }
+    else{
+        return Err(CustomError{
+            index: 0,
+            error: TryRecvError::Empty,
+        });
+    }
+   
+    }
+    
+    
 }
 
+// write a common interface that takes builder streams and do a non-blocking select on all the streams
+// and then process the messages accordingly
+
+#[derive(Debug, Clone)]
+enum BuilderReceivers<T:BuilderType>{
+     TransactionReceiver(BroadcastReceiver<MessageType<T>>),
+     DecideReceiver(BroadcastReceiver<MessageType<T>>),
+     DAProposalReceiver(BroadcastReceiver<MessageType<T>>),
+     QCProposalReceiver(BroadcastReceiver<MessageType<T>>)
+}
 // tests
 #[cfg(test)]
 mod tests {
     //use clap::builder;
+
+    use async_std::stream::IntoStream;
+    use clap::builder;
 
     use super::*;
     #[async_std::test]
@@ -299,10 +346,10 @@ mod tests {
         // spwan 10 tasks and send the builder instace, later try receing on each of the instance
         let mut handles = Vec::new();
         for i in 0..10 {
-            let tx_receiver_clone = tx_receiver.clone();
-            let decide_receiver_clone = decide_receiver.clone();
-            let da_receiver_clone = da_receiver.clone();
-            let qc_receiver_clone = qc_receiver.clone();
+            let mut tx_receiver_clone = tx_receiver.clone();
+            let mut decide_receiver_clone = decide_receiver.clone();
+            let mut da_receiver_clone = da_receiver.clone();
+            let mut qc_receiver_clone = qc_receiver.clone();
 
             let stx_msgs = stx_msgs.clone();
             let sdecide_msgs = sdecide_msgs.clone();
@@ -311,74 +358,53 @@ mod tests {
 
             let handle = task::spawn(async move {
                 
-                let mut builder_state = BuilderState::<BuilderTypeStruct>::new(tx_receiver_clone, decide_receiver_clone, da_receiver_clone, qc_receiver_clone);
+                let mut builder_state = BuilderState::<BuilderTypeStruct>::new(i, tx_receiver_clone, decide_receiver_clone, da_receiver_clone, qc_receiver_clone);
                 
                 loop{
-                    // try receiving from the tx channel
-                    if let Ok(rtx_msg) = builder_state.tx_receiver.try_recv(){
-                        let rtx_msg: TransactionMessage<BuilderTypeStruct> = match rtx_msg{
-                            MessageType::TransactionMessage(rtx_msg) => rtx_msg,
-                            _ => panic!("Wrong message type received"),
-                        };
-                        println!("Received tx msg from builder {}: {:?}", i, rtx_msg);
-                        assert_eq!(stx_msgs.get(rtx_msg.tx_hash as usize).unwrap().tx_hash, rtx_msg.tx_hash);
-                        if rtx_msg.tx_type == TransactionType::HotShot{
-                            builder_state.process_hotshot_transaction(rtx_msg.tx_hash, rtx_msg.tx, rtx_msg.tx_global_id.counter).await;
-                        }
-                        else{
-                            builder_state.process_external_transaction(rtx_msg.tx_hash, rtx_msg.tx, rtx_msg.tx_global_id.counter).await;
-                        } 
-                    }
-                    else if let Err(TryRecvError::Closed) = builder_state.tx_receiver.try_recv(){
-                        println!("Channel closed, breaking from builder {}", i);
-                        // break;
-                    }
 
-                    // try receving from the decide channel
+                    //let receivers = [&builder_state.tx_receiver, &builder_state.decide_receiver, &builder_state.da_proposal_receiver, &builder_state.qc_receiver];
+                    
+                    let received_msg = builder_state.do_selection_over_receivers().await;
 
-                    if let Ok(rdecide_msg) = builder_state.decide_receiver.try_recv(){
-                        let rdecide_msg: DecideMessage<BuilderTypeStruct> = match rdecide_msg{
-                            MessageType::DecideMessage(rdecide_msg) => rdecide_msg,
-                            _ => panic!("Wrong message type received"),
-                        };
-                        println!("Received decide msg from builder { }: {:?}", i, rdecide_msg);
-                        assert_eq!(sdecide_msgs.get(rdecide_msg.block_hash as usize).unwrap().block_hash, rdecide_msg.block_hash);
-                        builder_state.process_decide_event(rdecide_msg.block_hash).await;
+                    // for (index, &receiver) in receivers.iter().enumerate(){
+                    //     let received_msg = receiver.try_recv();
+                    match received_msg{
+                            Ok(received_msg) => {
+                                match received_msg{
+                                    MessageType::TransactionMessage(rtx_msg) => {
+                                        println!("Received tx msg from builder {}: {:?}", i, rtx_msg);
+                                        assert_eq!(stx_msgs.get(rtx_msg.tx_hash as usize).unwrap().tx_hash, rtx_msg.tx_hash);
+                                        if rtx_msg.tx_type == TransactionType::HotShot{
+                                            builder_state.process_hotshot_transaction(rtx_msg.tx_hash, rtx_msg.tx, rtx_msg.tx_global_id.counter).await;
+                                        }
+                                        else{
+                                            builder_state.process_external_transaction(rtx_msg.tx_hash, rtx_msg.tx, rtx_msg.tx_global_id.counter).await;
+                                        } 
+                                    },
+                                    MessageType::DecideMessage(rdecide_msg) => {
+                                        println!("Received decide msg from builder { }: {:?}", i, rdecide_msg);
+                                        assert_eq!(sdecide_msgs.get(rdecide_msg.block_hash as usize).unwrap().block_hash, rdecide_msg.block_hash);
+                                        builder_state.process_decide_event(rdecide_msg.block_hash).await;
+                                    },
+                                    MessageType::DAProposalMessage(rda_msg) => {
+                                        println!("Received da msg from builder {}: {:?}", i, rda_msg);
+                                        assert_eq!(sda_msgs.get(rda_msg.block as usize).unwrap().block, rda_msg.block);
+                                        builder_state.process_da_proposal(rda_msg.block_hash, rda_msg.block).await;
+                                    },
+                                    MessageType::QuorumProposalMessage(rqc_msg) => {
+                                        println!("Received qc msg from builder {}: {:?}", i, rqc_msg);
+                                        assert_eq!(sda_msgs.get(rqc_msg.block as usize).unwrap().block, rqc_msg.block);
+                                        builder_state.process_quorum_proposal(rqc_msg.block_hash, rqc_msg.block).await;
+                                    },
+                                };
+                            },
+                            Err(err) => {
+                                //let custom_error = CustomError{index, error: err};
+                                //println!("Error in receiving from the receiver {:?}", err);
+                                continue;
+                        },
                     }
-                    else if let Err(TryRecvError::Closed) = builder_state.decide_receiver.try_recv(){
-                        println!("Channel closed, breaking from builder {}", i);
-                        // break;
-                    } 
-
-                    // try receving from the da channel
-                    if let Ok(rda_msg) = builder_state.da_proposal_receiver.try_recv(){
-                        let rda_msg: DAProposalMessage<BuilderTypeStruct> = match rda_msg{
-                            MessageType::DAProposalMessage(rda_msg) => rda_msg,
-                            _ => panic!("Wrong message type received"),
-                        };
-                        println!("Received da msg from builder {}: {:?}", i, rda_msg);
-                        assert_eq!(sda_msgs.get(rda_msg.block as usize).unwrap().block, rda_msg.block);
-                        builder_state.process_da_proposal(rda_msg.block_hash, rda_msg.block).await;
-                    }
-                    else if let Err(TryRecvError::Closed) = builder_state.da_proposal_receiver.try_recv(){
-                        println!("Channel closed, breaking from builder {}", i);
-                        // break;
-                    }
-                    if let Ok(rqc_msg) = builder_state.qc_receiver.try_recv(){
-                        let rqc_msg: QuorumProposalMessage<BuilderTypeStruct> = match rqc_msg{
-                            MessageType::QuorumProposalMessage(rqc_msg) => rqc_msg,
-                            _ => panic!("Wrong message type received"),
-                        };
-                        println!("Received qc msg from builder {}: {:?}", i, rqc_msg);
-                        assert_eq!(sda_msgs.get(rqc_msg.block as usize).unwrap().block, rqc_msg.block);
-                        builder_state.process_quorum_proposal(rqc_msg.block_hash, rqc_msg.block).await;
-                    }
-                    else if let Err(TryRecvError::Closed) = builder_state.qc_receiver.try_recv(){
-                        println!("Channel closed, breaking from builder {}", i);
-                        // break;
-                    }
-                  
-                }
+                }   
             });
             handles.push(handle);
         }
