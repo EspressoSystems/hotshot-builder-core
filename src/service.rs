@@ -14,11 +14,11 @@
 // TODO no warning for unused imports
 #![allow(unused_imports)]
 #![allow(unused_variables)]
-pub use hotshot::{traits::NodeImplementation, types::Event, SystemContext, types::SystemContextHandle};
+pub use hotshot::{traits::NodeImplementation, types::SystemContextHandle};
 //use async_compatibility_layer::{channel::UnboundedStream, art::async_spawn};
 use async_lock::RwLock;
 use commit::Committable;
-use futures::Stream;
+use futures::{Stream, stream::StreamExt};
 use hotshot_task::{
     boxed_sync,
     event_stream::{ChannelStream, EventStream, StreamId},
@@ -27,14 +27,15 @@ use hotshot_task::{
     BoxSyncFuture,
 };
 use hotshot_task_impls::events::HotShotEvent;
+use hotshot_testing::state_types::TestTypes;
 use hotshot_types::simple_vote::QuorumData;
 use hotshot_types::{
     consensus::Consensus,
     error::HotShotError,
-    event::EventType,
+    event::{EventType, Event},
     message::{MessageKind, SequencingMessage},
     traits::{
-        election::Membership, node_implementation::NodeType, state::ConsensusTime, storage::Storage,
+        election::Membership, node_implementation::NodeType as BuilderType, state::ConsensusTime, storage::Storage,
     },
 };
 use hotshot_types::{data::Leaf, simple_certificate::QuorumCertificate};
@@ -42,6 +43,11 @@ use hotshot_types::{data::Leaf, simple_certificate::QuorumCertificate};
 use std::sync::Arc;
 use tracing::error;
 
+//use crate::builder_state::{MessageType, BuilderType, TransactionMessage, DecideMessage, QuorumProposalMessage, QCMessage};
+use async_broadcast::{broadcast, Sender as BroadcastSender, Receiver as BroadcastReceiver};
+use futures::future::ready;
+use crate::builder_state::{BuilderState, MessageType};
+use crate::builder_state::{GlobalId, TransactionMessage, TransactionType, DecideMessage, DAProposalMessage, QCMessage};
 #[derive(clap::Args, Default)]
 pub struct Options {
     #[clap(short, long, env = "ESPRESSO_BUILDER_PORT")]
@@ -60,15 +66,7 @@ pub struct Options {
 //     }
 // }
 
-/*
-
-use futures::future::ready;
-
-
-use crate::{data_source::process_hotshot_transaction, builder_state::BuilderType};
-
-use crate::builder_state::BuilderState;
-
+// following could be used if we need additiona processing for the events we received before passing to a builder
 async fn process_da_proposal<T:BuilderType>(builder_info: &mut BuilderState<T>){
     unimplemented!("Process DA Proposal");
 }
@@ -84,10 +82,15 @@ async fn process_decide_event<T:BuilderType>(builder_info: &mut BuilderState<T>,
 }
 
 /// Run an instance of the default Espresso builder service.
-pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementation<Types>, D>(
+pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplementation<Types>, D>(
     options: Options,
     data_source: D, // contains both the tx's and blocks local pool
     mut hotshot: SystemContextHandle<Types, I>,
+    tx_sender: BroadcastSender<MessageType<Types>>,
+    decide_sender: BroadcastSender<MessageType<Types>>,
+    da_sender: BroadcastSender<MessageType<Types>>,
+    qc_sender: BroadcastSender<MessageType<Types>>
+
 ) -> Result<(),()>
 //where //TODO
     //Payload<Types>: availability::QueryablePayload
@@ -103,25 +106,43 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                     panic!("Didn't receive any event from the HotShot event stream");
                 }
                 Some(event) => {
-                    match event {
+                    match event.event {
                         // error event
                         EventType::Error{error  } => {
                             error!("Error event in HotShot: {:?}", error);
                         }
                         // tx event
-                        EventType::Transaction(tx) => {
-                            // push the message on the tx stream
-                            
+                        EventType::Transactions{transactions} => {
+                            // iterate over the transactions and send them to the tx_sender
+                            // TODO: check do we need to change the type or struct of the transaction here
+                            for tx_message in transactions {
+                                    let tx_msg = TransactionMessage::<Types>{
+                                        tx: tx_message,
+                                        tx_type: TransactionType::HotShot,
+                                        tx_global_id: 1, //GlobalId::new(1),
+                                    };
+                                    tx_sender.broadcast(MessageType::TransactionMessage(tx_msg)).await.unwrap(); 
+                            }
                         }
                         // DA proposal event
-                        EventType::DAProposal(da_proposal) => {
+                        EventType::DAProposal{proposal, sender}=> {
                             // process the DA proposal
                             // process_da_proposal(da_proposal, data_source.clone()).await?;
+                            let da_msg = DAProposalMessage::<Types>{
+                                proposal: proposal,
+                                sender: sender,
+                            };
+                            da_sender.broadcast(MessageType::DAProposalMessage(da_msg)).await.unwrap();
+                            
                         }
                         // QC proposal event
-                        EventType::QCProposal(qc_proposal) => {
+                        EventType::QuorumProposal{proposal, sender} => {
                             // process the QC proposal
-                            
+                            let qc_msg = QCMessage::<Types>{
+                                proposal: proposal,
+                                sender: sender,
+                            };
+                            qc_sender.broadcast(MessageType::QCMessage(qc_msg)).await.unwrap();
                         }
                         // decide event
                         EventType::Decide {
@@ -129,11 +150,16 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                             qc,
                             block_size
                         } => {
-                           
+                           let decide_msg: DecideMessage<Types> = DecideMessage::<Types>{
+                               leaf_chain: leaf_chain,
+                               qc: qc,
+                               block_size: block_size,
+                           };
+                            decide_sender.broadcast(MessageType::DecideMessage(decide_msg)).await.unwrap();
                         }
                         // not sure whether we need it or not //TODO
-                        EventType::ViewFinished => {
-                            
+                        EventType::ViewFinished{view_number} => {
+                            unimplemented!("View Finished Event");
                         }
                         _ => {
                             unimplemented!();
@@ -145,4 +171,3 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
         }
         
 }
-*/

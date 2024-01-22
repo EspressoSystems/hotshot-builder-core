@@ -41,7 +41,7 @@ use hotshot_types::{data::Leaf, simple_certificate::QuorumCertificate};
 use std::{sync::Arc, time::Instant, collections::HashSet};
 use tracing::error;
 
-use crate::builder_state::{BuilderState, BuilderType, GlobalId};
+//use crate::builder_state::{BuilderState, BuilderType, GlobalId};
 
 
 /*

@@ -34,19 +34,24 @@ use std::{
 };
 use futures::Stream;
 
-// pub trait SendableStream: Stream + Sync + Send + 'static {}
-// pub trait PassType: Clone + Debug + Sync + Send + 'static {}
-
-// impl<StreamType:PassType> SendableStream for UnboundedStream<StreamType> {}
 
 use async_broadcast::{broadcast, TryRecvError, Sender as BroadcastSender, Receiver as BroadcastReceiver};
 //use futures_lite::{future::block_on, stream::StreamExt};
 
+// including the following from the hotshot
+use hotshot_types::{
+    traits::node_implementation::NodeType as BuilderType,
+    data::{DAProposal, Leaf, QuorumProposal, VidCommitment},
+    simple_certificate::QuorumCertificate,
+    message::Proposal,
+    traits::{block_contents::{BlockPayload, BlockHeader, Transaction}, state::ConsensusTime, signature_key::SignatureKey},
+};
+use commit::{Commitment, Committable};
 // A struct to hold the globally increasing ID
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Hash, Ord)]
 pub struct GlobalId {
     //counter: AtomicUsize,
-    counter: usize,
+    pub counter: usize,
 }
 
 impl GlobalId {
@@ -72,31 +77,64 @@ pub enum TransactionType {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct TransactionMessage<T:BuilderType>{
-    tx_hash: T::TransactionCommit,
-    tx: T::Transaction,
-    tx_type: TransactionType,
-    tx_global_id: GlobalId,
+pub struct TransactionMessage<TYPES:BuilderType>{
+    //tx_hash: T::TransactionCommit,
+    //tx: T::Transaction,
+    pub tx: TYPES::Transaction,
+    pub tx_type: TransactionType,
+    pub tx_global_id: usize,
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct DecideMessage<T:BuilderType>{
-    block_hash: T::BlockCommit,
+pub struct DecideMessage<TYPES:BuilderType>{
+    //block_hash: T::BlockCommit,
+    pub leaf_chain: Arc<Vec<Leaf<TYPES>>>,
+    pub qc: Arc<QuorumCertificate<TYPES>>,
+    pub block_size: Option<u64>
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct DAProposalMessage<T:BuilderType>{
-    block_hash: T::BlockCommit,
-    block: T::Block,
+pub struct DAProposalMessage<TYPES:BuilderType>{
+    //block_hash: T::BlockCommit,
+    //block: T::Block,
+    pub proposal: Proposal<TYPES, DAProposal<TYPES>>,
+    pub sender: TYPES::SignatureKey
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct QuorumProposalMessage<T:BuilderType>{
-    block_hash: T::BlockCommit,
-    block: T::Block,
+pub struct QCMessage<TYPES:BuilderType>{
+    //block_hash: T::BlockCommit,
+    //block: T::Block,
+    pub proposal: Proposal<TYPES, QuorumProposal<TYPES>>,
+    pub sender: TYPES::SignatureKey
 }
 
 
 use std::cmp::{PartialEq, Ord, PartialOrd};
 use std::hash::Hash;
 
+/*
+Note: Discarded this idea of having a generic trait since Leaf depends on Nodetype
+pub trait BuilderType{
+    /// The time type that this hotshot setup is using.
+    ///
+    /// This should be the same `Time` that `StateType::Time` is using.
+    type Time: ConsensusTime;
+    /// The block header type that this hotshot setup is using.
+    type BlockHeader: BlockHeader<Payload = Self::BlockPayload>;
+    /// The block type that this hotshot setup is using.
+    ///
+    /// This should be the same block that `StateType::BlockPayload` is using.
+    type BlockPayload: BlockPayload<Transaction = Self::Transaction>;
+    /// The signature key that this hotshot setup is using.
+    type SignatureKey: SignatureKey;
+    /// The transaction type that this hotshot setup is using.
+    ///
+    /// This should be equal to `BlockPayload::Transaction`
+    type Transaction: Transaction;
+    /// The builder ID type
+    type BuilderID;
+}
+*/
+
+/*
 pub trait BuilderType{
     type TransactionID: Sync + Send;// bound it to globalidgenerator
     type Transaction: Sync  + Send + Clone + Debug;
@@ -107,65 +145,74 @@ pub trait BuilderType{
     type BlockCommit: Sync  + Send + Clone + Debug; 
     type ViewNum: Sync + Send;
 }
+*/
 
 #[derive(Debug, Clone)]
-pub struct BuilderState<T: BuilderType> {
+pub struct BuilderState<TYPES: BuilderType> {
 
     pub builder_id: usize,
 
     // unique id to tx hash
     //pub globalid_to_txid: BTreeMap<GlobalId, T::TransactionCommit>,
-    pub globalid_to_txid: BTreeMap<usize, T::TransactionCommit>,
+    pub globalid_to_txid: BTreeMap<usize, Commitment<TYPES::Transaction>>,
     
     // transaction hash to transaction
     //pub txid_to_tx: HashMap<T::TransactionCommit,(GlobalId:counter, T::Transaction, TransactionType)>,
-    pub txid_to_tx: HashMap<T::TransactionCommit,(usize, T::Transaction, TransactionType)>,
+    pub txid_to_tx: HashMap<Commitment<TYPES::Transaction>,(usize, TYPES::Transaction, TransactionType)>,
 
     // parent hash to set of block hashes
-    pub parent_hash_to_block_hash: HashMap<T::BlockCommit, HashSet<T::BlockCommit>>,
+    pub parent_hash_to_block_hash: HashMap<VidCommitment, HashSet<VidCommitment>>,
     
     // block hash to the full block
-    pub block_hash_to_block: HashMap<T::BlockCommit, T::Block>,
+    pub block_hash_to_block: HashMap<VidCommitment, TYPES::BlockPayload>,
 
     // processed views
-    pub processed_views: HashMap<T::ViewNum, HashSet<T::BlockCommit>>,
+    pub processed_views: HashMap<TYPES::Time, HashSet<TYPES::BlockHeader>>,
 
     // transaction channels
-    pub tx_receiver: BroadcastReceiver<MessageType<T>>,
+    pub tx_receiver: BroadcastReceiver<MessageType<TYPES>>,
 
     // decide event channel
-    pub decide_receiver: BroadcastReceiver<MessageType<T>>,
+    pub decide_receiver: BroadcastReceiver<MessageType<TYPES>>,
     // TODO: Currently make it stremas, but later we might need to change it
     // da proposal event channel
-    pub da_proposal_receiver: BroadcastReceiver<MessageType<T>>,
+    pub da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>,
     // quorum proposal event channel
-    pub qc_receiver: BroadcastReceiver<MessageType<T>>,
+    pub qc_receiver: BroadcastReceiver<MessageType<TYPES>>,
 }
 #[async_trait]
-pub trait BuilderProgress<T: BuilderType> {
+pub trait BuilderProgress<TYPES: BuilderType> {
     // process the external transaction 
-    async fn process_external_transaction(&mut self, tx_hash: T::TransactionCommit, tx: T::Transaction, global_id:usize);
+    //async fn process_external_transaction(&mut self, tx_hash: Commitment<TYPES::Transaction>, tx: TYPES::Transaction, global_id:usize);
+    async fn process_external_transaction(&mut self, tx: TYPES::Transaction, global_id:usize);
     // process the hotshot transaction
-    async fn process_hotshot_transaction(&mut self, tx_hash: T::TransactionCommit, tx: T::Transaction, global_id:usize);
+    //async fn process_hotshot_transaction(&mut self, tx_hash: Commitment<TYPES::Transaction>, tx: TYPES::Transaction, global_id:usize);
+    async fn process_hotshot_transaction(&mut self,  tx: TYPES::Transaction, global_id:usize);
     // process the DA proposal
-    async fn process_da_proposal(&mut self, block_hash: T::BlockCommit, block: T::Block);
+    //async fn process_da_proposal(&mut self, block_hash: VidCommitment, block: TYPES::BlockPayload);
+    async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>);
     // process the quorum proposal
-    async fn process_quorum_proposal(&mut self, block_hash: T::BlockCommit, block: T::Block);
+    //async fn process_quorum_proposal(&mut self, block_hash: VidCommitment, block: TYPES::BlockPayload);
+    async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>);
     // process the decide event
-    async fn process_decide_event(&mut self, block_hash: T::BlockCommit);
+    //async fn process_decide_event(&mut self, block_hash: VidCommitment);
+    async fn process_decide_event(&mut self, decide_msg: DecideMessage<TYPES>);
 }
 
 
 #[async_trait]
-impl<T: BuilderType> BuilderProgress<T> for BuilderState<T>{
+impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     // all trait functions unimplemented
-    async fn process_external_transaction(&mut self, tx_hash: T::TransactionCommit, tx: T::Transaction, tx_global_id:usize)
+    //async fn process_external_transaction(&mut self, tx_hash: Commitment<TYPES::Transaction>, tx: TYPES::Transaction, tx_global_id:usize)
+    async fn process_external_transaction(&mut self, tx: TYPES::Transaction, tx_global_id:usize)
     {
         // PRIVATE MEMPOOL TRANSACTION PROCESSING
         println!("Processing external transaction");
         // check if the transaction already exists in the hashmap
         // if it exits, then we can ignore it and return
         // else we can insert it into the both the maps
+        // get tx_hash_now
+        let tx_hash = tx.commit();
         if self.txid_to_tx.contains_key(&tx_hash) {
                 println!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
         }
@@ -175,8 +222,10 @@ impl<T: BuilderType> BuilderProgress<T> for BuilderState<T>{
         }
     }
     
-    async fn process_hotshot_transaction(&mut self, tx_hash: T::TransactionCommit, tx: T::Transaction, tx_global_id:usize)
+    //async fn process_hotshot_transaction(&mut self, tx_hash: Commitment<TYPES::Transaction>, tx: TYPES::Transaction, tx_global_id:usize)
+    async fn process_hotshot_transaction(&mut self, tx: TYPES::Transaction, tx_global_id:usize)
     {
+        let tx_hash = tx.commit();
         // HOTSHOT MEMPOOL TRANSACTION PROCESSING
         if self.txid_to_tx.contains_key(&tx_hash) {
             println!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
@@ -188,19 +237,22 @@ impl<T: BuilderType> BuilderProgress<T> for BuilderState<T>{
         }
     }
     
-    async fn process_da_proposal(&mut self, block_hash: T::BlockCommit, block: T::Block)
+    //async fn process_da_proposal(&mut self, block_hash: VidCommitment, block: TYPES::BlockPayload)
+    async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>)
     {
         println!("Processing DA proposal");
         //todo!("process_da_proposal");
         
     }
-    async fn process_quorum_proposal(&mut self, block_hash: T::BlockCommit, block: T::Block)
+    //async fn process_quorum_proposal(&mut self, block_hash: VidCommitment, block: TYPES::BlockPayload)
+    async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>)
     {
         println!("Processing quorum proposal");
 
         //todo!("process_quorum_proposal");
     }
-    async fn process_decide_event(&mut self, block_hash: T::BlockCommit)
+    //async fn process_decide_event(&mut self,  block_hash: VidCommitment)
+    async fn process_decide_event(&mut self,  decide_msg: DecideMessage<TYPES>)
     {
         println!("Processing decide event");
         //todo!("process_decide_event");
@@ -208,20 +260,20 @@ impl<T: BuilderType> BuilderProgress<T> for BuilderState<T>{
 }
 
 #[derive(Debug, Clone)]
-pub enum MessageType<T: BuilderType>{
-    TransactionMessage(TransactionMessage<T>),
-    DecideMessage(DecideMessage<T>),
-    DAProposalMessage(DAProposalMessage<T>),
-    QuorumProposalMessage(QuorumProposalMessage<T>)
+pub enum MessageType<TYPES: BuilderType>{
+    TransactionMessage(TransactionMessage<TYPES>),
+    DecideMessage(DecideMessage<TYPES>),
+    DAProposalMessage(DAProposalMessage<TYPES>),
+    QCMessage(QCMessage<TYPES>)
 }
 
 #[derive(Debug, Clone)]
-struct CustomError{
+pub struct CustomError{
     index: usize,
     error: TryRecvError,
 }
-impl<T:BuilderType> BuilderState<T>{
-    fn new(builder_id: usize, tx_broadcast_receiver: BroadcastReceiver<MessageType<T>>, decide_braodcast_receiver: BroadcastReceiver<MessageType<T>>, da_proposal_stream: BroadcastReceiver<MessageType<T>>, qc_stream_receiver: BroadcastReceiver<MessageType<T>>)-> Self{
+impl<TYPES:BuilderType> BuilderState<TYPES>{
+    pub fn new(builder_id: usize, tx_receiver: BroadcastReceiver<MessageType<TYPES>>, decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>)-> Self{
        BuilderState{
                     builder_id,
                     globalid_to_txid: BTreeMap::new(),
@@ -229,18 +281,18 @@ impl<T:BuilderType> BuilderState<T>{
                     parent_hash_to_block_hash: HashMap::new(),
                     block_hash_to_block: HashMap::new(),
                     processed_views: HashMap::new(),
-                    tx_receiver: tx_broadcast_receiver,
-                    decide_receiver: decide_braodcast_receiver,
-                    da_proposal_receiver: da_proposal_stream,
-                    qc_receiver: qc_stream_receiver,
+                    tx_receiver: tx_receiver,
+                    decide_receiver: decide_receiver,
+                    da_proposal_receiver: da_proposal_receiver,
+                    qc_receiver: qc_receiver,
                     //combined_stream: CombinedStream::new(),
                 } 
    }
 
    
-   async fn do_selection_over_receivers(&mut self) -> Result<MessageType<T>, CustomError>
+   pub async fn do_selection_over_receivers(&mut self) -> Result<MessageType<TYPES>, CustomError>
    where
-         MessageType<T>: Clone,
+         MessageType<TYPES>: Clone,
     {
     // make a vector of all the receivers
     if let Ok(received_msg) = self.tx_receiver.try_recv(){
@@ -270,147 +322,11 @@ impl<T:BuilderType> BuilderState<T>{
 // write a common interface that takes builder streams and do a non-blocking select on all the streams
 // and then process the messages accordingly
 
+
 #[derive(Debug, Clone)]
-enum BuilderReceivers<T:BuilderType>{
-     TransactionReceiver(BroadcastReceiver<MessageType<T>>),
-     DecideReceiver(BroadcastReceiver<MessageType<T>>),
-     DAProposalReceiver(BroadcastReceiver<MessageType<T>>),
-     QCProposalReceiver(BroadcastReceiver<MessageType<T>>)
+enum BuilderReceivers<TYPES:BuilderType>{
+     TransactionReceiver(BroadcastReceiver<MessageType<TYPES>>),
+     DecideReceiver(BroadcastReceiver<MessageType<TYPES>>),
+     DAProposalReceiver(BroadcastReceiver<MessageType<TYPES>>),
+     QCProposalReceiver(BroadcastReceiver<MessageType<TYPES>>)
 }
-// tests
-#[cfg(test)]
-mod tests {
-    //use clap::builder;
-
-    use async_std::stream::IntoStream;
-    use clap::builder;
-
-    use super::*;
-    #[async_std::test]
-    async fn test_channel(){
-        #[derive(Clone, Debug)]
-        struct BuilderTypeStruct;
-
-        impl BuilderType for BuilderTypeStruct{
-            type TransactionID = u32;
-            type Transaction = u32;
-            type TransactionCommit = u32;
-            type Block = u32;
-            type BlockHeader = u32;
-            type BlockPayload = u32;
-            type BlockCommit = u32;
-            type ViewNum = u32;
-        }
-        
-        let (tx_sender, mut tx_receiver) = broadcast::<MessageType<BuilderTypeStruct>>(10);
-        let (decide_sender, mut decide_receiver) = broadcast::<MessageType<BuilderTypeStruct>>(10);
-        let (da_sender, mut da_receiver) = broadcast::<MessageType<BuilderTypeStruct>>(10);
-        let (qc_sender, mut qc_receiver) = broadcast::<MessageType<BuilderTypeStruct>>(10);
-        
-        let mut stx_msgs = Vec::new();
-        let mut sdecide_msgs = Vec::new();
-        let mut sda_msgs = Vec::new();
-        let mut sqc_msgs = Vec::new();
-
-        // generate 5 messages for each type and send it to the respective channels
-        for i in 0..6 as u32{
-            // pass a msg to the tx channel
-            let stx_msg = TransactionMessage{
-                tx_hash: i,
-                tx: i,
-                tx_type: TransactionType::HotShot,
-                tx_global_id: GlobalId::new(i as usize),
-            };
-            let sdecide_msg = DecideMessage{
-                block_hash: i,
-            };
-            let sda_msg = DAProposalMessage{
-                block_hash: i,
-                block: i,
-            };
-            let sqc_msg = QuorumProposalMessage{
-                block_hash: i,
-                block: i,
-            };
-        
-            tx_sender.broadcast(MessageType::TransactionMessage(stx_msg.clone())).await.unwrap();
-            decide_sender.broadcast(MessageType::DecideMessage(sdecide_msg.clone())).await.unwrap();
-            da_sender.broadcast(MessageType::DAProposalMessage(sda_msg.clone())).await.unwrap();
-            qc_sender.broadcast(MessageType::QuorumProposalMessage(sqc_msg.clone())).await.unwrap();
-
-            stx_msgs.push(stx_msg);
-            sdecide_msgs.push(sdecide_msg);
-            sda_msgs.push(sda_msg);
-            sqc_msgs.push(sqc_msg);
-        }
-        // spwan 10 tasks and send the builder instace, later try receing on each of the instance
-        let mut handles = Vec::new();
-        for i in 0..10 {
-            let mut tx_receiver_clone = tx_receiver.clone();
-            let mut decide_receiver_clone = decide_receiver.clone();
-            let mut da_receiver_clone = da_receiver.clone();
-            let mut qc_receiver_clone = qc_receiver.clone();
-
-            let stx_msgs = stx_msgs.clone();
-            let sdecide_msgs = sdecide_msgs.clone();
-            let sda_msgs = sda_msgs.clone();
-            let sqc_msgs = sqc_msgs.clone();
-
-            let handle = task::spawn(async move {
-                
-                let mut builder_state = BuilderState::<BuilderTypeStruct>::new(i, tx_receiver_clone, decide_receiver_clone, da_receiver_clone, qc_receiver_clone);
-                
-                loop{
-
-                    //let receivers = [&builder_state.tx_receiver, &builder_state.decide_receiver, &builder_state.da_proposal_receiver, &builder_state.qc_receiver];
-                    
-                    let received_msg = builder_state.do_selection_over_receivers().await;
-
-                    // for (index, &receiver) in receivers.iter().enumerate(){
-                    //     let received_msg = receiver.try_recv();
-                    match received_msg{
-                            Ok(received_msg) => {
-                                match received_msg{
-                                    MessageType::TransactionMessage(rtx_msg) => {
-                                        println!("Received tx msg from builder {}: {:?}", i, rtx_msg);
-                                        assert_eq!(stx_msgs.get(rtx_msg.tx_hash as usize).unwrap().tx_hash, rtx_msg.tx_hash);
-                                        if rtx_msg.tx_type == TransactionType::HotShot{
-                                            builder_state.process_hotshot_transaction(rtx_msg.tx_hash, rtx_msg.tx, rtx_msg.tx_global_id.counter).await;
-                                        }
-                                        else{
-                                            builder_state.process_external_transaction(rtx_msg.tx_hash, rtx_msg.tx, rtx_msg.tx_global_id.counter).await;
-                                        } 
-                                    },
-                                    MessageType::DecideMessage(rdecide_msg) => {
-                                        println!("Received decide msg from builder { }: {:?}", i, rdecide_msg);
-                                        assert_eq!(sdecide_msgs.get(rdecide_msg.block_hash as usize).unwrap().block_hash, rdecide_msg.block_hash);
-                                        builder_state.process_decide_event(rdecide_msg.block_hash).await;
-                                    },
-                                    MessageType::DAProposalMessage(rda_msg) => {
-                                        println!("Received da msg from builder {}: {:?}", i, rda_msg);
-                                        assert_eq!(sda_msgs.get(rda_msg.block as usize).unwrap().block, rda_msg.block);
-                                        builder_state.process_da_proposal(rda_msg.block_hash, rda_msg.block).await;
-                                    },
-                                    MessageType::QuorumProposalMessage(rqc_msg) => {
-                                        println!("Received qc msg from builder {}: {:?}", i, rqc_msg);
-                                        assert_eq!(sda_msgs.get(rqc_msg.block as usize).unwrap().block, rqc_msg.block);
-                                        builder_state.process_quorum_proposal(rqc_msg.block_hash, rqc_msg.block).await;
-                                    },
-                                };
-                            },
-                            Err(err) => {
-                                //let custom_error = CustomError{index, error: err};
-                                //println!("Error in receiving from the receiver {:?}", err);
-                                continue;
-                        },
-                    }
-                }   
-            });
-            handles.push(handle);
-        }
-        for handle in handles {
-            handle.await;
-        }
-    }
-}
-
