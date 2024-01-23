@@ -165,7 +165,17 @@ mod tests {
             sdecide_msgs.push(sdecide_msg);
             sda_msgs.push(sda_msg);
             sqc_msgs.push(sqc_msg);
+
+            //drop(tx_sender);
+            //drop(decide_sender);
+
         }
+        drop(tx_sender);
+        drop(decide_sender);
+        drop(da_sender);
+        drop(qc_sender);
+
+
         // spwan 10 tasks and send the builder instace, later try receing on each of the instance
         let mut handles = Vec::new();
         for i in 0..10 {
@@ -226,7 +236,10 @@ mod tests {
                             Err(err) => {
                                 //let custom_error = CustomError{index, error: err};
                                 //println!("Error in receiving from the receiver {:?}", err);
-                                continue;
+                                if err.error == TryRecvError::Closed{
+                                    println!("The channel is closed");
+                                    break;
+                                }
                         },
                     }
                 }   

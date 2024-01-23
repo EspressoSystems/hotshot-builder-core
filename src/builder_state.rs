@@ -269,8 +269,8 @@ pub enum MessageType<TYPES: BuilderType>{
 
 #[derive(Debug, Clone)]
 pub struct CustomError{
-    index: usize,
-    error: TryRecvError,
+    pub index: usize,
+    pub error: TryRecvError,
 }
 impl<TYPES:BuilderType> BuilderState<TYPES>{
     pub fn new(builder_id: usize, tx_receiver: BroadcastReceiver<MessageType<TYPES>>, decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>)-> Self{
@@ -294,18 +294,88 @@ impl<TYPES:BuilderType> BuilderState<TYPES>{
    where
          MessageType<TYPES>: Clone,
     {
-    // make a vector of all the receivers
-    if let Ok(received_msg) = self.tx_receiver.try_recv(){
-        return Ok(received_msg);
+    
+    let closed_channel_error = CustomError{
+        index: 0,
+        error: TryRecvError::Closed,
+    };
+
+    // make a vector of receives and then do try_recv over each receiver
+   //let mut receivers = [&self.tx_receiver, &self.decide_receiver, &self.da_proposal_receiver, &self.qc_receiver];
+  
+
+    // make a vector of mutable receivers
+    let mut receivers: Vec<&mut BroadcastReceiver<MessageType<TYPES>>> = vec![
+        &mut self.tx_receiver,
+        &mut self.decide_receiver,
+        &mut self.da_proposal_receiver,
+        &mut self.qc_receiver,
+    ];
+
+    let mut close_count = 0;
+    for receiver in &mut receivers {
+        let received_msg = receiver.try_recv();
+
+        match received_msg {
+            Ok(msg) => return Ok(msg),
+            Err(e) => {
+                match e {
+                    TryRecvError::Closed => {
+                        close_count+=1;
+                    }
+                    TryRecvError::Empty => {
+                        continue;
+                    }
+                    TryRecvError::Overflowed(_) => {
+                        continue;
+                    }
+                }
+            }
+        }
     }
+    if close_count == receivers.len(){
+        return Err(closed_channel_error);
+    }
+    else{
+        return Err(CustomError{
+            index: 0,
+            error: TryRecvError::Empty,
+        });
+    } 
+    
+    /*
+    if let received_msg = self.tx_receiver.try_recv(){
+        match received_msg{
+            Ok(msg) => return Ok(msg),
+            TryRecvError::Closed(Err) => {
+                return Err(closed_channel_error);
+            },
+        }
+        }
+        //return Ok(received_msg);
     else if let Ok(received_msg) = self.decide_receiver.try_recv(){
-        return Ok(received_msg);
-    }
+        match received_msg{
+            Ok(msg) => return Ok(msg),
+            Err(e::Closed) => {
+                return Err(closed_channel_error);
+            },
+        }
+        }
     else if let Ok(received_msg) = self.da_proposal_receiver.try_recv(){
-        return Ok(received_msg);
+        match received_msg{
+            Ok(msg) => return Ok(msg),
+            Err(e::Closed) => {
+                return Err(closed_channel_error);
+            },
+        }
     }
     else if let Ok(received_msg) = self.qc_receiver.try_recv(){
-        return Ok(received_msg);
+        match received_msg{
+            Ok(msg) => return Ok(msg),
+            Err(e::Closed) => {
+                return Err(closed_channel_error);
+            },
+        }
     }
     else{
         return Err(CustomError{
@@ -313,7 +383,7 @@ impl<TYPES:BuilderType> BuilderState<TYPES>{
             error: TryRecvError::Empty,
         });
     }
-   
+    */
     }
     
     
