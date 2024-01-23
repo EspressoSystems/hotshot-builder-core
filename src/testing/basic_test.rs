@@ -20,6 +20,7 @@ pub use crate::builder_state::{BuilderState,MessageType, BuilderProgress};
 pub use async_broadcast::{broadcast, TryRecvError, Sender as BroadcastSender, Receiver as BroadcastReceiver};
 // tests
 
+/// The following tests are performed:
 #[cfg(test)]
 mod tests {
 
@@ -31,6 +32,7 @@ mod tests {
     use crate::builder_state::{GlobalId, TransactionMessage, TransactionType, DecideMessage, DAProposalMessage, QCMessage};
 
     use super::*;
+    /// This test simulates multiple builders receiving messages from the channels and processing them
     #[async_std::test]
     async fn test_channel(){
         println!("Testing the channel");
@@ -58,10 +60,11 @@ mod tests {
             type StateType = TestState;
             type Membership = GeneralStaticCommittee<TestTypes, Self::SignatureKey>;
         }
-        let (tx_sender, mut tx_receiver) = broadcast::<MessageType<TestTypes>>(10);
-        let (decide_sender, mut decide_receiver) = broadcast::<MessageType<TestTypes>>(10);
-        let (da_sender, mut da_receiver) = broadcast::<MessageType<TestTypes>>(10);
-        let (qc_sender, mut qc_receiver) = broadcast::<MessageType<TestTypes>>(10);
+
+        let (tx_sender, tx_receiver) = broadcast::<MessageType<TestTypes>>(10);
+        let (decide_sender, decide_receiver) = broadcast::<MessageType<TestTypes>>(10);
+        let (da_sender, da_receiver) = broadcast::<MessageType<TestTypes>>(10);
+        let (qc_sender, qc_receiver) = broadcast::<MessageType<TestTypes>>(10);
         
         let mut stx_msgs = Vec::new();
         let mut sdecide_msgs = Vec::new();
@@ -82,7 +85,7 @@ mod tests {
             };
             
             // Prepare the decide message
-            let mut qc = QuorumCertificate::<TestTypes>::genesis();
+            let qc = QuorumCertificate::<TestTypes>::genesis();
             let sdecide_msg = DecideMessage::<TestTypes>{
                 leaf_chain: Arc::new(vec![]),
                 qc: Arc::new(qc),
@@ -153,10 +156,10 @@ mod tests {
         // spwan 10 tasks and send the builder instace, later try receing on each of the instance
         let mut handles = Vec::new();
         for i in 0..10 {
-            let mut tx_receiver_clone = tx_receiver.clone();
-            let mut decide_receiver_clone = decide_receiver.clone();
-            let mut da_receiver_clone = da_receiver.clone();
-            let mut qc_receiver_clone = qc_receiver.clone();
+            let tx_receiver_clone = tx_receiver.clone();
+            let decide_receiver_clone = decide_receiver.clone();
+            let da_receiver_clone = da_receiver.clone();
+            let qc_receiver_clone = qc_receiver.clone();
 
             let stx_msgs = stx_msgs.clone();
             let sdecide_msgs = sdecide_msgs.clone();

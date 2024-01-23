@@ -1,7 +1,4 @@
 #![allow(unused_imports)]
-#![allow(unused_mut)]
-#![allow(dead_code)]
-#![allow(unused_variables)]
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::BuildHasher;
 //use std::error::Error;
@@ -307,6 +304,7 @@ impl<TYPES:BuilderType> BuilderState<TYPES>{
                 match e {
                     TryRecvError::Closed => {
                         close_count+=1;
+                        //return Err(closed_channel_error);
                     }
                     TryRecvError::Empty => {
                         continue;
