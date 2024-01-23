@@ -224,21 +224,21 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     //async fn process_da_proposal(&mut self, block_hash: VidCommitment, block: TYPES::BlockPayload)
     async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>)
     {
-        println!("Processing DA proposal");
+        //println!("Processing DA proposal");
         //todo!("process_da_proposal");
         
     }
     //async fn process_quorum_proposal(&mut self, block_hash: VidCommitment, block: TYPES::BlockPayload)
     async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>)
     {
-        println!("Processing quorum proposal");
+        //println!("Processing quorum proposal");
 
         //todo!("process_quorum_proposal");
     }
     //async fn process_decide_event(&mut self,  block_hash: VidCommitment)
     async fn process_decide_event(&mut self,  decide_msg: DecideMessage<TYPES>)
     {
-        println!("Processing decide event");
+        //println!("Processing decide event");
         //todo!("process_decide_event");
     }
 }
