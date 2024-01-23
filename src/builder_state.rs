@@ -134,19 +134,6 @@ pub trait BuilderType{
 }
 */
 
-/*
-pub trait BuilderType{
-    type TransactionID: Sync + Send;// bound it to globalidgenerator
-    type Transaction: Sync  + Send + Clone + Debug;
-    type TransactionCommit: Hash + Eq + Clone + Sync + Send + Debug;
-    type Block: Sync + Send + Clone + Debug;
-    type BlockHeader: Sync + Send;
-    type BlockPayload: Sync + Send;
-    type BlockCommit: Sync  + Send + Clone + Debug; 
-    type ViewNum: Sync + Send;
-}
-*/
-
 #[derive(Debug, Clone)]
 pub struct BuilderState<TYPES: BuilderType> {
 
@@ -302,8 +289,6 @@ impl<TYPES:BuilderType> BuilderState<TYPES>{
 
     // make a vector of receives and then do try_recv over each receiver
    //let mut receivers = [&self.tx_receiver, &self.decide_receiver, &self.da_proposal_receiver, &self.qc_receiver];
-  
-
     // make a vector of mutable receivers
     let mut receivers: Vec<&mut BroadcastReceiver<MessageType<TYPES>>> = vec![
         &mut self.tx_receiver,
@@ -343,60 +328,7 @@ impl<TYPES:BuilderType> BuilderState<TYPES>{
         });
     } 
     
-    /*
-    if let received_msg = self.tx_receiver.try_recv(){
-        match received_msg{
-            Ok(msg) => return Ok(msg),
-            TryRecvError::Closed(Err) => {
-                return Err(closed_channel_error);
-            },
-        }
-        }
-        //return Ok(received_msg);
-    else if let Ok(received_msg) = self.decide_receiver.try_recv(){
-        match received_msg{
-            Ok(msg) => return Ok(msg),
-            Err(e::Closed) => {
-                return Err(closed_channel_error);
-            },
-        }
-        }
-    else if let Ok(received_msg) = self.da_proposal_receiver.try_recv(){
-        match received_msg{
-            Ok(msg) => return Ok(msg),
-            Err(e::Closed) => {
-                return Err(closed_channel_error);
-            },
-        }
-    }
-    else if let Ok(received_msg) = self.qc_receiver.try_recv(){
-        match received_msg{
-            Ok(msg) => return Ok(msg),
-            Err(e::Closed) => {
-                return Err(closed_channel_error);
-            },
-        }
-    }
-    else{
-        return Err(CustomError{
-            index: 0,
-            error: TryRecvError::Empty,
-        });
-    }
-    */
     }
     
     
-}
-
-// write a common interface that takes builder streams and do a non-blocking select on all the streams
-// and then process the messages accordingly
-
-
-#[derive(Debug, Clone)]
-enum BuilderReceivers<TYPES:BuilderType>{
-     TransactionReceiver(BroadcastReceiver<MessageType<TYPES>>),
-     DecideReceiver(BroadcastReceiver<MessageType<TYPES>>),
-     DAProposalReceiver(BroadcastReceiver<MessageType<TYPES>>),
-     QCProposalReceiver(BroadcastReceiver<MessageType<TYPES>>)
 }
