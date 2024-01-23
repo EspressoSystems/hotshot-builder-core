@@ -5,7 +5,7 @@
 use async_std::task::{self, Builder};
 use std::sync::Arc;
 use sha2::{Digest, Sha256};
-
+use futures::future::select_all;
 pub use hotshot_testing::{block_types::{TestTransaction, TestBlockHeader, TestBlockPayload}, state_types::TestState};
 pub use hotshot_types::{
     traits::node_implementation::NodeType as BuilderType,
@@ -17,7 +17,7 @@ pub use hotshot_types::{
 pub use hotshot::traits::election::static_committee::{GeneralStaticCommittee, StaticElectionConfig};
 
 pub use crate::builder_state::{BuilderState,MessageType, BuilderProgress};
-pub use async_broadcast::{broadcast, TryRecvError, Sender as BroadcastSender, Receiver as BroadcastReceiver};
+pub use async_broadcast::{broadcast, TryRecvError, Sender as BroadcastSender, Receiver as BroadcastReceiver, RecvError};
 // tests
 
 /// The following tests are performed:
@@ -147,12 +147,7 @@ mod tests {
             sqc_msgs.push(sqc_msg);
 
         }
-        drop(tx_sender);
-        drop(decide_sender);
-        drop(da_sender);
-        drop(qc_sender);
-
-
+    
         // spwan 10 tasks and send the builder instace, later try receing on each of the instance
         let mut handles = Vec::new();
         for i in 0..10 {
@@ -172,57 +167,61 @@ mod tests {
                 
                 loop{
 
-                    //let receivers = [&builder_state.tx_receiver, &builder_state.decide_receiver, &builder_state.da_proposal_receiver, &builder_state.qc_receiver];
-                    //println!("waiting to receive a message from the builder {}", i);
-                    let received_msg = builder_state.do_selection_over_receivers().await;
+                    let received_msg: Result<MessageType<TestTypes>, async_broadcast::RecvError> = select_all([builder_state.tx_receiver.recv(), builder_state.decide_receiver.recv(), builder_state.da_proposal_receiver.recv(), builder_state.qc_receiver.recv()]).await.0;
 
-                    // for (index, &receiver) in receivers.iter().enumerate(){
-                    //     let received_msg = receiver.try_recv();
-                    match received_msg{
-                            Ok(received_msg) => {
-                                match received_msg{
-                                    MessageType::TransactionMessage(rtx_msg) => {
-                                        println!("Received tx msg from builder {}: {:?}", i, rtx_msg);
-                                        assert_eq!(stx_msgs.get(rtx_msg.tx_global_id).unwrap().tx_global_id, rtx_msg.tx_global_id);
-                                        if rtx_msg.tx_type == TransactionType::HotShot{
-                                            builder_state.process_hotshot_transaction(rtx_msg.tx, rtx_msg.tx_global_id).await;
-                                        }
-                                        else{
-                                            builder_state.process_external_transaction(rtx_msg.tx, rtx_msg.tx_global_id).await;
-                                        } 
-                                    },
-                                    MessageType::DecideMessage(rdecide_msg) => {
-                                        println!("Received decide msg from builder { }: {:?}", i, rdecide_msg);
-                                        assert_eq!(sdecide_msgs.get(rdecide_msg.block_size.unwrap() as usize).unwrap().block_size, rdecide_msg.block_size);
-                                        builder_state.process_decide_event(rdecide_msg).await;
-                                    },
-                                    MessageType::DAProposalMessage(rda_msg) => {
-                                        println!("Received da msg from builder {}: {:?}", i, rda_msg);
-                                        let view_number = rda_msg.proposal.data.get_view_number().get_u64();
-                                        assert_eq!(sda_msgs.get(view_number as usize).unwrap().proposal.data.view_number.get_u64(), rda_msg.proposal.data.view_number.get_u64());
-                                        builder_state.process_da_proposal(rda_msg).await;
-                                    },
-                                    MessageType::QCMessage(rqc_msg) => {
-                                        println!("Received qc msg from builder {}: {:?}", i, rqc_msg);
-                                        let view_number = rqc_msg.proposal.data.get_view_number().get_u64();
-                                        assert_eq!(sqc_msgs.get(view_number as usize).unwrap().proposal.data.view_number.get_u64(), rqc_msg.proposal.data.view_number.get_u64());
-                                        builder_state.process_quorum_proposal(rqc_msg).await;
-                                    },
-                                };
-                            },
-                            Err(err) => {
-                                if err.error == TryRecvError::Closed{
-                                    println!("The channel is closed");
-                                    break;
+                    match received_msg {
+                        Ok(received_msg) => {
+                            match received_msg {
+                                MessageType::TransactionMessage(rtx_msg) => {
+                                    println!("Received tx msg from builder {}: {:?}", i, rtx_msg);
+                                    assert_eq!(stx_msgs.get(rtx_msg.tx_global_id).unwrap().tx_global_id, rtx_msg.tx_global_id);
+                                    if rtx_msg.tx_type == TransactionType::HotShot {
+                                        builder_state.process_hotshot_transaction(rtx_msg.tx, rtx_msg.tx_global_id).await;
+                                    } else {
+                                        builder_state.process_external_transaction(rtx_msg.tx, rtx_msg.tx_global_id).await;
+                                    }
                                 }
-                        },
+                                MessageType::DecideMessage(rdecide_msg) => {
+                                    println!("Received decide msg from builder {}: {:?}", i, rdecide_msg);
+                                    assert_eq!(sdecide_msgs.get(rdecide_msg.block_size.unwrap() as usize).unwrap().block_size, rdecide_msg.block_size);
+                                    builder_state.process_decide_event(rdecide_msg).await;
+                                }
+                                MessageType::DAProposalMessage(rda_msg) => {
+                                    println!("Received da msg from builder {}: {:?}", i, rda_msg);
+                                    let view_number = rda_msg.proposal.data.get_view_number().get_u64();
+                                    assert_eq!(sda_msgs.get(view_number as usize).unwrap().proposal.data.view_number.get_u64(), rda_msg.proposal.data.view_number.get_u64());
+                                    builder_state.process_da_proposal(rda_msg).await;
+                                }
+                                MessageType::QCMessage(rqc_msg) => {
+                                    println!("Received qc msg from builder {}: {:?}", i, rqc_msg);
+                                    let view_number = rqc_msg.proposal.data.get_view_number().get_u64();
+                                    assert_eq!(sqc_msgs.get(view_number as usize).unwrap().proposal.data.view_number.get_u64(), rqc_msg.proposal.data.view_number.get_u64());
+                                    builder_state.process_quorum_proposal(rqc_msg).await;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            if err == RecvError::Closed {
+                                println!("The channel is closed");
+                                break;
+                            }
+                        }
                     }
-                }   
-            });
+                } 
+            });  
             handles.push(handle);
         }
+
+        drop(tx_sender);
+        drop(decide_sender);
+        drop(da_sender);
+        drop(qc_sender);
+        
         for handle in handles {
             handle.await;
         }
+
+        
+
     }
 }
