@@ -1,26 +1,19 @@
 #![allow(unused_imports)]
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::BuildHasher;
-//use std::error::Error;
 use std::sync::{Arc, Mutex};
 use bincode::de;
 use futures::stream::select_all;
 use futures::{Future, select};
 use async_std::task::{self, Builder};
-//use hotshot_types::traits::block_contents::Transaction;
-//use std::time::Instant;
 use async_trait::async_trait;
 //use async_compatibility_layer::channel::{unbounded, UnboundedSender, UnboundedStream, UnboundedReceiver};
 use async_lock::RwLock;
-
-// implement debug trait for unboundedstream
 
 
 use hotshot::rand::seq::index;
 //use hotshot_task::event_stream::{ChannelStream, EventStream, StreamId};
 use tokio_stream::StreamExt;
-// Instead of using time, let us try to use a global counter
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -31,9 +24,8 @@ use std::{
 };
 use futures::Stream;
 
-
+use std::time::{SystemTime, UNIX_EPOCH};
 use async_broadcast::{broadcast, TryRecvError, Sender as BroadcastSender, Receiver as BroadcastReceiver};
-//use futures_lite::{future::block_on, stream::StreamExt};
 
 // including the following from the hotshot
 use hotshot_types::{
@@ -44,6 +36,8 @@ use hotshot_types::{
     traits::{block_contents::{BlockPayload, BlockHeader, Transaction}, state::ConsensusTime, signature_key::SignatureKey},
 };
 use commit::{Commitment, Committable};
+
+pub type TxTimeStamp = u128;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TransactionType {
@@ -57,7 +51,6 @@ pub struct TransactionMessage<TYPES:BuilderType>{
     //tx: T::Transaction,
     pub tx: TYPES::Transaction,
     pub tx_type: TransactionType,
-    pub tx_global_id: usize,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct DecideMessage<TYPES:BuilderType>{
@@ -113,61 +106,64 @@ pub trait BuilderType{
 pub struct BuilderState<TYPES: BuilderType> {
 
     pub builder_id: usize,
-
-    // unique id to tx hash
-    //pub globalid_to_txid: BTreeMap<GlobalId, T::TransactionCommit>,
-    pub globalid_to_txid: BTreeMap<usize, Commitment<TYPES::Transaction>>,
     
-    // transaction hash to transaction
-    //pub txid_to_tx: HashMap<T::TransactionCommit,(GlobalId:counter, T::Transaction, TransactionType)>,
-    pub txid_to_tx: HashMap<Commitment<TYPES::Transaction>,(usize, TYPES::Transaction, TransactionType)>,
+    // timestamp to tx hash, used for ordering for the transactions
+    pub timestamp_to_tx: BTreeMap<TxTimeStamp, Commitment<TYPES::Transaction>>,
+    
+    // transaction hash to transaction data for efficient lookup
+    pub tx_hash_to_tx: HashMap<Commitment<TYPES::Transaction>,(TxTimeStamp, TYPES::Transaction, TransactionType)>,
 
-    // parent hash to set of block hashes
+    /// Included txs set while building blocks
+    pub included_txns: HashSet<Commitment<TYPES::Transaction>>,
+
+    /// parent hash to set of block hashes
     pub parent_hash_to_block_hash: HashMap<VidCommitment, HashSet<VidCommitment>>,
     
-    // block hash to the full block
+    /// block hash to the full block
     pub block_hash_to_block: HashMap<VidCommitment, TYPES::BlockPayload>,
 
-    // processed views
+    /// processed views
     pub processed_views: HashMap<TYPES::Time, HashSet<TYPES::BlockHeader>>,
 
-    // transaction channels
+    // Channel Receivers for the HotShot events, Tx_receiver could also receive the external transactions
+    /// transaction receiver
     pub tx_receiver: BroadcastReceiver<MessageType<TYPES>>,
 
-    // decide event channel
+    /// decide receiver
     pub decide_receiver: BroadcastReceiver<MessageType<TYPES>>,
-    // TODO: Currently make it stremas, but later we might need to change it
-    // da proposal event channel
+    
+    // TODO: Currently make it receivers, but later we might need to change it
+    /// da proposal event channel
     pub da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>,
-    // quorum proposal event channel
+    
+    /// quorum proposal event channel
     pub qc_receiver: BroadcastReceiver<MessageType<TYPES>>,
 }
 /// Trait to hold the helper functions for the builder
 #[async_trait]
 pub trait BuilderProgress<TYPES: BuilderType> {
-    // process the external transaction 
-    //async fn process_external_transaction(&mut self, tx_hash: Commitment<TYPES::Transaction>, tx: TYPES::Transaction, global_id:usize);
-    async fn process_external_transaction(&mut self, tx: TYPES::Transaction, global_id:usize);
-    // process the hotshot transaction
-    //async fn process_hotshot_transaction(&mut self, tx_hash: Commitment<TYPES::Transaction>, tx: TYPES::Transaction, global_id:usize);
-    async fn process_hotshot_transaction(&mut self,  tx: TYPES::Transaction, global_id:usize);
-    // process the DA proposal
-    //async fn process_da_proposal(&mut self, block_hash: VidCommitment, block: TYPES::BlockPayload);
+    /// process the external transaction
+    async fn process_external_transaction(&mut self, tx: TYPES::Transaction);
+    
+    /// process the hotshot transaction
+    async fn process_hotshot_transaction(&mut self,  tx: TYPES::Transaction);
+    
+    /// process the DA proposal
     async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>);
-    // process the quorum proposal
-    //async fn process_quorum_proposal(&mut self, block_hash: VidCommitment, block: TYPES::BlockPayload);
+    
+    /// process the quorum proposal
     async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>);
-    // process the decide event
-    //async fn process_decide_event(&mut self, block_hash: VidCommitment);
+    
+    /// process the decide event
     async fn process_decide_event(&mut self, decide_msg: DecideMessage<TYPES>);
 }
 
 
 #[async_trait]
 impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
-    // all trait functions unimplemented
-    //async fn process_external_transaction(&mut self, tx_hash: Commitment<TYPES::Transaction>, tx: TYPES::Transaction, tx_global_id:usize)
-    async fn process_external_transaction(&mut self, tx: TYPES::Transaction, tx_global_id:usize)
+
+    /// processing the external i.e private mempool transaction
+    async fn process_external_transaction(&mut self, tx: TYPES::Transaction)
     {
         // PRIVATE MEMPOOL TRANSACTION PROCESSING
         println!("Processing external transaction");
@@ -176,45 +172,56 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // else we can insert it into the both the maps
         // get tx_hash_now
         let tx_hash = tx.commit();
-        if self.txid_to_tx.contains_key(&tx_hash) {
+        // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
+        if self.tx_hash_to_tx.contains_key(&tx_hash) && self.included_txns.contains(&tx_hash) {
                 println!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
         }
         else {
-                self.globalid_to_txid.insert(tx_global_id, tx_hash.clone());
-                self.txid_to_tx.insert(tx_hash, (tx_global_id, tx, TransactionType::External));
+                // get the current timestamp in nanoseconds
+                let tx_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
+                
+                // insert into both timestamp_tx and tx_hash_tx maps
+                self.timestamp_to_tx.insert(tx_timestamp, tx_hash.clone());
+                self.tx_hash_to_tx.insert(tx_hash, (tx_timestamp, tx, TransactionType::External));
         }
     }
     
-    //async fn process_hotshot_transaction(&mut self, tx_hash: Commitment<TYPES::Transaction>, tx: TYPES::Transaction, tx_global_id:usize)
-    async fn process_hotshot_transaction(&mut self, tx: TYPES::Transaction, tx_global_id:usize)
+    /// processing the hotshot i.e public mempool transaction
+    async fn process_hotshot_transaction(&mut self, tx: TYPES::Transaction)
     {
         let tx_hash = tx.commit();
         // HOTSHOT MEMPOOL TRANSACTION PROCESSING
-        if self.txid_to_tx.contains_key(&tx_hash) {
+        // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
+        if self.tx_hash_to_tx.contains_key(&tx_hash) && self.included_txns.contains(&tx_hash) {
             println!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
         }
         else {
-            // insert into both the maps and mark the tx type to be HotShot
-            self.globalid_to_txid.insert(tx_global_id, tx_hash.clone());
-            self.txid_to_tx.insert(tx_hash, (tx_global_id, tx, TransactionType::HotShot));
+                // get the current timestamp in nanoseconds
+               let tx_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
+                
+                // insert into both timestamp_tx and tx_hash_tx maps
+                self.timestamp_to_tx.insert(tx_timestamp, tx_hash.clone());
+                self.tx_hash_to_tx.insert(tx_hash, (tx_timestamp, tx, TransactionType::HotShot));
         }
     }
     
-    //async fn process_da_proposal(&mut self, block_hash: VidCommitment, block: TYPES::BlockPayload)
+    /// processing the DA proposal
     async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>)
     {
         //println!("Processing DA proposal");
         //todo!("process_da_proposal");
         
     }
-    //async fn process_quorum_proposal(&mut self, block_hash: VidCommitment, block: TYPES::BlockPayload)
+
+    /// processing the quorum proposal
     async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>)
     {
         //println!("Processing quorum proposal");
 
         //todo!("process_quorum_proposal");
     }
-    //async fn process_decide_event(&mut self,  block_hash: VidCommitment)
+
+    /// processing the decide event
     async fn process_decide_event(&mut self,  decide_msg: DecideMessage<TYPES>)
     {
         //println!("Processing decide event");
@@ -235,8 +242,9 @@ impl<TYPES:BuilderType> BuilderState<TYPES>{
     pub fn new(builder_id: usize, tx_receiver: BroadcastReceiver<MessageType<TYPES>>, decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>)-> Self{
        BuilderState{
                     builder_id,
-                    globalid_to_txid: BTreeMap::new(),
-                    txid_to_tx: HashMap::new(),
+                    timestamp_to_tx: BTreeMap::new(),
+                    tx_hash_to_tx: HashMap::new(),
+                    included_txns: HashSet::new(),
                     parent_hash_to_block_hash: HashMap::new(),
                     block_hash_to_block: HashMap::new(),
                     processed_views: HashMap::new(),
@@ -244,7 +252,6 @@ impl<TYPES:BuilderType> BuilderState<TYPES>{
                     decide_receiver: decide_receiver,
                     da_proposal_receiver: da_proposal_receiver,
                     qc_receiver: qc_receiver,
-                    //combined_stream: CombinedStream::new(),
                 } 
    }
 

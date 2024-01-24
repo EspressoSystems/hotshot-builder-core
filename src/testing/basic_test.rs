@@ -27,7 +27,8 @@ mod tests {
     use core::num;
     use std::{collections::HashSet, env, hash::Hash, marker::PhantomData};
 
-    use hotshot::types::SignatureKey;
+    use commit::Committable;
+    use hotshot::{rand::seq::index, types::SignatureKey};
     use hotshot_types::{data::QuorumProposal, traits::{block_contents::BlockHeader, state::ConsensusTime}, vote::HasViewNumber};
 
     use crate::builder_state::{TransactionMessage, TransactionType, DecideMessage, DAProposalMessage, QCMessage};
@@ -90,7 +91,6 @@ mod tests {
             let stx_msg = TransactionMessage::<TestTypes>{
                 tx: tx.clone(),
                 tx_type: TransactionType::HotShot,
-                tx_global_id: i as usize, //GlobalId::new(i as usize),
             };
             
             // Prepare the decide message
@@ -182,7 +182,7 @@ mod tests {
                 let mut channel_close_index = HashSet::<usize>::new();
                 loop{
 
-                    let (received_msg, index, _)= select_all([builder_state.tx_receiver.recv(), builder_state.decide_receiver.recv(), builder_state.da_proposal_receiver.recv(), builder_state.qc_receiver.recv()]).await;
+                    let (received_msg, channel_index, _)= select_all([builder_state.tx_receiver.recv(), builder_state.decide_receiver.recv(), builder_state.da_proposal_receiver.recv(), builder_state.qc_receiver.recv()]).await;
                     
                     match received_msg {
                         Ok(received_msg) => {
@@ -191,12 +191,15 @@ mod tests {
                                     // store in the rtx_msgs
                                     rtx_msgs.push(rtx_msg.clone());
                                     
+                                    // get the content from the rtx_msg's inside vec
+                                    let index = rtx_msg.tx.0[0] as usize;
                                     //println!("Received tx msg from builder {}: {:?} from index {}", i, rtx_msg, index);
-                                    assert_eq!(stx_msgs.get(rtx_msg.tx_global_id).unwrap().tx_global_id, rtx_msg.tx_global_id);
+                                    assert_eq!(stx_msgs.get(index).unwrap().tx.commit(), rtx_msg.tx.commit());
+                                    // Pass the tx msg to the handler
                                     if rtx_msg.tx_type == TransactionType::HotShot {
-                                        builder_state.process_hotshot_transaction(rtx_msg.tx, rtx_msg.tx_global_id).await;
+                                        builder_state.process_hotshot_transaction(rtx_msg.tx).await;
                                     } else {
-                                        builder_state.process_external_transaction(rtx_msg.tx, rtx_msg.tx_global_id).await;
+                                        builder_state.process_external_transaction(rtx_msg.tx).await;
                                     }
                                     
                                 }
@@ -230,9 +233,9 @@ mod tests {
                         }
                         Err(err) => {
                             if err == RecvError::Closed {
-                                println!("The channel {} is closed", index);
+                                println!("The channel {} is closed", channel_index);
                                 //break;
-                                channel_close_index.insert(index);
+                                channel_close_index.insert(channel_index);
                             }
                         }
                     }
@@ -244,7 +247,7 @@ mod tests {
 
                 // now go through the content of stx_msgs and rtx_msgs and check if they are same
                 for i in 0..stx_msgs.len() {
-                    assert_eq!(stx_msgs.get(i).unwrap().tx_global_id, rtx_msgs.get(i).unwrap().tx_global_id);
+                    assert_eq!(stx_msgs.get(i).unwrap().tx.commit(), rtx_msgs.get(i).unwrap().tx.commit());
                 }
                 
                 // now go through the content of sdecide_msgs and rdecide_msgs and check if they are same
@@ -260,8 +263,7 @@ mod tests {
                 // now go through the content of sqc_msgs and rqc_msgs and check if they are same
                 for i in 0..sqc_msgs.len() {
                     assert_eq!(sqc_msgs.get(i).unwrap().proposal.data.view_number.get_u64(), rqc_msgs.get(i).unwrap().proposal.data.view_number.get_u64());
-                }
-                
+                }                
 
             });  
             handles.push(handle);
@@ -270,12 +272,6 @@ mod tests {
         for handle in handles {
             handle.await;
         }
-
-    // break the receiver loop if all the sent messages are received now
-    // drop(tx_sender);
-    // drop(decide_sender);
-    // drop(da_sender);
-    // drop(qc_sender);
 
     }
 }

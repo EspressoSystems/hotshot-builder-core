@@ -114,16 +114,12 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
                         }
                         // tx event
                         EventType::Transactions{transactions} => {
-                            // iterate over the transactions and send them to the tx_sender
-                            // t1 -> [1, 2, 3]
-                            // t2 -> [4, 5, 1]
-                            // [1, 2, 3, 4, 5]
+                            // iterate over the transactions and send them to the tx_sender, might get duplicate transactions but builder needs to filter them
                             // TODO: check do we need to change the type or struct of the transaction here
                             for tx_message in transactions {
                                     let tx_msg = TransactionMessage::<Types>{
                                         tx: tx_message,
                                         tx_type: TransactionType::HotShot,
-                                        tx_global_id: 1, //GlobalId::new(1),
                                     };
                                     tx_sender.broadcast(MessageType::TransactionMessage(tx_msg)).await.unwrap(); 
                             }
