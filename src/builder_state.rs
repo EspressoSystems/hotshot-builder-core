@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::BuildHasher;
+use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use bincode::de;
 use futures::stream::select_all;
@@ -9,9 +10,11 @@ use async_std::task::{self, Builder};
 use async_trait::async_trait;
 //use async_compatibility_layer::channel::{unbounded, UnboundedSender, UnboundedStream, UnboundedReceiver};
 use async_lock::RwLock;
-
+use hotshot_types::traits::block_contents::vid_commitment;
+use sha2::{Digest, Sha256};
 
 use hotshot::rand::seq::index;
+use hotshot_testing::block_types::TestBlockPayload;
 //use hotshot_task::event_stream::{ChannelStream, EventStream, StreamId};
 use tokio_stream::StreamExt;
 
@@ -122,6 +125,12 @@ pub struct BuilderState<TYPES: BuilderType> {
     /// block hash to the full block
     pub block_hash_to_block: HashMap<VidCommitment, TYPES::BlockPayload>,
 
+    /// da_proposal_payload_commit to da_proposal
+    pub da_proposal_payload_commit_to_da_proposal: HashMap<VidCommitment, DAProposal<TYPES>>,
+
+    /// qc_payload_commit to qc
+    pub qc_payload_commit_to_qc: HashMap<VidCommitment, QCMessage<TYPES>>,
+
     /// processed views
     pub processed_views: HashMap<TYPES::Time, HashSet<TYPES::BlockHeader>>,
 
@@ -211,14 +220,65 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         //println!("Processing DA proposal");
         //todo!("process_da_proposal");
         
+        let da_proposal_data = da_msg.proposal.data.clone();
+        let sender = da_msg.sender;
+
+        // get the view number and encoded txns from the da_proposal_data
+        let view_number = da_proposal_data.view_number;
+        let encoded_txns = da_proposal_data.encoded_transactions;
+
+        let metadata: <<TYPES as BuilderType>::BlockPayload as BlockPayload>::Metadata = da_proposal_data.metadata;
+        
+        // get the block payload from the encoded_txns
+        let block_payload_txns = TestBlockPayload::from_bytes(encoded_txns.clone().into_iter(), &()).transactions;
+
+        let encoded_txns_hash = Sha256::digest(&encoded_txns);
+
+        // generate the vid commitment
+        // TODO: Currently we are hardcoding the number of storage nodes to 2, but later we need to change it
+        // let payload_vid_commitment = vid_commitment(&encoded_txns, 8);
+
+        // // Verify the signature of the DA proposal
+        // // insert into the da_proposal_payload_commit_to_da_proposal hashmap if not exists already
+        // // sender.validate(&da_msg.proposal.signature, &encoded_txns) &&
+        // if !self.da_proposal_payload_commit_to_da_proposal.contains_key(&payload_vid_commitment) {
+        //     let da_proposal = DAProposal {
+        //         encoded_transactions: encoded_txns.clone(),
+        //         metadata: metadata.clone(),
+        //         view_number: view_number,
+        //     };
+            
+        //     self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal);    
+                
+        // }
+
+        return;
+            //self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal_data.clone());    
+        
     }
 
     /// processing the quorum proposal
     async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>)
     {
         //println!("Processing quorum proposal");
+        let qc_proposal_data = qc_msg.proposal.data;
+        let sender = qc_msg.sender;
 
-        //todo!("process_quorum_proposal");
+        let payload_vid_commitment = qc_proposal_data.block_header.payload_commitment();
+
+        // can use this commitment to match the da proposal or vice-versa
+        
+        // Verify the signature of the QC proposal
+        // insert into the qc_payload_commit_to_qc hashmap if not exists already
+        // if sender.validate(&qc_msg.proposal.signature, &payload_vid_commitment) && !self.qc_payload_commit_to_qc.contains_key(&payload_vid_commitment) {
+        //     let qc_proposal = QCMessage {
+        //         proposal: qc_proposal_data.clone(),
+        //         sender: sender,
+        //     };
+            
+        //     self.qc_payload_commit_to_qc.insert(payload_vid_commitment, qc_proposal);    
+                
+        // }
     }
 
     /// processing the decide event
@@ -252,6 +312,8 @@ impl<TYPES:BuilderType> BuilderState<TYPES>{
                     decide_receiver: decide_receiver,
                     da_proposal_receiver: da_proposal_receiver,
                     qc_receiver: qc_receiver,
+                    da_proposal_payload_commit_to_da_proposal: HashMap::new(),
+                    qc_payload_commit_to_qc: HashMap::new(),
                 } 
    }
 
