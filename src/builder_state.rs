@@ -44,28 +44,6 @@ use hotshot_types::{
     traits::{block_contents::{BlockPayload, BlockHeader, Transaction}, state::ConsensusTime, signature_key::SignatureKey},
 };
 use commit::{Commitment, Committable};
-// A struct to hold the globally increasing ID
-#[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Hash, Ord)]
-pub struct GlobalId {
-    //counter: AtomicUsize,
-    pub counter: usize,
-}
-
-impl GlobalId {
-    // Create a new instance of the generator with an initial value
-    pub fn new(initial_value: usize) -> Self {
-        GlobalId {
-            //counter: AtomicUsize::new(initial_value),
-            counter:initial_value,
-        }
-    }
-    // Get the next globally increasing ID
-    pub fn next_id(&mut self) -> usize {
-        //self.counter.fetch_add(1, Ordering::Relaxed)
-        self.counter = self.counter + 1;
-        self.counter
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TransactionType {
@@ -164,6 +142,7 @@ pub struct BuilderState<TYPES: BuilderType> {
     // quorum proposal event channel
     pub qc_receiver: BroadcastReceiver<MessageType<TYPES>>,
 }
+/// Trait to hold the helper functions for the builder
 #[async_trait]
 pub trait BuilderProgress<TYPES: BuilderType> {
     // process the external transaction 
@@ -243,6 +222,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
 }
 
+/// Unifies the possible messages that can be received by the builder
 #[derive(Debug, Clone)]
 pub enum MessageType<TYPES: BuilderType>{
     TransactionMessage(TransactionMessage<TYPES>),
@@ -251,11 +231,6 @@ pub enum MessageType<TYPES: BuilderType>{
     QCMessage(QCMessage<TYPES>)
 }
 
-#[derive(Debug, Clone)]
-pub struct CustomError{
-    pub index: usize,
-    pub error: TryRecvError,
-}
 impl<TYPES:BuilderType> BuilderState<TYPES>{
     pub fn new(builder_id: usize, tx_receiver: BroadcastReceiver<MessageType<TYPES>>, decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>)-> Self{
        BuilderState{

@@ -47,7 +47,7 @@ use tracing::error;
 use async_broadcast::{broadcast, Sender as BroadcastSender, Receiver as BroadcastReceiver};
 use futures::future::ready;
 use crate::builder_state::{BuilderState, MessageType};
-use crate::builder_state::{GlobalId, TransactionMessage, TransactionType, DecideMessage, DAProposalMessage, QCMessage};
+use crate::builder_state::{TransactionMessage, TransactionType, DecideMessage, DAProposalMessage, QCMessage};
 #[derive(clap::Args, Default)]
 pub struct Options {
     #[clap(short, long, env = "ESPRESSO_BUILDER_PORT")]
@@ -96,6 +96,7 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
     //Payload<Types>: availability::QueryablePayload
     // Might need to bound D with something...
 {
+        
         // hear out for events from the context handle and execute them
         loop {
             let (mut event_stream, _streamid) = hotshot.get_event_stream(FilterEvent::default()).await;
@@ -114,6 +115,9 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
                         // tx event
                         EventType::Transactions{transactions} => {
                             // iterate over the transactions and send them to the tx_sender
+                            // t1 -> [1, 2, 3]
+                            // t2 -> [4, 5, 1]
+                            // [1, 2, 3, 4, 5]
                             // TODO: check do we need to change the type or struct of the transaction here
                             for tx_message in transactions {
                                     let tx_msg = TransactionMessage::<Types>{

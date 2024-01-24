@@ -25,17 +25,25 @@ pub use async_broadcast::{broadcast, TryRecvError, Sender as BroadcastSender, Re
 mod tests {
 
     use core::num;
-    use std::{collections::HashSet, hash::Hash, marker::PhantomData};
+    use std::{collections::HashSet, env, hash::Hash, marker::PhantomData};
 
     use hotshot::types::SignatureKey;
     use hotshot_types::{data::QuorumProposal, traits::{block_contents::BlockHeader, state::ConsensusTime}, vote::HasViewNumber};
 
-    use crate::builder_state::{GlobalId, TransactionMessage, TransactionType, DecideMessage, DAProposalMessage, QCMessage};
+    use crate::builder_state::{TransactionMessage, TransactionType, DecideMessage, DAProposalMessage, QCMessage};
+
+
+    #[derive(Debug, Clone)]
+    pub struct CustomError{
+        pub index: usize,
+        pub error: TryRecvError,
+    }
 
     use super::*;
     /// This test simulates multiple builders receiving messages from the channels and processing them
     #[async_std::test]
     async fn test_channel(){
+        //env::set_var("RUST_ASYNC_STD_THREAD_COUNT", "10");
         println!("Testing the channel");
         #[derive(
             Copy,
@@ -182,7 +190,7 @@ mod tests {
                                 MessageType::TransactionMessage(rtx_msg) => {
                                     // store in the rtx_msgs
                                     rtx_msgs.push(rtx_msg.clone());
-
+                                    
                                     //println!("Received tx msg from builder {}: {:?} from index {}", i, rtx_msg, index);
                                     assert_eq!(stx_msgs.get(rtx_msg.tx_global_id).unwrap().tx_global_id, rtx_msg.tx_global_id);
                                     if rtx_msg.tx_type == TransactionType::HotShot {
