@@ -178,17 +178,17 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     {
         // PRIVATE MEMPOOL TRANSACTION PROCESSING
         println!("Processing external transaction");
-        // check if the transaction already exists in the hashmap
+        // check if the transaction already exists in either the included set or the local tx pool
         // if it exits, then we can ignore it and return
-        // else we can insert it into the both the maps
-        // get tx_hash_now
+        // else we can insert it into local tx pool
+        // get tx_hash as keu
         let tx_hash = tx.commit();
         // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
-        if self.tx_hash_to_tx.contains_key(&tx_hash) && self.included_txns.contains(&tx_hash) {
+        if self.tx_hash_to_tx.contains_key(&tx_hash) || self.included_txns.contains(&tx_hash) {
                 println!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
         }
         else {
-                // get the current timestamp in nanoseconds
+                // get the current timestamp in nanoseconds; it used for ordering the transactions
                 let tx_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
                 
                 // insert into both timestamp_tx and tx_hash_tx maps
@@ -239,16 +239,17 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // generate the vid commitment
         // TODO: Currently we are hardcoding the number of storage nodes to 8, but later we need to change it
         let payload_vid_commitment = vid_commitment(&encoded_txns, NODES_IN_VID_COMPUTATION);
+        
         if !self.da_proposal_payload_commit_to_da_proposal.contains_key(&payload_vid_commitment) {
             // add the original da proposal to the hashmap
             // verify the signature and if valid then insert into the map
             if sender.validate(&da_msg.proposal.signature, &encoded_txns_hash) {
-                let da_proposal = DAProposal {
+                let da_proposal_data = DAProposal {
                     encoded_transactions: encoded_txns.clone(),
                     metadata: metadata.clone(),
                     view_number: view_number,
                 };
-                self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal);    
+                self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal_data);    
             }   
         }  
     }
@@ -280,7 +281,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     {
         //println!("Processing decide event");
         //todo!("process_decide_event");
-        
+
     }
 }
 
