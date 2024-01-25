@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(unused_variables)]
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::BuildHasher;
 use std::marker::PhantomData;
@@ -41,6 +42,7 @@ use hotshot_types::{
 use commit::{Commitment, Committable};
 
 pub type TxTimeStamp = u128;
+const NODES_IN_VID_COMPUTATION: usize = 8;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TransactionType {
@@ -129,7 +131,7 @@ pub struct BuilderState<TYPES: BuilderType> {
     pub da_proposal_payload_commit_to_da_proposal: HashMap<VidCommitment, DAProposal<TYPES>>,
 
     /// qc_payload_commit to qc
-    pub qc_payload_commit_to_qc: HashMap<VidCommitment, QCMessage<TYPES>>,
+    pub qc_payload_commit_to_qc: HashMap<VidCommitment, QuorumProposal<TYPES>>,
 
     /// processed views
     pub processed_views: HashMap<TYPES::Time, HashSet<TYPES::BlockHeader>>,
@@ -235,26 +237,20 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         let encoded_txns_hash = Sha256::digest(&encoded_txns);
 
         // generate the vid commitment
-        // TODO: Currently we are hardcoding the number of storage nodes to 2, but later we need to change it
-        // let payload_vid_commitment = vid_commitment(&encoded_txns, 8);
-
-        // // Verify the signature of the DA proposal
-        // // insert into the da_proposal_payload_commit_to_da_proposal hashmap if not exists already
-        // // sender.validate(&da_msg.proposal.signature, &encoded_txns) &&
-        // if !self.da_proposal_payload_commit_to_da_proposal.contains_key(&payload_vid_commitment) {
-        //     let da_proposal = DAProposal {
-        //         encoded_transactions: encoded_txns.clone(),
-        //         metadata: metadata.clone(),
-        //         view_number: view_number,
-        //     };
-            
-        //     self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal);    
-                
-        // }
-
-        return;
-            //self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal_data.clone());    
-        
+        // TODO: Currently we are hardcoding the number of storage nodes to 8, but later we need to change it
+        let payload_vid_commitment = vid_commitment(&encoded_txns, NODES_IN_VID_COMPUTATION);
+        if !self.da_proposal_payload_commit_to_da_proposal.contains_key(&payload_vid_commitment) {
+            // add the original da proposal to the hashmap
+            // verify the signature and if valid then insert into the map
+            if sender.validate(&da_msg.proposal.signature, &encoded_txns_hash) {
+                let da_proposal = DAProposal {
+                    encoded_transactions: encoded_txns.clone(),
+                    metadata: metadata.clone(),
+                    view_number: view_number,
+                };
+                self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal);    
+            }   
+        }  
     }
 
     /// processing the quorum proposal
@@ -268,17 +264,15 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
 
         // can use this commitment to match the da proposal or vice-versa
         
-        // Verify the signature of the QC proposal
-        // insert into the qc_payload_commit_to_qc hashmap if not exists already
-        // if sender.validate(&qc_msg.proposal.signature, &payload_vid_commitment) && !self.qc_payload_commit_to_qc.contains_key(&payload_vid_commitment) {
-        //     let qc_proposal = QCMessage {
-        //         proposal: qc_proposal_data.clone(),
-        //         sender: sender,
-        //     };
-            
-        //     self.qc_payload_commit_to_qc.insert(payload_vid_commitment, qc_proposal);    
-                
-        // }
+        // first check whether vid_commitment exists in the qc_payload_commit_to_qc hashmap, if yer, ignore it, otherwise validate it and later insert in
+        if !self.qc_payload_commit_to_qc.contains_key(&payload_vid_commitment){
+            // Verify the signature of the QC proposal
+            // insert into the qc_payload_commit_to_qc hashmap if not exists already
+            if sender.validate(&qc_msg.proposal.signature, payload_vid_commitment.as_ref()) {
+                self.qc_payload_commit_to_qc.insert(payload_vid_commitment, qc_proposal_data.clone());    
+                    
+            }
+        }
     }
 
     /// processing the decide event
@@ -286,6 +280,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     {
         //println!("Processing decide event");
         //todo!("process_decide_event");
+        
     }
 }
 
