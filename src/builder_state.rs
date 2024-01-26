@@ -291,7 +291,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         let block_size = decide_msg.block_size;
 
         // get the most recent decide parent commitment as the first entry in the leaf_chain(sorted by descreasing view number)
-        let decide_parent_commitment = leaf_chain[0].parent_commitment;
+        let latest_decide_parent_commitment = leaf_chain[0].parent_commitment;
         // now we use this decide_parent_commitment to build blocks off
 
 
@@ -305,8 +305,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             match block_payload{
                 Some(block_payload) => {
                     println!("Block payload in decide event {:?}", block_payload);
-                    let metadata: BlockPayload::Metadata = ();
-                    
+                    let metadata = leaf.get_block_header().metadata();
                     let transactions_commitments = block_payload.transaction_commitments(&metadata);
                     // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx, and included tx map
                     //let transactions:Vec<TYPES::Transaction> = vec![];
@@ -335,6 +334,8 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 }
             }
         }
+
+        // TODO: Think how to make use of the latest_decide_parent_commitment to build blocks off
     }
 }
 
