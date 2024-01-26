@@ -15,11 +15,12 @@ use async_std::task::{self, Builder};
 use async_trait::async_trait;
 //use async_compatibility_layer::channel::{unbounded, UnboundedSender, UnboundedStream, UnboundedReceiver};
 use async_lock::RwLock;
+use hotshot_task_impls::transactions;
 use hotshot_types::traits::block_contents::vid_commitment;
 use sha2::{Digest, Sha256};
 
 use hotshot::rand::seq::index;
-use hotshot_testing::block_types::TestBlockPayload;
+use hotshot_testing::block_types::{TestBlockHeader, TestBlockPayload, TestTransaction};
 //use hotshot_task::event_stream::{ChannelStream, EventStream, StreamId};
 use tokio_stream::StreamExt;
 
@@ -241,7 +242,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         let encoded_txns_hash = Sha256::digest(&encoded_txns);
 
         // generate the vid commitment
-        // TODO: Currently we are hardcoding the number of storage nodes to 8, but later we need to change it
+        // TODO: Currently we are hardcoding the number of storage nodes to 8, but later read it either form sequencer/hotshot repo
         let payload_vid_commitment = vid_commitment(&encoded_txns, NODES_IN_VID_COMPUTATION);
         
         if !self.da_proposal_payload_commit_to_da_proposal.contains_key(&payload_vid_commitment) {
@@ -255,7 +256,8 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 };
                 self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal_data);    
             }   
-        }  
+        }
+          
     }
 
     /// processing the quorum proposal
@@ -283,9 +285,55 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     /// processing the decide event
     async fn process_decide_event(&mut self,  decide_msg: DecideMessage<TYPES>)
     {
-        //println!("Processing decide event");
-        //todo!("process_decide_event");
+        
+        let leaf_chain = decide_msg.leaf_chain;
+        let qc = decide_msg.qc;
+        let block_size = decide_msg.block_size;
 
+        // get the most recent decide parent commitment as the first entry in the leaf_chain(sorted by descreasing view number)
+        let decide_parent_commitment = leaf_chain[0].parent_commitment;
+        // now we use this decide_parent_commitment to build blocks off
+
+
+        // do local pruning based on decide event data
+        // iterate over all the decide leaves and extract out the transactions contained inside it
+        // for each transaction, check if it exists in the included_txns set, if yes, then ignore it, otherwise add it to the included_txns set
+        for leaf in leaf_chain.iter() {
+            // get the block payload
+            // constrain its type to be of type TestBlockPayload
+            let block_payload = leaf.get_block_payload();
+            match block_payload{
+                Some(block_payload) => {
+                    println!("Block payload in decide event {:?}", block_payload);
+                    let transactions = block_payload.transactions;
+                    // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx, and included tx map
+                    //let transactions:Vec<TYPES::Transaction> = vec![];
+                    
+                    for transaction in transactions.iter() {
+                        // get the transaction hash
+                        let tx_hash = transaction.commit();
+                        // check if the transaction already exists in the included_txns set, if yes, then ignore it, otherwise add it to the included_txns set
+                        if self.included_txns.contains(&tx_hash) {
+                            self.included_txns.remove(&tx_hash);
+                        } 
+                        // remove the transaction from the timestamp_to_tx map
+                        if let Some((timestamp, _, _)) = self.tx_hash_to_tx.get(&tx_hash) {
+                            if self.timestamp_to_tx.contains_key(timestamp) {
+                                self.timestamp_to_tx.remove(timestamp);
+                            }
+                        }
+                        // remove the transaction from the tx_hash_to_tx map also
+                        if self.tx_hash_to_tx.contains_key(&tx_hash) {
+                            self.tx_hash_to_tx.remove(&tx_hash);
+                        }
+                        
+                    }
+                },
+                None => {
+                    println!("Block payload is none");
+                }
+            }
+        }
     }
 }
 
