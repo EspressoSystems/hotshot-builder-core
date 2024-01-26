@@ -257,6 +257,30 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal_data);    
             }   
         }
+        let mut block_txns:Vec<TYPES::Transaction> = vec![];
+        
+        // if we have a matching qc for the current da proposal, then we can build a block off it
+        if self.qc_payload_commit_to_qc.contains_key(&payload_vid_commitment){
+            // can spawn or call a function to build a block off it
+            // get the current system time
+            let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
+            // start making off a block using the txns from the local pool
+            // iterate over the timestamp_to_tx map and get the txns with lowest timestamp first
+            for (_, tx_hash) in self.timestamp_to_tx.iter() {
+                // get the transaction from the tx_hash_to_tx map
+                if let Some((_, tx, _)) = self.tx_hash_to_tx.get(tx_hash){
+                    // add the transaction to the block_txns if it not already included
+                    if !self.included_txns.contains(tx_hash) {
+                        // include into the current building block
+                        block_txns.push(tx.clone());
+                        // include in the included tx set
+                        self.included_txns.insert(tx_hash.clone());
+                        
+                    }
+                }
+            }
+
+        }
           
     }
 
@@ -280,6 +304,32 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                     
             }
         }
+
+        //TODO: see how to build multiplie blocks using this same VID commitment
+        let mut block_txns:Vec<TYPES::Transaction> = vec![];
+        
+        // if we have a matching da for the current da proposal, then we can build a block off it
+        if self.da_proposal_payload_commit_to_da_proposal.contains_key(&payload_vid_commitment){
+            // can spawn or call a function to build a block off it
+            // get the current system time
+            let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
+            // start making off a block using the txns from the local pool
+            // iterate over the timestamp_to_tx map and get the txns with lowest timestamp first
+            for (_, tx_hash) in self.timestamp_to_tx.iter() {
+                // get the transaction from the tx_hash_to_tx map
+                if let Some((_, tx, _)) = self.tx_hash_to_tx.get(tx_hash){
+                    // add the transaction to the block_txns if it not already included
+                    if !self.included_txns.contains(tx_hash) {
+                        // include into the current building block
+                        block_txns.push(tx.clone());
+                        // include in the included tx set
+                        self.included_txns.insert(tx_hash.clone());
+                        
+                    }
+                }
+            }
+
+        }
     }
 
     /// processing the decide event
@@ -297,7 +347,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
 
         // do local pruning based on decide event data
         // iterate over all the decide leaves and extract out the transactions contained inside it
-        // for each transaction, check if it exists in the included_txns set, if yes, then ignore it, otherwise add it to the included_txns set
+        // for each transaction, check if it exists in the local tx pool, if yes, then remove it from the local tx pool
         for leaf in leaf_chain.iter() {
             // get the block payload
             // constrain its type to be of type TestBlockPayload
@@ -307,15 +357,9 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                     println!("Block payload in decide event {:?}", block_payload);
                     let metadata = leaf.get_block_header().metadata();
                     let transactions_commitments = block_payload.transaction_commitments(&metadata);
-                    // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx, and included tx map
+                    // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx
                     //let transactions:Vec<TYPES::Transaction> = vec![];
                     for tx_hash in transactions_commitments.iter() {
-                        // get the transaction hash
-                        //let tx_hash = transaction.commit();
-                        // check if the transaction already exists in the included_txns set, if yes, then ignore it, otherwise add it to the included_txns set
-                        if self.included_txns.contains(&tx_hash) {
-                            self.included_txns.remove(&tx_hash);
-                        } 
                         // remove the transaction from the timestamp_to_tx map
                         if let Some((timestamp, _, _)) = self.tx_hash_to_tx.get(&tx_hash) {
                             if self.timestamp_to_tx.contains_key(timestamp) {
@@ -328,6 +372,8 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                         }
                         
                     }
+                    // TODO Is it safe to re-initialise the included_txns here, as we need to start fresh
+                    self.included_txns = HashSet::new();
                 },
                 None => {
                     println!("Block payload is none");
