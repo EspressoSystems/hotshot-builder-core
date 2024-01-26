@@ -305,13 +305,14 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             match block_payload{
                 Some(block_payload) => {
                     println!("Block payload in decide event {:?}", block_payload);
-                    let transactions = block_payload.transactions;
+                    let metadata: BlockPayload::Metadata = ();
+                    
+                    let transactions_commitments = block_payload.transaction_commitments(&metadata);
                     // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx, and included tx map
                     //let transactions:Vec<TYPES::Transaction> = vec![];
-                    
-                    for transaction in transactions.iter() {
+                    for tx_hash in transactions_commitments.iter() {
                         // get the transaction hash
-                        let tx_hash = transaction.commit();
+                        //let tx_hash = transaction.commit();
                         // check if the transaction already exists in the included_txns set, if yes, then ignore it, otherwise add it to the included_txns set
                         if self.included_txns.contains(&tx_hash) {
                             self.included_txns.remove(&tx_hash);
