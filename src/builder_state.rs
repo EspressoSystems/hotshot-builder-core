@@ -172,6 +172,9 @@ pub trait BuilderProgress<TYPES: BuilderType> {
     
     /// process the decide event
     async fn process_decide_event(&mut self, decide_msg: DecideMessage<TYPES>);
+
+    /// build a block
+    async fn build_block(&mut self, payload_vid_commitment: VidCommitment) -> Option<Vec<TYPES::Transaction>>;
 }
 
 
@@ -257,30 +260,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal_data);    
             }   
         }
-        let mut block_txns:Vec<TYPES::Transaction> = vec![];
-        
-        // if we have a matching qc for the current da proposal, then we can build a block off it
-        if self.qc_payload_commit_to_qc.contains_key(&payload_vid_commitment){
-            // can spawn or call a function to build a block off it
-            // get the current system time
-            let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
-            // start making off a block using the txns from the local pool
-            // iterate over the timestamp_to_tx map and get the txns with lowest timestamp first
-            for (_, tx_hash) in self.timestamp_to_tx.iter() {
-                // get the transaction from the tx_hash_to_tx map
-                if let Some((_, tx, _)) = self.tx_hash_to_tx.get(tx_hash){
-                    // add the transaction to the block_txns if it not already included
-                    if !self.included_txns.contains(tx_hash) {
-                        // include into the current building block
-                        block_txns.push(tx.clone());
-                        // include in the included tx set
-                        self.included_txns.insert(tx_hash.clone());
-                        
-                    }
-                }
-            }
-
-        }
+        let block = self.build_block(payload_vid_commitment).await;
           
     }
 
@@ -304,12 +284,15 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                     
             }
         }
-
+        let block = self.build_block(payload_vid_commitment).await;
+    }
+    // build a block
+    async fn build_block(&mut self, payload_vid_commitment: VidCommitment) -> Option<Vec<TYPES::Transaction>>{
         //TODO: see how to build multiplie blocks using this same VID commitment
         let mut block_txns:Vec<TYPES::Transaction> = vec![];
         
         // if we have a matching da for the current da proposal, then we can build a block off it
-        if self.da_proposal_payload_commit_to_da_proposal.contains_key(&payload_vid_commitment){
+        if self.qc_payload_commit_to_qc.contains_key(&payload_vid_commitment) && self.da_proposal_payload_commit_to_da_proposal.contains_key(&payload_vid_commitment){
             // can spawn or call a function to build a block off it
             // get the current system time
             let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
@@ -328,8 +311,9 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                     }
                 }
             }
-
+            return Some(block_txns);
         }
+        None
     }
 
     /// processing the decide event
