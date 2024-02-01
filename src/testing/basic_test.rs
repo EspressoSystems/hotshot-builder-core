@@ -7,7 +7,7 @@
 
 #![allow(unused_imports)]
 use async_std::task::{self, Builder};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use sha2::{Digest, Sha256};
 use futures::future::select_all;
 pub use hotshot_testing::{block_types::{TestTransaction, TestBlockHeader, TestBlockPayload, genesis_vid_commitment}, state_types::TestState};
@@ -32,7 +32,7 @@ mod tests {
     use std::{collections::HashSet, env, hash::Hash, marker::PhantomData};
 
     use hotshot::{rand::seq::index, types::SignatureKey};
-    use hotshot_types::{data::QuorumProposal, traits::{block_contents::BlockHeader, state::ConsensusTime}, vote::HasViewNumber};
+    use hotshot_types::{data::QuorumProposal, message::Message, traits::{block_contents::BlockHeader, state::ConsensusTime}, vote::HasViewNumber};
 
     use crate::builder_state::{TransactionMessage, TransactionSource, DecideMessage, DAProposalMessage, QCMessage};
 
@@ -165,6 +165,7 @@ mod tests {
         // spwan 10 builder instances, later try receing on each of the instance
         let mut handles = Vec::new();
         for i in 0..2 {
+            
             let tx_receiver_clone = tx_receiver.clone();
             let decide_receiver_clone = decide_receiver.clone();
             let da_receiver_clone = da_receiver.clone();
@@ -175,13 +176,18 @@ mod tests {
             let sdecide_msgs: Vec<DecideMessage<TestTypes>> = sdecide_msgs.clone();
             let sda_msgs: Vec<DAProposalMessage<TestTypes>> = sda_msgs.clone();
             let sqc_msgs: Vec<QCMessage<TestTypes>> = sqc_msgs.clone();
+            
             // TODO clone a handle and check it contains the remaining messages and don't contain the messages before cloning it
             let handle = task::spawn(async move {
                 
                 let built_from_view_vid_leaf = (ViewNumber::new(i as u64), genesis_vid_commitment(), Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage());
+                
                 let (pub_key, private_key) = BLSPubKey::generated_from_seed_indexed([i as u8; 32],i as u64);
                
-               let mut builder_state = BuilderState::<TestTypes>::new((pub_key, private_key), built_from_view_vid_leaf, tx_receiver_clone, decide_receiver_clone, da_receiver_clone, qc_receiver_clone,req_receiver_clone);
+               //let mut builder_state = Arc::new(Mutex::new(BuilderState::<TestTypes>::new((pub_key, private_key), built_from_view_vid_leaf, tx_receiver_clone, decide_receiver_clone, da_receiver_clone, qc_receiver_clone,req_receiver_clone)));
+               let mut builder_state = BuilderState::<TestTypes>::new((pub_key, private_key), built_from_view_vid_leaf, 
+                                                                                                tx_receiver_clone, decide_receiver_clone, da_receiver_clone, 
+                                                                                                qc_receiver_clone, req_receiver_clone);
                 
                 // to keep track of the messages received by the builder
                 let mut rtx_msgs: Vec<TransactionMessage<TestTypes>> = Vec::new();
@@ -190,22 +196,46 @@ mod tests {
                 let mut rqc_msgs:Vec<QCMessage<TestTypes>> =  Vec::new();
 
                 let mut channel_close_index = HashSet::<usize>::new();
+                //let shared_builder_state = Arc::clone(&builder_state);
                 loop{
 
-                    // while Ok(req) = builder_state.req_receiver.try_recv() {
+                    while let Ok(req) = builder_state.req_receiver.recv().await {
+                        println!("Received request in builder {}: {:?}", i, req);
+                        if let MessageType::RequestMessage(req) = req {
+
+                            let requested_vid_commitment = req.requested_vid_commitment;
+                            
+                        }
                     //     //... handle requests
                     //     // it says do I have a block for this set of txns? if so, return that header?? MPSC [async_compatility]
                     //     // else iterate through and call build block, and add block to blockmap in globalstate
                     //     // do validity check for the requester as well i.e are they leader for one of the next k views
 
-                    // }
-                    let (received_msg, channel_index, _)= select_all([builder_state.req_receiver.recv(), builder_state.tx_receiver.recv(), builder_state.decide_receiver.recv(), builder_state.da_proposal_receiver.recv(), builder_state.qc_receiver.recv()]).await;
+                    }
+
+
+                    // unlock the builder state
+                    //let mut builder_state = builder_state.lock().unwrap();
+                    
+                    let (received_msg, channel_index, _)= select_all([builder_state.tx_receiver.recv(), 
+                                                                                                                builder_state.decide_receiver.recv(), builder_state.da_proposal_receiver.recv(), 
+                                                                                                                builder_state.qc_receiver.recv(), builder_state.req_receiver.recv()]).await;
                     
                     match received_msg {
                         Ok(received_msg) => {
                             match received_msg {
+                                
+                                // request message
+                                MessageType::RequestMessage(req) => {
+                                    println!("Received request msg in builder {}: {:?} from index {}", i, req, channel_index);
+                                    // store in the rtx_msgs
+                                    //rreq_msgs.push(req.clone());
+                                    //builder_state.process_request(req).await;
+                                }
+
+                                // transaction message
                                 MessageType::TransactionMessage(rtx_msg) => {
-                                    println!("Received tx msg from builder {}: {:?} from index {}", i, rtx_msg, channel_index);
+                                    println!("Received tx msg in builder {}: {:?} from index {}", i, rtx_msg, channel_index);
                                     // store in the rtx_msgs
                                     rtx_msgs.push(rtx_msg.clone());
                                     
@@ -221,8 +251,10 @@ mod tests {
                                     }
                                     
                                 }
+
+                                // decide message
                                 MessageType::DecideMessage(rdecide_msg) => {
-                                    println!("Received decide msg from builder {}: {:?} from index {}", i, rdecide_msg, channel_index);
+                                    println!("Received decide msg in builder {}: {:?} from index {}", i, rdecide_msg, channel_index);
                                     // store in the rdecide_msgs
                                     rdecide_msgs.push(rdecide_msg.clone());
 
@@ -230,8 +262,10 @@ mod tests {
                                     assert_eq!(sdecide_msgs.get(rdecide_msg.block_size.unwrap() as usize).unwrap().block_size, rdecide_msg.block_size);
                                     builder_state.process_decide_event(rdecide_msg).await;
                                 }
+
+                                // DA proposal message
                                 MessageType::DAProposalMessage(rda_msg) => {
-                                    println!("Received da msg from builder {}: {:?} from index {}", i, rda_msg, channel_index);
+                                    println!("Received da msg in builder {}: {:?} from index {}", i, rda_msg, channel_index);
                                     // store in the rda_msgs
                                     rda_msgs.push(rda_msg.clone());
 
@@ -240,8 +274,10 @@ mod tests {
                                     assert_eq!(sda_msgs.get(view_number as usize).unwrap().proposal.data.view_number.get_u64(), rda_msg.proposal.data.view_number.get_u64());
                                     builder_state.process_da_proposal(rda_msg).await;
                                 }
+
+                                // QC proposal message
                                 MessageType::QCMessage(rqc_msg) => {
-                                    println!("Received qc msg from builder {}: {:?} from index {}", i, rqc_msg, channel_index);
+                                    println!("Received qc msg in builder {}: {:?} from index {}", i, rqc_msg, channel_index);
                                     // store in the rqc_msgs
                                     rqc_msgs.push(rqc_msg.clone());
 

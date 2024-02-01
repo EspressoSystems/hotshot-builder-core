@@ -82,6 +82,11 @@ pub struct QCMessage<TYPES:BuilderType>{
     pub sender: TYPES::SignatureKey,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct RequestMessage{
+    pub requested_vid_commitment: VidCommitment,
+}
+
 
 use std::cmp::{PartialEq, Ord, PartialOrd};
 use std::hash::Hash;
@@ -267,7 +272,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         let sender = qc_msg.sender;
 
         let payload_vid_commitment = qc_proposal_data.block_header.payload_commitment();
-        
+
         // first check whether vid_commitment exists in the qc_payload_commit_to_qc hashmap, if yer, ignore it, otherwise validate it and later insert in
         if !self.quorum_proposal_payload_commit_to_quorum_proposal.contains_key(&payload_vid_commitment){
                 // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
@@ -389,7 +394,8 @@ pub enum MessageType<TYPES: BuilderType>{
     TransactionMessage(TransactionMessage<TYPES>),
     DecideMessage(DecideMessage<TYPES>),
     DAProposalMessage(DAProposalMessage<TYPES>),
-    QCMessage(QCMessage<TYPES>)
+    QCMessage(QCMessage<TYPES>),
+    RequestMessage(RequestMessage),
 }
 
 impl<TYPES:BuilderType> BuilderState<TYPES>{
