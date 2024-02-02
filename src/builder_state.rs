@@ -36,7 +36,7 @@ use std::{
 use futures::Stream;
 
 use std::time::{SystemTime, UNIX_EPOCH};
-use async_broadcast::{broadcast, TryRecvError, Sender as BroadcastSender, Receiver as BroadcastReceiver};
+use async_broadcast::{broadcast, TryRecvError, Sender as BroadcastSender, Receiver as BroadcastReceiver, RecvError};
 
 // including the following from the hotshot
 use hotshot_types::{
@@ -154,10 +154,13 @@ pub trait BuilderProgress<TYPES: BuilderType> {
     async fn process_decide_event(&mut self, decide_msg: DecideMessage<TYPES>);
 
     /// spawn a clone of builder
-    async fn spawn_clone(self, da_proposal: DAProposal<TYPES>, quorum_proposal: QuorumProposal<TYPES>);
+    async fn spawn_clone(self, da_proposal: DAProposal<TYPES>, quorum_proposal: QuorumProposal<TYPES>, leader: TYPES::SignatureKey);
 
     /// build a block
     async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<Vec<TYPES::Transaction>>;
+
+    /// Event Loop
+    async fn event_loop(mut self);
 }
 
 
@@ -228,12 +231,8 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         let encoded_txns = da_proposal_data.encoded_transactions;
 
         let metadata: <<TYPES as BuilderType>::BlockPayload as BlockPayload>::Metadata = da_proposal_data.metadata;
-        
-        // get the block payload from the encoded_txns; the following are not used currently, however might need later
-        // let block_payload_txns = TestBlockPayload::from_bytes(encoded_txns.clone().into_iter(), &()).transactions;
-        // let encoded_txns_hash = Sha256::digest(&encoded_txns);
 
-        // generate the vid commitment
+        // generate the vid commitment; num nodes are received through hotshot api in service.rs and passed along with message onto channel
         let total_nodes = da_msg.total_nodes;
         let payload_vid_commitment = vid_commitment(&encoded_txns, total_nodes);
         
@@ -247,7 +246,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
             if let Entry::Occupied(qc_proposal_data) = self.quorum_proposal_payload_commit_to_quorum_proposal.entry(payload_vid_commitment.clone()) {
                 let qc_proposal_data = qc_proposal_data.remove();
-                self.clone().spawn_clone(da_proposal_data, qc_proposal_data);
+                self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender);
             } else {
                 self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal_data);    
             }
@@ -278,7 +277,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
                 if let Entry::Occupied(da_proposal_data) = self.da_proposal_payload_commit_to_da_proposal.entry(payload_vid_commitment.clone()) {
                     let da_proposal_data = da_proposal_data.remove();
-                    self.clone().spawn_clone(da_proposal_data, qc_proposal_data);
+                    self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender);
                 } else {
                     self.quorum_proposal_payload_commit_to_quorum_proposal.insert(payload_vid_commitment, qc_proposal_data.clone());
                 }
@@ -333,15 +332,37 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
 
     // spawn a clone of the builder state
-    async fn spawn_clone(self, da_proposal: DAProposal<TYPES>, quorum_proposal: QuorumProposal<TYPES>)
+    async fn spawn_clone(mut self, da_proposal: DAProposal<TYPES>, quorum_proposal: QuorumProposal<TYPES>, leader: TYPES::SignatureKey)
     {
-        // spawn a clone of the builder
-        // let mut cloned_builder = self.clone();
-        // // spawn a new task to build a block off the matching da and quorum proposals
-        // let cloned_builder_handle = task::spawn(async move {
-        //     //cloned_builder.build_block(da_proposal, quorum_proposal).await;
-        // });
-        print!("Spawned a new task to build a block off the matching da and quorum proposals");
+        self.built_from_view_vid_leaf.0 = quorum_proposal.view_number;
+        self.built_from_view_vid_leaf.1 = quorum_proposal.block_header.payload_commitment();
+        
+        let leaf: Leaf<_> = Leaf {
+            view_number: quorum_proposal.view_number,
+            justify_qc: quorum_proposal.justify_qc.clone(),
+            parent_commitment: quorum_proposal.justify_qc.get_data().leaf_commit,
+            block_header: quorum_proposal.block_header.clone(),
+            block_payload: None,
+            rejected: vec![],
+            proposer_id: leader,
+        };
+        self.built_from_view_vid_leaf.2 = leaf.commit();
+        
+        // let block_payload_txns = TestBlockPayload::from_bytes(encoded_txns.clone().into_iter(), &()).transactions;
+        // let encoded_txns_hash = Sha256::digest(&encoded_txns);
+        let payload = <TYPES::BlockPayload as BlockPayload>::from_bytes(
+            da_proposal.encoded_transactions.clone().into_iter(),
+            quorum_proposal.block_header.metadata(),
+        );
+        
+        payload.transaction_commitments(quorum_proposal.block_header.metadata()).iter().for_each(|txn| 
+            if let Entry::Occupied(txn_info) = self.tx_hash_to_available_txns.entry(*txn) {
+                self.timestamp_to_tx.remove(&txn_info.get().0);
+                self.included_txns.insert(*txn);
+                txn_info.remove_entry();
+            });
+        
+        self.event_loop();
     }
 
      // build a block
@@ -386,8 +407,86 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         }
         None
     }
-}
 
+    async fn event_loop(mut self) {
+            task::spawn(
+                loop{   
+                    //let builder_state = builder_state.lock().unwrap();
+                    while let Ok(req) = self.req_receiver.recv().await {
+                        if let MessageType::RequestMessage(req) = req {
+
+                            let requested_vid_commitment = req.requested_vid_commitment;
+                            
+                        }
+                    //     //... handle requests
+                    //selft says do I have a block for this set of txns? if so, return that header?? MPSC [async_compatility]
+                    //     // else iterate through and call build block, and add block to blockmap in globalstate
+                    //     // do validity check for the requester as well i.e are they leader for one of the next k views
+
+                    }
+
+                    let (received_msg, channel_index, _)= select_all([self.tx_receiver.recv(), self.decide_receiver.recv(), self.da_proposal_receiver.recv(), 
+                                                                                                         self.qc_receiver.recv(), self.req_receiver.recv()]).await;
+                    
+                    match received_msg {
+                        Ok(received_msg) => {
+                            match received_msg {
+                                
+                                // request message
+                                MessageType::RequestMessage(req) => {
+                                    println!("Received request msg in builder {}: {:?} from index {}", self.builder_id.0, req, channel_index);
+                                    // store in the rtx_msgs
+                                    //rreq_msgs.push(req.clone());
+                                    //builder_state.process_request(req).await;
+                                }
+
+                                // transaction message
+                                MessageType::TransactionMessage(rtx_msg) => {
+                                    println!("Received tx msg in builder {}: {:?} from index {}", self.builder_id.0, rtx_msg, channel_index);
+                                    
+                                    // get the content from the rtx_msg's inside vec
+                                    // Pass the tx msg to the handler
+                                    if rtx_msg.tx_type == TransactionSource::HotShot {
+                                        self.process_hotshot_transaction(rtx_msg.tx).await;
+                                    } else {
+                                        self.process_external_transaction(rtx_msg.tx).await;
+                                    }
+                                    
+                                }
+
+                                // decide message
+                                MessageType::DecideMessage(rdecide_msg) => {
+                                    println!("Received decide msg in builder {}: {:?} from index {}", self.builder_id.0, rdecide_msg, channel_index);
+                                    // store in the rdecide_msgs
+                                    self.process_decide_event(rdecide_msg).await;
+                                }
+
+                                // DA proposal message
+                                MessageType::DAProposalMessage(rda_msg) => {
+                                    println!("Received da proposal msg in builder {}: {:?} from index {}", self.builder_id.0, rda_msg, channel_index);
+                                                        
+                                    self.process_da_proposal(rda_msg).await;
+                                }
+                                // QC proposal message
+                                MessageType::QCMessage(rqc_msg) => {
+                                    println!("Received qc msg in builder {}: {:?} from index {}", self.builder_id.0, rqc_msg, channel_index);
+                                    self.process_quorum_proposal(rqc_msg).await;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            if err == RecvError::Closed {
+                                println!("The channel {} is closed", channel_index);
+                                //break;
+                                //channel_close_index.insert(channel_index);
+                            }
+                        }
+                    }
+            
+                }
+            );
+    }
+}
 /// Unifies the possible messages that can be received by the builder
 #[derive(Debug, Clone)]
 pub enum MessageType<TYPES: BuilderType>{

@@ -177,6 +177,8 @@ mod tests {
             let sda_msgs: Vec<DAProposalMessage<TestTypes>> = sda_msgs.clone();
             let sqc_msgs: Vec<QCMessage<TestTypes>> = sqc_msgs.clone();
             
+            let mut builder_state = Arc::new(Mutex::new(BuilderState::<TestTypes>::new((pub_key, private_key), built_from_view_vid_leaf, tx_receiver_clone, decide_receiver_clone, da_receiver_clone, qc_receiver_clone, req_receiver_clone)));
+            
             // TODO clone a handle and check it contains the remaining messages and don't contain the messages before cloning it
             let handle = task::spawn(async move {
                 
@@ -184,8 +186,7 @@ mod tests {
                 
                 let (pub_key, private_key) = BLSPubKey::generated_from_seed_indexed([i as u8; 32],i as u64);
                
-               //let mut builder_state = Arc::new(Mutex::new(BuilderState::<TestTypes>::new((pub_key, private_key), built_from_view_vid_leaf, tx_receiver_clone, decide_receiver_clone, da_receiver_clone, qc_receiver_clone,req_receiver_clone)));
-               let mut builder_state = BuilderState::<TestTypes>::new((pub_key, private_key), built_from_view_vid_leaf, 
+                let mut builder_state = BuilderState::<TestTypes>::new((pub_key, private_key), built_from_view_vid_leaf, 
                                                                                                 tx_receiver_clone, decide_receiver_clone, da_receiver_clone, 
                                                                                                 qc_receiver_clone, req_receiver_clone);
                 
@@ -197,8 +198,10 @@ mod tests {
 
                 let mut channel_close_index = HashSet::<usize>::new();
                 //let shared_builder_state = Arc::clone(&builder_state);
+            
                 loop{
 
+                    //let builder_state = builder_state.lock().unwrap();
                     while let Ok(req) = builder_state.req_receiver.recv().await {
                         println!("Received request in builder {}: {:?}", i, req);
                         if let MessageType::RequestMessage(req) = req {
