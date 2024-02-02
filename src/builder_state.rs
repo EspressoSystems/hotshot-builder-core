@@ -10,7 +10,6 @@ use std::hash::BuildHasher;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use bincode::de;
-use futures::stream::select_all;
 use futures::{Future, select};
 use async_std::task::{self, Builder};
 use async_trait::async_trait;
@@ -49,6 +48,7 @@ use hotshot_types::{
 use commit::{Commitment, Committable};
 
 use jf_primitives::signatures::bls_over_bn254::{BLSOverBN254CurveSignatureScheme, KeyPair, SignKey, VerKey};
+use futures::future::select_all;
 
 pub type TxTimeStamp = u128;
 const NUM_NODES_IN_VID_COMPUTATION: usize = 8;
@@ -409,7 +409,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
 
     async fn event_loop(mut self) {
-            task::spawn(
+            task::spawn(async move{
                 loop{   
                     //let builder_state = builder_state.lock().unwrap();
                     while let Ok(req) = self.req_receiver.recv().await {
@@ -484,7 +484,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                     }
             
                 }
-            );
+    });
     }
 }
 /// Unifies the possible messages that can be received by the builder
