@@ -46,4 +46,4 @@ async-broadcast = "0.6.0"
 sha2 = "0.10"
 jf-primitives = { git = "https://github.com/EspressoSystems/jellyfish" }
 
-builder-api = {git = "https://github.com/EspressoSystems/hs-builder-api", branch="main"}
+hs-builder-api = {git = "https://github.com/EspressoSystems/hs-builder-api", branch="main"}

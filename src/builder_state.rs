@@ -86,7 +86,7 @@ pub struct QCMessage<TYPES:BuilderType>{
 #[derive(Clone, Debug, PartialEq)]
 pub struct RequestMessage{
     pub requested_vid_commitment: VidCommitment,
-    pub total_nodes: usize
+    //pub total_nodes: usize
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -155,6 +155,9 @@ pub struct BuilderState<TYPES: BuilderType>{
 
     // response sender
     pub response_sender: BroadcastSender<ResponseMessage>,
+
+    // quorum membership
+    pub quorum_membership: Arc<TYPES::Membership>,
 }
 /// Trait to hold the helper functions for the builder
 #[async_trait]
@@ -178,7 +181,7 @@ pub trait BuilderProgress<TYPES: BuilderType> {
     async fn spawn_clone(self, da_proposal: DAProposal<TYPES>, quorum_proposal: QuorumProposal<TYPES>, leader: TYPES::SignatureKey);
 
     /// build a block
-    async fn build_block(&mut self, matching_vid: VidCommitment, num_quorum_committee: usize) -> Option<ResponseMessage>;
+    async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<ResponseMessage>;
 
     /// Event Loop
     async fn event_loop(mut self);
@@ -397,7 +400,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
 
      // build a block
-    async fn build_block(&mut self, matching_vid: VidCommitment, num_quorum_committee: usize) -> Option<ResponseMessage>{
+    async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<ResponseMessage>{
 
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
             self.timestamp_to_tx.iter().filter_map(|(ts, tx_hash)| {
@@ -418,7 +421,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             
             
             // get the number of quorum committee members to be used for VID calculation
-            //let num_quorum_committee = self.membership.total_nodes();
+            let num_quorum_committee = self.quorum_membership.total_nodes();
 
             // TODO <https://github.com/EspressoSystems/HotShot/issues/1686>
             let srs = test_srs(num_quorum_committee);
@@ -461,9 +464,9 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                         if let MessageType::RequestMessage(req) = req {
 
                             let requested_vid_commitment = req.requested_vid_commitment;
-                            let vid_nodes = req.total_nodes;
+                            //let vid_nodes = req.total_nodes;
                             if requested_vid_commitment == self.built_from_view_vid_leaf.1{
-                                    let response = self.build_block(requested_vid_commitment, vid_nodes).await;
+                                    let response = self.build_block(requested_vid_commitment).await;
                                     match response{
                                         Some(response)=>{
                                             // send the response back
@@ -555,7 +558,7 @@ pub enum MessageType<TYPES: BuilderType>{
 }
 
 impl<TYPES:BuilderType> BuilderState<TYPES>{
-    pub fn new(builder_id: (VerKey, SignKey), view_vid_leaf:(TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>), tx_receiver: BroadcastReceiver<MessageType<TYPES>>, decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>, req_receiver: BroadcastReceiver<MessageType<TYPES>>, global_state: Arc<RwLock<GlobalState<TYPES>>>, response_sender: BroadcastSender<ResponseMessage>)-> Self{
+    pub fn new(builder_id: (VerKey, SignKey), view_vid_leaf:(TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>), tx_receiver: BroadcastReceiver<MessageType<TYPES>>, decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>, req_receiver: BroadcastReceiver<MessageType<TYPES>>, global_state: Arc<RwLock<GlobalState<TYPES>>>, response_sender: BroadcastSender<ResponseMessage>, quorum_membership: TYPES::Membership)-> Self{
        BuilderState{
                     builder_id: builder_id,
                     timestamp_to_tx: BTreeMap::new(),
@@ -572,6 +575,7 @@ impl<TYPES:BuilderType> BuilderState<TYPES>{
                     quorum_proposal_payload_commit_to_quorum_proposal: HashMap::new(),
                     global_state: global_state,
                     response_sender: response_sender,
+                    quorum_membership: quorum_membership,
                 } 
    }
 
