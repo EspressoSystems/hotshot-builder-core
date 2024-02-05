@@ -51,11 +51,11 @@ use tracing::error;
 //use crate::builder_state::{MessageType, BuilderType, TransactionMessage, DecideMessage, QuorumProposalMessage, QCMessage};
 use async_broadcast::{broadcast, Sender as BroadcastSender, Receiver as BroadcastReceiver};
 use futures::future::ready;
-use crate::builder_state::{BuilderState, MessageType, ResponseMessage};
+use crate::builder_state::{BuilderState, MessageType, ResponseMessage, RequestMessage};
 use crate::builder_state::{TransactionMessage, TransactionSource, DecideMessage, DAProposalMessage, QCMessage};
 
 
-use builder_api::data_source::BuilderDataSource;
+use hs_builder_api::{data_source::BuilderDataSource, block_metadata::BlockMetadata, builder::BuildError};
 
 use sha2::{Digest, Sha256};
 #[derive(clap::Args, Default)]
@@ -68,7 +68,7 @@ pub struct Options {
 pub struct GlobalState<Types: BuilderType>{
     pub block_hash_to_block: HashMap<BuilderCommitment, Types::BlockPayload>,
     pub vid_to_potential_builder_state: HashMap<VidCommitment, BuilderState<Types>>,
-    pub request_sender: BroadcastSender<MessageType<Types>>,
+    pub request_sender: BroadcastSender<RequestMessage>,
 }
 
 impl<Types: BuilderType> GlobalState<Types>{
@@ -79,23 +79,30 @@ impl<Types: BuilderType> GlobalState<Types>{
         }
     }
 }
+use hotshot_types::traits::node_implementation::NodeType;
 
-impl BuilderDataSourc<Types: BuilderType> for GlobalState<Types>
+impl<Types:BuilderType + NodeType> BuilderDataSource<Types> for GlobalState<Types>
 {
     async fn get_available_blocks(
         &self,
         for_parent: &VidCommitment,
     ) -> Result<Vec<BlockMetadata<Types>>, BuildError> {
-        unimplemented!()
+
+        let req_msg = RequestMessage{
+            requested_vid_commitment: for_parent.clone(),
+        };
+        self.request_sender.broadcast(req_msg).await.unwrap();
     }
     async fn claim_block(
         &self,
-        block_hash: &BuilderCommitment<Types>,
-        signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
+        block_hash: &BuilderCommitment,
+        signature: &<<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<Types::BlockPayload, BuildError> {
-        unimplemented!()
+        //unimplemented!()
+        let block = self.block_hash_to_block.get(&block_hash).unwrap().clone();
+        Ok(block)
     }
-    async fn submit_txn(&self, txn: <Types as NodeType>::Transaction) -> Result<(), BuildError> {
+    async fn submit_txn(&self, txn: <Types as BuilderType>::Transaction) -> Result<(), BuildError> {
         unimplemented!()
     }
 }

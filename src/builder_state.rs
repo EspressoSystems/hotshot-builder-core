@@ -554,7 +554,6 @@ pub enum MessageType<TYPES: BuilderType>{
     DecideMessage(DecideMessage<TYPES>),
     DAProposalMessage(DAProposalMessage<TYPES>),
     QCMessage(QCMessage<TYPES>),
-    RequestMessage(RequestMessage),
 }
 
 impl<TYPES:BuilderType> BuilderState<TYPES>{
