@@ -54,6 +54,9 @@ use futures::future::ready;
 use crate::builder_state::{BuilderState, MessageType, ResponseMessage};
 use crate::builder_state::{TransactionMessage, TransactionSource, DecideMessage, DAProposalMessage, QCMessage};
 
+
+use builder_api::data_source::BuilderDataSource;
+
 use sha2::{Digest, Sha256};
 #[derive(clap::Args, Default)]
 pub struct Options {
@@ -65,6 +68,7 @@ pub struct Options {
 pub struct GlobalState<Types: BuilderType>{
     pub block_hash_to_block: HashMap<BuilderCommitment, Types::BlockPayload>,
     pub vid_to_potential_builder_state: HashMap<VidCommitment, BuilderState<Types>>,
+    pub request_sender: BroadcastSender<MessageType<Types>>,
 }
 
 impl<Types: BuilderType> GlobalState<Types>{
@@ -75,6 +79,27 @@ impl<Types: BuilderType> GlobalState<Types>{
         }
     }
 }
+
+impl BuilderDataSourc<Types: BuilderType> for GlobalState<Types>
+{
+    async fn get_available_blocks(
+        &self,
+        for_parent: &VidCommitment,
+    ) -> Result<Vec<BlockMetadata<Types>>, BuildError> {
+        unimplemented!()
+    }
+    async fn claim_block(
+        &self,
+        block_hash: &BuilderCommitment<Types>,
+        signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
+    ) -> Result<Types::BlockPayload, BuildError> {
+        unimplemented!()
+    }
+    async fn submit_txn(&self, txn: <Types as NodeType>::Transaction) -> Result<(), BuildError> {
+        unimplemented!()
+    }
+}
+
 // impl api // from the hs-builder-api/src/
 /// Run an instance of the default Espresso builder service.
 pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplementation<Types>, D>(
@@ -187,3 +212,4 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
         }
         
 }
+
