@@ -42,6 +42,7 @@ use hotshot_types::{
         election::Membership, node_implementation::NodeType as BuilderType, storage::Storage,
         signature_key::SignatureKey,block_contents::BlockHeader, consensus_api::ConsensusApi
     },
+    utils::BuilderCommitment
 };
 use hotshot_types::{data::Leaf, simple_certificate::QuorumCertificate};
 use std::{collections::HashMap, sync::Arc};
@@ -50,7 +51,7 @@ use tracing::error;
 //use crate::builder_state::{MessageType, BuilderType, TransactionMessage, DecideMessage, QuorumProposalMessage, QCMessage};
 use async_broadcast::{broadcast, Sender as BroadcastSender, Receiver as BroadcastReceiver};
 use futures::future::ready;
-use crate::builder_state::{BuilderState, MessageType};
+use crate::builder_state::{BuilderState, MessageType, ResponseMessage};
 use crate::builder_state::{TransactionMessage, TransactionSource, DecideMessage, DAProposalMessage, QCMessage};
 
 use sha2::{Digest, Sha256};
@@ -60,13 +61,14 @@ pub struct Options {
     pub port: u16
 }
 //
+#[derive(Clone, Debug)]
 pub struct GlobalState<Types: BuilderType>{
-    pub block_hash_to_block: HashMap<VidCommitment, Types::BlockPayload>,
+    pub block_hash_to_block: HashMap<BuilderCommitment, Types::BlockPayload>,
     pub vid_to_potential_builder_state: HashMap<VidCommitment, BuilderState<Types>>,
 }
 
-impl GlobalState<Types: BuilderType>{
-    pub fn removed_handles(&mut self, vidcommitment: VidCommitment, block_hashes: Vec<BlockHash>) {
+impl<Types: BuilderType> GlobalState<Types>{
+    pub fn remove_handles(&mut self, vidcommitment: VidCommitment, block_hashes: Vec<BuilderCommitment>) {
         self.vid_to_potential_builder_state.remove(&vidcommitment);
         for block_hash in block_hashes {
             self.block_hash_to_block.remove(&block_hash);
@@ -84,7 +86,7 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
     da_sender: BroadcastSender<MessageType<Types>>,
     qc_sender: BroadcastSender<MessageType<Types>>,
     req_sender: BroadcastSender<MessageType<Types>>,
-    response_receiver: BroadcastReceiver<ResponseMessage<Types>>,
+    response_receiver: BroadcastReceiver<ResponseMessage>,
 
 ) -> Result<(),()>
 //where //TODO
