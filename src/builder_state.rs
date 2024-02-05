@@ -270,7 +270,11 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
             if let Entry::Occupied(qc_proposal_data) = self.quorum_proposal_payload_commit_to_quorum_proposal.entry(payload_vid_commitment.clone()) {
                 let qc_proposal_data = qc_proposal_data.remove();
-                self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
+                let self_clone = self.clone();
+                self_clone.spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
+
+                // register the clone to the global state
+                self.global_state.write_arc().builder_states.insert(payload_vid_commitment, self_clone);
             } else {
                 self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal_data);    
             }
@@ -301,7 +305,12 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
                 if let Entry::Occupied(da_proposal_data) = self.da_proposal_payload_commit_to_da_proposal.entry(payload_vid_commitment.clone()) {
                     let da_proposal_data = da_proposal_data.remove();
-                    self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
+                    let self_clone = self.clone();
+                    self_clone.spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
+
+                    // registed the clone to the global state
+                    self.global_state.write_arc().builder_states.insert(payload_vid_commitment, self_clone);
+                
                 } else {
                     self.quorum_proposal_payload_commit_to_quorum_proposal.insert(payload_vid_commitment, qc_proposal_data.clone());
                 }
