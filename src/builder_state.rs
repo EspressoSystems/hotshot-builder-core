@@ -43,7 +43,8 @@ use hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal, VidCommitment},
     simple_certificate::QuorumCertificate,
     message::Proposal,
-    traits::{block_contents::{BlockPayload, BlockHeader, Transaction}, state::ConsensusTime, signature_key::SignatureKey},
+    traits::{block_contents::{BlockPayload, BlockHeader, Transaction}, signature_key::SignatureKey},
+    utils::BuilderCommitment
 };
 use commit::{Commitment, Committable};
 
@@ -87,9 +88,22 @@ pub struct RequestMessage{
     pub requested_vid_commitment: VidCommitment,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResponseMessage{
+    pub block_hash: BuilderCommitment, //TODO: Need to pull out from hotshot
+    pub block_size: u64,
+    pub offered_fee: u64,
+}
+
+pub enum Status {
+    ShouldExit,
+    ShouldContinue,
+}
 
 use std::cmp::{PartialEq, Ord, PartialOrd};
 use std::hash::Hash;
+
+use crate::service::GlobalState;
 
 #[derive(Debug, Clone)]
 pub struct BuilderState<TYPES: BuilderType>{
@@ -134,6 +148,9 @@ pub struct BuilderState<TYPES: BuilderType>{
 
     // channel receiver for the requests
     pub req_receiver: BroadcastReceiver<MessageType<TYPES>>,
+
+    // global state handle
+    pub global_state: Arc::<RwLock::<GlobalState<TYPES>>>,
 }
 /// Trait to hold the helper functions for the builder
 #[async_trait]
@@ -246,7 +263,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
             if let Entry::Occupied(qc_proposal_data) = self.quorum_proposal_payload_commit_to_quorum_proposal.entry(payload_vid_commitment.clone()) {
                 let qc_proposal_data = qc_proposal_data.remove();
-                self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender);
+                self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
             } else {
                 self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal_data);    
             }
@@ -277,7 +294,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
                 if let Entry::Occupied(da_proposal_data) = self.da_proposal_payload_commit_to_da_proposal.entry(payload_vid_commitment.clone()) {
                     let da_proposal_data = da_proposal_data.remove();
-                    self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender);
+                    self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
                 } else {
                     self.quorum_proposal_payload_commit_to_quorum_proposal.insert(payload_vid_commitment, qc_proposal_data.clone());
                 }
@@ -286,49 +303,54 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
     
     /// processing the decide event
-    async fn process_decide_event(&mut self,  decide_msg: DecideMessage<TYPES>)
+    async fn process_decide_event(&mut self,  decide_msg: DecideMessage<TYPES>) -> Option<Status>
     {
+
         let leaf_chain = decide_msg.leaf_chain;
         let qc = decide_msg.qc;
         let block_size = decide_msg.block_size;
 
-        // get the most recent decide parent commitment as the first entry in the leaf_chain(sorted by descreasing view number)
-        // let latest_decide_parent_commitment = leaf_chain[0].parent_commitment;
-        // now we use this decide_parent_commitment to build blocks off
+        
+        let latest_decide_parent_commitment = leaf_chain[0].parent_commitment;
+        
+        let latest_decide_commitment = leaf_chain[0].commit();
+        
+        let leaf_view_number = leaf_chain[0].view_number;
 
+        if self.built_from_view_vid_leaf.0 <= leaf_view_number{
+            println!("The decide event is not for the next view, so ignoring it");
+            return Some(Status::ShouldExit);
+        }
 
-        // do local pruning based on decide event data
-        // iterate over all the decide leaves and extract out the transactions contained inside it
-        // for each transaction, check if it exists in the local tx pool, if yes, then remove it from the local tx pool
-        for leaf in leaf_chain.iter() {
-            // get the block payload
-            // constrain its type to be of type TestBlockPayload
-            let block_payload = leaf.get_block_payload();
-            match block_payload{
-                Some(block_payload) => {
-                    println!("Block payload in decide event {:?}", block_payload);
-                    let metadata = leaf.get_block_header().metadata();
-                    let transactions_commitments = block_payload.transaction_commitments(&metadata);
-                    // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx
-                    //let transactions:Vec<TYPES::Transaction> = vec![];
-                    for tx_hash in transactions_commitments.iter() {
-                        // remove the transaction from the timestamp_to_tx map
-                        if let Some((timestamp, _, _)) = self.tx_hash_to_available_txns.get(&tx_hash) {
-                            if self.timestamp_to_tx.contains_key(timestamp) {
-                                self.timestamp_to_tx.remove(timestamp);
-                            }
-                            self.tx_hash_to_available_txns.remove(&tx_hash);
+        let block_payload = leaf_chain[0].get_block_payload();
+        match block_payload{
+            Some(block_payload) => {
+                println!("Block payload in decide event {:?}", block_payload);
+                let metadata = leaf_chain[0].get_block_header().metadata();
+                let transactions_commitments = block_payload.transaction_commitments(&metadata);
+                // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx
+                //let transactions:Vec<TYPES::Transaction> = vec![];
+                for tx_hash in transactions_commitments.iter() {
+                    // remove the transaction from the timestamp_to_tx map
+                    if let Some((timestamp, _, _)) = self.tx_hash_to_available_txns.get(&tx_hash) {
+                        if self.timestamp_to_tx.contains_key(timestamp) {
+                            self.timestamp_to_tx.remove(timestamp);
                         }
-                        
-                        // remove from the included_txns set also
-                        self.included_txns.remove(&tx_hash);
+                        self.tx_hash_to_available_txns.remove(&tx_hash);
                     }
-                },
-                None => {
-                    println!("Block payload is none");
+                    
+                    // maybe in the future, remove from the included_txns set also
+                    // self.included_txns.remove(&tx_hash);
                 }
+            },
+            None => {
+                println!("Block payload is none");
             }
         }
+
+        self.global_state.lock().remove_handles(self.built_from_view_vid_leaf.1, self.block_hashes).await;
+
+        return Some(Status::ShouldContinue);
     }
 
     // spawn a clone of the builder state
@@ -343,7 +365,6 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             parent_commitment: quorum_proposal.justify_qc.get_data().leaf_commit,
             block_header: quorum_proposal.block_header.clone(),
             block_payload: None,
-            rejected: vec![],
             proposer_id: leader,
         };
         self.built_from_view_vid_leaf.2 = leaf.commit();
@@ -362,49 +383,41 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 txn_info.remove_entry();
             });
         
-        self.event_loop();
+        self.event_loop().await;
     }
 
      // build a block
-    async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<Vec<TYPES::Transaction>>{
-        let mut block_txns:Vec<TYPES::Transaction> = vec![];
+    async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<ResponseMessage>{
 
-        // if we have a matching da for the current da proposal, then we can build a block off it
-        if self.quorum_proposal_payload_commit_to_quorum_proposal.contains_key(&matching_vid) && self.da_proposal_payload_commit_to_da_proposal.contains_key(&matching_vid){
-            // can spawn or call a function to build a block off it
-            // get the current system time
-            let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
-            // start making off a block using the txns from the local pool
-            // iterate over the timestamp_to_tx map and get the txns with lowest timestamp first
-            let mut to_remove_timestamps:Vec<TxTimeStamp> = vec![];
-            let mut to_remove_tx_hashes:Vec<Commitment<TYPES::Transaction>> = vec![];
-
-            for (timestamp, tx_hash) in self.timestamp_to_tx.iter() {
-                // get the transaction from the tx_hash_to_tx map
-                if let Some((_, tx, _)) = self.tx_hash_to_available_txns.get(tx_hash){
-                    // add the transaction to the block_txns if it not already included
-                    if !self.included_txns.contains(tx_hash) {
-                        // include into the current building block
-                        block_txns.push(tx.clone());
-                        // include in the included tx set
-                        self.included_txns.insert(tx_hash.clone());
-                        
-                    }
-                    to_remove_tx_hashes.push(*tx_hash);
-                }
-                to_remove_timestamps.push(*timestamp);
-            }
-
-            // iterate over the to_remove_tx_hashes and remove them from the tx_hash_to_available_txns map
-            for tx_hash in to_remove_tx_hashes.iter() {
-                self.tx_hash_to_available_txns.remove(tx_hash);
-            }
-            // iterate over the to_remove_timestamps and remove them from the timestamp_to_tx map
-            for timestamp in to_remove_timestamps.iter() {
-                self.timestamp_to_tx.remove(timestamp);
-            }
-            return Some(block_txns);
+        if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
+            self.timestamp_to_tx.iter().filter_map(|(ts, tx_hash)| {
+                self.tx_hash_to_available_txns.get(tx_hash).map(|(ts, tx, source)| {
+                    tx.clone()
+                })
+        })) {
+            
+            let block_hash = payload.builder_hash(&metadata);
+            let block_size = payload.size(&metadata); // TODO: figure out
+            let offered_fee = 0;
+            
+            
+            
+            let join_handle = task::spawn(async move |block_hash, payload, metadata| {
+                // TODO: Disperse Operation: May be talk to @Gus about it // https://github.com/EspressoSystems/HotShot/blob/main/crates/task-impls/src/vid.rs#L97-L98
+                // calculate vid shares
+                let vid = VidScheme::new(chunk_size, num_quorum_committee, &srs).unwrap();
+                vid.disperse(encoded_transactions.clone()).unwrap();
+                
+                
+                
+            });
+        
+        
+            self.service_handle.global_state.block_map.insert(block_hash, (payload, metadata, join_handle));
+        
+            return ResponseMessage(block_hash, block_size, offered_fee);
         }
+
         None
     }
 
@@ -417,6 +430,9 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
 
                             let requested_vid_commitment = req.requested_vid_commitment;
                             
+                            if requested_vid_commitment == self.built_from_view_vid_leaf.1{
+                                    self.build_block(requested_vid_commitment).await;
+                            }
                         }
                     //     //... handle requests
                     //selft says do I have a block for this set of txns? if so, return that header?? MPSC [async_compatility]
@@ -498,7 +514,7 @@ pub enum MessageType<TYPES: BuilderType>{
 }
 
 impl<TYPES:BuilderType> BuilderState<TYPES>{
-    pub fn new(builder_id: (VerKey, SignKey), view_vid_leaf:(TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>), tx_receiver: BroadcastReceiver<MessageType<TYPES>>, decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>, req_receiver: BroadcastReceiver<MessageType<TYPES>>)-> Self{
+    pub fn new(builder_id: (VerKey, SignKey), view_vid_leaf:(TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>), tx_receiver: BroadcastReceiver<MessageType<TYPES>>, decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>, req_receiver: BroadcastReceiver<MessageType<TYPES>>, global_state: Arc<RwLock<GlobalState<TYPES>>>)-> Self{
        BuilderState{
                     builder_id: builder_id,
                     timestamp_to_tx: BTreeMap::new(),
@@ -513,6 +529,7 @@ impl<TYPES:BuilderType> BuilderState<TYPES>{
                     req_receiver: req_receiver,
                     da_proposal_payload_commit_to_da_proposal: HashMap::new(),
                     quorum_proposal_payload_commit_to_quorum_proposal: HashMap::new(),
+                    global_state: global_state,
                 } 
    }
 

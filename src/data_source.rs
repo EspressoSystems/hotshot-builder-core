@@ -37,7 +37,7 @@ use hotshot_types::{
     event::EventType,
     message::{MessageKind, SequencingMessage},
     traits::{
-        election::Membership, node_implementation::NodeType, state::ConsensusTime, storage::Storage,
+        election::Membership, node_implementation::NodeType, storage::Storage,
     },
 };
 use hotshot_types::{data::Leaf, simple_certificate::QuorumCertificate};

@@ -39,7 +39,7 @@ use hotshot_types::{
     event::{EventType, Event},
     message::{MessageKind, SequencingMessage},
     traits::{
-        election::Membership, node_implementation::NodeType as BuilderType, state::ConsensusTime, storage::Storage,
+        election::Membership, node_implementation::NodeType as BuilderType, storage::Storage,
         signature_key::SignatureKey,block_contents::BlockHeader, consensus_api::ConsensusApi
     },
 };
@@ -65,6 +65,15 @@ pub struct GlobalState<Types: BuilderType>{
     pub vid_to_potential_builder_state: HashMap<VidCommitment, BuilderState<Types>>,
 }
 
+impl GlobalState<Types: BuilderType>{
+    pub fn removed_handles(&mut self, vidcommitment: VidCommitment, block_hashes: Vec<BlockHash>) {
+        self.vid_to_potential_builder_state.remove(&vidcommitment);
+        for block_hash in block_hashes {
+            self.block_hash_to_block.remove(&block_hash);
+        }
+    }
+}
+// impl api // from the hs-builder-api/src/
 /// Run an instance of the default Espresso builder service.
 pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplementation<Types>, D>(
     options: Options,
@@ -73,7 +82,9 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
     tx_sender: BroadcastSender<MessageType<Types>>,
     decide_sender: BroadcastSender<MessageType<Types>>,
     da_sender: BroadcastSender<MessageType<Types>>,
-    qc_sender: BroadcastSender<MessageType<Types>>
+    qc_sender: BroadcastSender<MessageType<Types>>,
+    req_sender: BroadcastSender<MessageType<Types>>,
+    response_receiver: BroadcastReceiver<ResponseMessage<Types>>,
 
 ) -> Result<(),()>
 //where //TODO
