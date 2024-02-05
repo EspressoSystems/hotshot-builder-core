@@ -13,7 +13,7 @@ use bincode::de;
 use futures::{Future, select};
 use async_std::task::{self, Builder};
 use async_trait::async_trait;
-//use async_compatibility_layer::channel::{unbounded, UnboundedSender, UnboundedStream, UnboundedReceiver};
+use async_compatibility_layer::{channel::{UnboundedStream,UnboundedReceiver, UnboundedSender}, art::async_spawn, };
 use async_lock::RwLock;
 use hotshot_task_impls::transactions;
 use hotshot_types::traits::block_contents::{vid_commitment, TestableBlock};
@@ -154,7 +154,7 @@ pub struct BuilderState<TYPES: BuilderType>{
     pub global_state: Arc::<RwLock::<GlobalState<TYPES>>>,
 
     // response sender
-    pub response_sender: BroadcastSender<ResponseMessage>,
+    pub response_sender: UnboundedSender<ResponseMessage>,
 
     // quorum membership
     pub quorum_membership: Arc<TYPES::Membership>,
@@ -470,7 +470,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                     match response{
                                         Some(response)=>{
                                             // send the response back
-                                            self.response_sender.broadcast(response).await.unwrap();
+                                            self.response_sender.send(response).await.unwrap();
                                         }
                                         None => {
                                             println!("No response to send");
@@ -557,7 +557,7 @@ pub enum MessageType<TYPES: BuilderType>{
 }
 
 impl<TYPES:BuilderType> BuilderState<TYPES>{
-    pub fn new(builder_id: (VerKey, SignKey), view_vid_leaf:(TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>), tx_receiver: BroadcastReceiver<MessageType<TYPES>>, decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>, req_receiver: BroadcastReceiver<MessageType<TYPES>>, global_state: Arc<RwLock<GlobalState<TYPES>>>, response_sender: BroadcastSender<ResponseMessage>, quorum_membership: TYPES::Membership)-> Self{
+    pub fn new(builder_id: (VerKey, SignKey), view_vid_leaf:(TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>), tx_receiver: BroadcastReceiver<MessageType<TYPES>>, decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>, req_receiver: BroadcastReceiver<MessageType<TYPES>>, global_state: Arc<RwLock<GlobalState<TYPES>>>, response_sender: UnboundedSender<ResponseMessage>, quorum_membership: TYPES::Membership)-> Self{
        BuilderState{
                     builder_id: builder_id,
                     timestamp_to_tx: BTreeMap::new(),

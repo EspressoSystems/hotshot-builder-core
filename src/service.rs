@@ -19,7 +19,7 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 pub use hotshot::{traits::NodeImplementation, types::SystemContextHandle, HotShotConsensusApi};
-//use async_compatibility_layer::{channel::UnboundedStream, art::async_spawn};
+use async_compatibility_layer::{channel::{UnboundedStream,UnboundedReceiver, UnboundedSender}, art::async_spawn, };
 use async_lock::RwLock;
 use commit::Committable;
 use futures::{Stream, stream::StreamExt};
@@ -69,6 +69,7 @@ pub struct GlobalState<Types: BuilderType>{
     pub block_hash_to_block: HashMap<BuilderCommitment, Types::BlockPayload>,
     pub vid_to_potential_builder_state: HashMap<VidCommitment, BuilderState<Types>>,
     pub request_sender: BroadcastSender<RequestMessage>,
+    pub response_receiver: UnboundedReceiver<ResponseMessage>,
 }
 
 impl<Types: BuilderType> GlobalState<Types>{
