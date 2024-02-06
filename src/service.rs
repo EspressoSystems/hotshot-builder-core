@@ -64,7 +64,7 @@ pub struct Options {
     pub port: u16
 }
 //
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct GlobalState<Types: BuilderType>{
     pub block_hash_to_block: HashMap<BuilderCommitment, Types::BlockPayload>,
     pub vid_to_potential_builder_state: HashMap<VidCommitment, BuilderState<Types>>,
@@ -107,6 +107,7 @@ impl<Types:BuilderType + NodeType> BuilderDataSource<Types> for GlobalState<Type
         unimplemented!()
     }
 }
+
 
 // impl api // from the hs-builder-api/src/
 /// Run an instance of the default Espresso builder service.

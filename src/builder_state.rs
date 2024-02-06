@@ -43,7 +43,7 @@ use hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal, VidCommitment, VidScheme, VidSchemeTrait, test_srs},
     simple_certificate::QuorumCertificate,
     message::Proposal,
-    traits::{block_contents::{BlockPayload, BlockHeader, Transaction}, signature_key::SignatureKey},
+    traits::{block_contents::{BlockPayload, BlockHeader, Transaction}, signature_key::SignatureKey, election::Membership},
     utils::BuilderCommitment
 };
 use commit::{Commitment, Committable};
@@ -274,7 +274,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 self_clone.spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
 
                 // register the clone to the global state
-                self.global_state.write_arc().builder_states.insert(payload_vid_commitment, self_clone);
+                self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
             } else {
                 self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal_data);    
             }
@@ -309,7 +309,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                     self_clone.spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
 
                     // registed the clone to the global state
-                    self.global_state.write_arc().builder_states.insert(payload_vid_commitment, self_clone);
+                    self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
                 
                 } else {
                     self.quorum_proposal_payload_commit_to_quorum_proposal.insert(payload_vid_commitment, qc_proposal_data.clone());
@@ -430,6 +430,8 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             
             
             // get the number of quorum committee members to be used for VID calculation
+            //let quo_membership = Arc::into_inner(self.quorum_membership).unwrap();//.clone();
+            
             let num_quorum_committee = self.quorum_membership.total_nodes();
 
             // TODO <https://github.com/EspressoSystems/HotShot/issues/1686>
@@ -563,10 +565,11 @@ pub enum MessageType<TYPES: BuilderType>{
     DecideMessage(DecideMessage<TYPES>),
     DAProposalMessage(DAProposalMessage<TYPES>),
     QCMessage(QCMessage<TYPES>),
+    RequestMessage(RequestMessage),
 }
 
 impl<TYPES:BuilderType> BuilderState<TYPES>{
-    pub fn new(builder_id: (VerKey, SignKey), view_vid_leaf:(TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>), tx_receiver: BroadcastReceiver<MessageType<TYPES>>, decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>, req_receiver: BroadcastReceiver<MessageType<TYPES>>, global_state: Arc<RwLock<GlobalState<TYPES>>>, response_sender: UnboundedSender<ResponseMessage>, quorum_membership: TYPES::Membership)-> Self{
+    pub fn new(builder_id: (VerKey, SignKey), view_vid_leaf:(TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>), tx_receiver: BroadcastReceiver<MessageType<TYPES>>, decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>, req_receiver: BroadcastReceiver<MessageType<TYPES>>, global_state: Arc<RwLock<GlobalState<TYPES>>>, response_sender: UnboundedSender<ResponseMessage>, quorum_membership: Arc<TYPES::Membership>)-> Self{
        BuilderState{
                     builder_id: builder_id,
                     timestamp_to_tx: BTreeMap::new(),
