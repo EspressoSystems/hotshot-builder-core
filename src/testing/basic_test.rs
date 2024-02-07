@@ -15,7 +15,7 @@ pub use hotshot_testing::{
     state_types::{TestInstanceState, TestValidatedState},
 };
 pub use hotshot_types::{
-    traits::node_implementation::NodeType as BuilderType,
+    traits::node_implementation::{NodeType as BuilderType, ConsensusTime},
     data::{ViewNumber, Leaf, DAProposal, QuorumProposal},
     simple_certificate::QuorumCertificate,
     signature_key::{BLSPubKey,BLSPrivKey},

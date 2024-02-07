@@ -6,9 +6,10 @@
 // use hotshot_testing::block_types::{TestBlockHeader, TestBlockPayload, TestTransaction};
 //use hotshot_task::event_stream::{ChannelStream, EventStream, StreamId};
 
+//use hotshot_task_impls::da;
 // including the following from the hotshot
 use hotshot_types::{
-    traits::{node_implementation::NodeType as BuilderType, block_contents::vid_commitment, signature_key::SignatureKey},
+    traits::{node_implementation::{NodeType as BuilderType,ConsensusTime}, block_contents::vid_commitment, signature_key::SignatureKey},
     data::{DAProposal, Leaf, QuorumProposal, VidCommitment, VidScheme, VidSchemeTrait, test_srs},
     simple_certificate::QuorumCertificate,
     message::Proposal,
@@ -234,7 +235,12 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // check for view number
         // check for signature validation and correct leader (both of these are done in the service.rs i.e. before putting hotshot events onto the da channel)
 
-        if da_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0{
+        // bootstrapping part
+        // if the view number is 0 then keep going, and don't return from it
+        if self.built_from_view_vid_leaf.0.get_u64() == 0 {
+            println!("In bootstrapping phase");
+        }
+        else if da_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0{
                 println!("View number does not match the built_from_view, so ignoring it");
                 return;
         }
@@ -285,8 +291,13 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // check for the leaf commitment
         // check for signature validation and correct leader (both of these are done in the service.rs i.e. before putting hotshot events onto the da channel)
         // can use this commitment to match the da proposal or vice-versa
-        // TODO: if this special value
-        if qc_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0 ||
+       
+        // bootstrapping part
+        // if the view number is 0 then keep going, and don't return from it
+        if self.built_from_view_vid_leaf.0.get_u64() == 0{
+            println!("In bootstrapping phase");
+        }
+        else if qc_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0 ||
            qc_msg.proposal.data.justify_qc.get_data().leaf_commit != self.built_from_view_vid_leaf.2 {
                 println!("Either View number or leaf commit does not match the built-in info, so ignoring it");
                 return;
@@ -332,13 +343,22 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         
         let leaf_view_number = leaf_chain[0].view_number;
 
-        if self.built_from_view_vid_leaf.0 <= leaf_view_number{
+        // bootstrapping case
+        // handle the case when we hear a decide event before we have atleast one clone, in that case, we might exit the builder
+        // and not make any progress; so we need to handle that case
+        // Adhoc logic: if the number of subscrived receivers are more than 1, it means that there exists a clone and we can safely exit
+        if self.built_from_view_vid_leaf.0.get_u64() == 0 && self.tx_receiver.receiver_count() <=1 {
+            println!("In bootstrapping phase");
+            //return Some(Status::ShouldContinue);
+        }
+        else if self.built_from_view_vid_leaf.0 <= leaf_view_number{
             println!("The decide event is not for the next view, so ignoring it");
                // convert leaf commitments into buildercommiments
             //let leaf_commitments:Vec<BuilderCommitment> = leaf_chain.iter().map(|leaf| leaf.get_block_payload().unwrap().builder_commitment(&leaf.get_block_header().metadata())).collect();
             
             // remove the handles from the global state
             self.global_state.write_arc().await.remove_handles(self.built_from_view_vid_leaf.1, self.builder_commitments.clone());
+
             return Some(Status::ShouldExit);
         }
 
@@ -540,9 +560,20 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                 MessageType::DecideMessage(rdecide_msg) => {
                                     println!("Received decide msg in builder {}: {:?} from index {}", self.builder_keys.0, rdecide_msg, channel_index);
                                     // store in the rdecide_msgs
-                                    self.process_decide_event(rdecide_msg).await;
+                                    let decide_status = self.process_decide_event(rdecide_msg).await;
                                     // TODO
                                     // if should exit, then break out of the loop
+                                    match decide_status{
+                                        Some(Status::ShouldExit) => {
+                                            break;
+                                        }
+                                        Some(Status::ShouldContinue) => {
+                                            continue;
+                                        }
+                                        None => {
+                                            continue;
+                                        }
+                                    }
                                 }
 
                                 // DA proposal message
