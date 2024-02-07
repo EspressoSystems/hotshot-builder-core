@@ -8,15 +8,15 @@
 
 // including the following from the hotshot
 use hotshot_types::{
-    traits::{node_implementation::NodeType as BuilderType, block_contents::vid_commitment},
+    traits::{node_implementation::NodeType as BuilderType, block_contents::vid_commitment, signature_key::SignatureKey},
     data::{DAProposal, Leaf, QuorumProposal, VidCommitment, VidScheme, VidSchemeTrait, test_srs},
     simple_certificate::QuorumCertificate,
     message::Proposal,
     traits::{block_contents::{BlockPayload, BlockHeader}, election::Membership},
     utils::BuilderCommitment,
-    vote::Certificate
+    vote::Certificate,
 };
-use jf_primitives::signatures::bls_over_bn254::{SignKey, VerKey};
+//use jf_primitives::signatures::bls_over_bn254::{SignKey, VerKey};
 use commit::{Commitment, Committable};
 
 use futures::future::select_all;
@@ -92,7 +92,7 @@ pub enum Status {
 #[derive(Debug, Clone)]
 pub struct BuilderState<TYPES: BuilderType>{
 
-    pub builder_id: (VerKey, SignKey), //TODO (pub,priv) key of the builder, may be good to keep a ref
+    pub builder_keys: (TYPES::SignatureKey, <<TYPES as BuilderType>::SignatureKey as SignatureKey>::PrivateKey), //TODO (pub,priv) key of the builder, may be good to keep a ref
     
     // timestamp to tx hash, used for ordering for the transactions
     pub timestamp_to_tx: BTreeMap<TxTimeStamp, Commitment<TYPES::Transaction>>,
@@ -496,7 +496,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                 
                                 // request message
                                 MessageType::RequestMessage(req) => {
-                                    println!("Received request msg in builder {}: {:?} from index {}", self.builder_id.0, req, channel_index);
+                                    println!("Received request msg in builder {}: {:?} from index {}", self.builder_keys.0, req, channel_index);
                                     
                                     self.process_block_request(req).await;
                                     
@@ -504,7 +504,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
 
                                 // transaction message
                                 MessageType::TransactionMessage(rtx_msg) => {
-                                    println!("Received tx msg in builder {}: {:?} from index {}", self.builder_id.0, rtx_msg, channel_index);
+                                    println!("Received tx msg in builder {}: {:?} from index {}", self.builder_keys.0, rtx_msg, channel_index);
                                     
                                     // get the content from the rtx_msg's inside vec
                                     // Pass the tx msg to the handler
@@ -518,7 +518,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
 
                                 // decide message
                                 MessageType::DecideMessage(rdecide_msg) => {
-                                    println!("Received decide msg in builder {}: {:?} from index {}", self.builder_id.0, rdecide_msg, channel_index);
+                                    println!("Received decide msg in builder {}: {:?} from index {}", self.builder_keys.0, rdecide_msg, channel_index);
                                     // store in the rdecide_msgs
                                     self.process_decide_event(rdecide_msg).await;
                                     // TODO
@@ -527,13 +527,13 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
 
                                 // DA proposal message
                                 MessageType::DAProposalMessage(rda_msg) => {
-                                    println!("Received da proposal msg in builder {}: {:?} from index {}", self.builder_id.0, rda_msg, channel_index);
+                                    println!("Received da proposal msg in builder {}: {:?} from index {}", self.builder_keys.0, rda_msg, channel_index);
                                                         
                                     self.process_da_proposal(rda_msg).await;
                                 }
                                 // QC proposal message
                                 MessageType::QCMessage(rqc_msg) => {
-                                    println!("Received qc msg in builder {}: {:?} from index {}", self.builder_id.0, rqc_msg, channel_index);
+                                    println!("Received qc msg in builder {}: {:?} from index {}", self.builder_keys.0, rqc_msg, channel_index);
                                     self.process_quorum_proposal(rqc_msg).await;
                                 }
                             }
@@ -562,12 +562,12 @@ pub enum MessageType<TYPES: BuilderType>{
 }
 
 impl<TYPES:BuilderType> BuilderState<TYPES>{
-    pub fn new(builder_id: (VerKey, SignKey), view_vid_leaf:(TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>), tx_receiver: BroadcastReceiver<MessageType<TYPES>>, 
+    pub fn new(builder_keys: (TYPES::SignatureKey, <<TYPES as BuilderType>::SignatureKey as SignatureKey>::PrivateKey), view_vid_leaf:(TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>), tx_receiver: BroadcastReceiver<MessageType<TYPES>>, 
                decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>, 
                req_receiver: BroadcastReceiver<MessageType<TYPES>>, global_state: Arc<RwLock<GlobalState<TYPES>>>, response_sender: UnboundedSender<ResponseMessage<TYPES>>, 
                quorum_membership: Arc<TYPES::Membership>)-> Self{
        BuilderState{
-                    builder_id: builder_id,
+                    builder_keys: builder_keys,
                     timestamp_to_tx: BTreeMap::new(),
                     tx_hash_to_available_txns: HashMap::new(),
                     included_txns: HashSet::new(),
