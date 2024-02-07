@@ -26,6 +26,7 @@ use async_std::task;
 use async_trait::async_trait;
 use async_compatibility_layer::channel:: UnboundedSender;
 use async_lock::RwLock;
+//use sha2::digest::crypto_common::rand_core::block;
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -82,6 +83,8 @@ pub struct ResponseMessage<TYPES: BuilderType>{
     pub block_payload: TYPES::BlockPayload,
     pub metadata: <<TYPES as BuilderType>::BlockPayload as BlockPayload>::Metadata,
     pub join_handle: Arc::<JoinHandle<()>>,
+    pub signature:<<TYPES as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
+    pub sender: TYPES::SignatureKey,
 }
 
 pub enum Status {
@@ -423,9 +426,9 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             let encoded_txns:Vec<u8> = payload.encode().unwrap().into_iter().collect();
 
 
-            let block_size = encoded_txns.len() as u64;
+            let block_size: u64 = encoded_txns.len() as u64;
             
-            let offered_fee = 0;
+            let offered_fee: u64 = 0;
             
             
             // get the number of quorum committee members to be used for VID calculation
@@ -451,7 +454,20 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             //self.global_state.write().block_hash_to_block.insert(block_hash, (payload, metadata, join_handle));
             //let mut global_state = self.global_state.write().unwrap();
             //self.global_state.write_arc().await.block_hash_to_block.insert(block_hash.clone(), (payload, metadata, join_handle));
-            return Some(ResponseMessage{block_hash: block_hash, block_size: block_size, offered_fee: offered_fee, block_payload: payload, metadata: metadata, join_handle: Arc::new(join_handle)});
+            
+            // to sign combine the block_hash i.e builder commitment, block size and offered fee
+            let mut combined_bytes: Vec<u8> = Vec::new();
+            combined_bytes.extend_from_slice(&block_size.to_be_bytes());
+            combined_bytes.extend_from_slice(block_hash.as_ref());
+            combined_bytes.extend_from_slice(&offered_fee.to_be_bytes());
+
+            let signature_over_block_info = <TYPES as BuilderType>::SignatureKey::sign(
+                &self.builder_keys.1, combined_bytes.as_slice())
+                .expect("Failed to sign tx hash");
+            //let signature = self.builder_keys.0.sign(&block_hash);
+            return Some(ResponseMessage{block_hash: block_hash, block_size: block_size, offered_fee: offered_fee, 
+                                        block_payload: payload, metadata: metadata, join_handle: Arc::new(join_handle), 
+                                        signature: signature_over_block_info, sender: self.builder_keys.0.clone()});
         };
 
         None
@@ -467,7 +483,11 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                         // send the response back
                         self.response_sender.send(response.clone()).await.unwrap();
                         //let inner = Arc::unwrap_or_clone(response.join_handle);
-                        self.global_state.write_arc().await.block_hash_to_block.insert(response.block_hash, (response.block_payload, response.metadata, response.join_handle));
+                        // generate signature over the block payload and metadata and sent it back
+                        
+                        // again sign over the block hash
+                        
+                        self.global_state.write_arc().await.block_hash_to_block.insert(response.block_hash, (response.block_payload, response.metadata, response.join_handle, response.signature, response.sender));
                     }
                     None => {
                         println!("No response to send");

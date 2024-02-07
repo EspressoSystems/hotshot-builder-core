@@ -27,7 +27,7 @@ use hotshot_types::{
     utils::BuilderCommitment,
     data::VidCommitment
 };
-use hs_builder_api::{data_source::BuilderDataSource, block_metadata::BlockMetadata, builder::BuildError};
+use hs_builder_api::{data_source::BuilderDataSource, block_info::{AvailableBlockData, AvailableBlockInfo}, builder::BuildError};
 
 use futures::stream::StreamExt;
 use async_compatibility_layer::channel::UnboundedReceiver;
@@ -52,7 +52,8 @@ pub struct Options {
 #[derive(Debug)]
 pub struct GlobalState<Types: BuilderType>{
     //pub block_hash_to_block: HashMap<BuilderCommitment, Types::BlockPayload>,
-    pub block_hash_to_block: HashMap<BuilderCommitment, (Types::BlockPayload, <<Types as BuilderType>::BlockPayload as BlockPayload>::Metadata, Arc<JoinHandle<()>>)>,
+    pub block_hash_to_block: HashMap<BuilderCommitment, (Types::BlockPayload, <<Types as BuilderType>::BlockPayload as BlockPayload>::Metadata, Arc<JoinHandle<()>>, 
+                                                            <<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,Types::SignatureKey)>,
     //pub vid_to_potential_builder_state: HashMap<VidCommitment, BuilderState<Types>>,
     pub request_sender: BroadcastSender<RequestMessage>,
     pub response_receiver: UnboundedReceiver<ResponseMessage<Types>>,
@@ -78,7 +79,7 @@ where
     async fn get_available_blocks(
         &self,
         for_parent: &VidCommitment,
-    ) -> Result<Vec<BlockMetadata<Types>>, BuildError> {
+    ) -> Result<Vec<AvailableBlockInfo<Types>>, BuildError> {
 
         let req_msg = RequestMessage{
             requested_vid_commitment: for_parent.clone(),
@@ -88,10 +89,12 @@ where
         
         match response_received {
             Ok(response) =>{
-                let block_metadata = BlockMetadata::<Types>{
+                let block_metadata = AvailableBlockInfo::<Types>{
                     block_hash: response.block_hash,
                     block_size: response.block_size,
                     offered_fee: response.offered_fee,
+                    signature: response.signature,
+                    sender: response.sender,
                     _phantom: Default::default(),
                 };
                 Ok(vec![block_metadata])
@@ -106,11 +109,18 @@ where
         &self,
         block_hash: &BuilderCommitment,
         signature: &<<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
-    ) -> Result<Types::BlockPayload, BuildError> {
+    ) -> Result<AvailableBlockData<Types>, BuildError> {
         // TODO: Verify the signature??
         
         if let Some(block) = self.block_hash_to_block.get(block_hash){
-            Ok(block.0.clone())
+            //Ok(block.0.clone())
+            let block_data = AvailableBlockData::<Types>{
+                block_payload: block.0.clone(),
+                signature: block.3.clone(),
+                sender: block.4.clone(),
+                _phantom: Default::default(),
+            };
+            Ok(block_data)
         } else {
             Err(BuildError::Error{message: "Block not found".to_string()})
         }
