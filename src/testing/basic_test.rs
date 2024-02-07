@@ -224,9 +224,9 @@ mod tests {
 
         assert!(quorum_membershiop.total_nodes() == TEST_NUM_NODES_IN_VID_COMPUTATION);
 
-        // let mut builder_state = BuilderState::<TestTypes>::new((builder_pub__key, builder_private_key), 
-        //                                                     (ViewNumber::new(0), genesis_vid_commitment(), Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage()), 
-        //                                                     tx_receiver, decide_receiver, da_receiver, qc_receiver, req_receiver, global_state, res_sender, quorum_membershiop);    
+        let mut builder_state = BuilderState::<TestTypes>::new((builder_pub_key, builder_private_key), 
+                                                            (ViewNumber::new(0), genesis_vid_commitment(), Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage()), 
+                                                            tx_receiver, decide_receiver, da_receiver, qc_receiver, req_receiver, global_state, res_sender, Arc::new(quorum_membershiop));    
         
 
 
