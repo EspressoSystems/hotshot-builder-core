@@ -257,7 +257,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // generate the vid commitment; num nodes are received through hotshot api in service.rs and passed along with message onto channel
         let total_nodes = da_msg.total_nodes;
 
-        let payload_vid_commitment = vid_commitment(&encoded_txns, total_nodes);
+        let payload_vid_commitment = vid_commitment(&encoded_txns, total_nodes); 
         
         if !self.da_proposal_payload_commit_to_da_proposal.contains_key(&payload_vid_commitment) {
             let da_proposal_data = DAProposal {

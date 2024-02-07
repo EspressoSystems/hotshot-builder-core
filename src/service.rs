@@ -55,7 +55,7 @@ pub struct GlobalState<Types: BuilderType>{
     pub block_hash_to_block: HashMap<BuilderCommitment, (Types::BlockPayload, <<Types as BuilderType>::BlockPayload as BlockPayload>::Metadata, Arc<JoinHandle<()>>, 
                                                             <<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,Types::SignatureKey)>,
     //pub vid_to_potential_builder_state: HashMap<VidCommitment, BuilderState<Types>>,
-    pub request_sender: BroadcastSender<RequestMessage>,
+    pub request_sender: BroadcastSender<MessageType<Types>>,
     pub response_receiver: UnboundedReceiver<ResponseMessage<Types>>,
 }
 
@@ -65,6 +65,13 @@ impl<Types: BuilderType> GlobalState<Types>{
         println!("Removing handles for vid commitment {:?}", vidcommitment);
         for block_hash in block_hashes {
             self.block_hash_to_block.remove(&block_hash);
+        }
+    }
+    pub fn new(request_sender: BroadcastSender<MessageType<Types>>, response_receiver: UnboundedReceiver<ResponseMessage<Types>>) -> Self {
+        GlobalState{
+            block_hash_to_block: Default::default(),
+            request_sender: request_sender,
+            response_receiver: response_receiver,
         }
     }
 }
@@ -84,7 +91,7 @@ where
         let req_msg = RequestMessage{
             requested_vid_commitment: for_parent.clone(),
         };
-        self.request_sender.broadcast(req_msg).await.unwrap();
+        self.request_sender.broadcast(MessageType::RequestMessage(req_msg)).await.unwrap();
         let response_received = self.response_receiver.recv().await;
         
         match response_received {
