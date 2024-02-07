@@ -15,50 +15,34 @@
 //!     b. Quorum Proposal
 //!     c. Decide Event
 //!
-// TODO no warning for unused imports
-#![allow(unused_imports)]
 #![allow(unused_variables)]
-pub use hotshot::{traits::NodeImplementation, types::SystemContextHandle, HotShotConsensusApi};
-use async_compatibility_layer::{channel::{UnboundedStream,UnboundedReceiver, UnboundedSender}, art::async_spawn, };
-use async_lock::RwLock;
-use commit::Committable;
-use futures::{Stream, stream::StreamExt};
-use hotshot_task::{
-    boxed_sync,
-    event_stream::{ChannelStream, EventStream, StreamId},
-    global_registry::GlobalRegistry,
-    task::FilterEvent,
-    BoxSyncFuture,
-};
-use hotshot_task_impls::events::HotShotEvent;
-use hotshot_testing::state_types::TestTypes;
-use hotshot_types::{data::VidCommitment, simple_vote::QuorumData};
+use hotshot::{traits::NodeImplementation, types::SystemContextHandle, HotShotConsensusApi};
+use hotshot_task::task::FilterEvent;
 use hotshot_types::{
-    consensus::Consensus,
-    error::HotShotError,
-    event::{EventType, Event},
-    message::{MessageKind, SequencingMessage},
+    event::EventType,
     traits::{
-        election::Membership, node_implementation::NodeType as BuilderType, storage::Storage,
+        node_implementation::NodeType as BuilderType,
         signature_key::SignatureKey,block_contents::{BlockHeader,BlockPayload}, consensus_api::ConsensusApi
     },
-    utils::BuilderCommitment
+    utils::BuilderCommitment,
+    data::VidCommitment
 };
-use hotshot_types::{data::Leaf, simple_certificate::QuorumCertificate};
-use std::{collections::HashMap, sync::Arc};
-use tracing::error;
-
-//use crate::builder_state::{MessageType, BuilderType, TransactionMessage, DecideMessage, QuorumProposalMessage, QCMessage};
-use async_broadcast::{broadcast, Sender as BroadcastSender, Receiver as BroadcastReceiver};
-use futures::future::ready;
-use crate::builder_state::{BuilderState, MessageType, ResponseMessage, RequestMessage};
-use crate::builder_state::{TransactionMessage, TransactionSource, DecideMessage, DAProposalMessage, QCMessage};
-use tagged_base64::TaggedBase64;
-
 use hs_builder_api::{data_source::BuilderDataSource, block_metadata::BlockMetadata, builder::BuildError};
+
+use futures::stream::StreamExt;
+use async_compatibility_layer::channel::UnboundedReceiver;
+use async_broadcast::Sender as BroadcastSender;
 use async_trait::async_trait;
 use async_std::task::JoinHandle;
+
+use std::{collections::HashMap, sync::Arc};
+use tagged_base64::TaggedBase64;
+use tracing::error;
 use sha2::{Digest, Sha256};
+
+use crate::builder_state::{TransactionMessage, TransactionSource, DecideMessage, DAProposalMessage, QCMessage};
+use crate::builder_state::{ MessageType, ResponseMessage, RequestMessage};
+
 #[derive(clap::Args, Default)]
 pub struct Options {
     #[clap(short, long, env = "ESPRESSO_BUILDER_PORT")]
@@ -77,6 +61,7 @@ pub struct GlobalState<Types: BuilderType>{
 impl<Types: BuilderType> GlobalState<Types>{
     pub fn remove_handles(&mut self, vidcommitment: VidCommitment, block_hashes: Vec<BuilderCommitment>) {
         //self.vid_to_potential_builder_state.remove(&vidcommitment);
+        println!("Removing handles for vid commitment {:?}", vidcommitment);
         for block_hash in block_hashes {
             self.block_hash_to_block.remove(&block_hash);
         }
@@ -148,8 +133,6 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
     decide_sender: BroadcastSender<MessageType<Types>>,
     da_sender: BroadcastSender<MessageType<Types>>,
     qc_sender: BroadcastSender<MessageType<Types>>,
-    req_sender: BroadcastSender<MessageType<Types>>,
-
 ) -> Result<(),()>
 //where //TODO
     //Payload<Types>: availability::QueryablePayload
@@ -237,6 +220,7 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
                         }
                         // not sure whether we need it or not //TODO
                         EventType::ViewFinished{view_number} => {
+                            println!("View Finished Event for view number: {:?}", view_number);
                             unimplemented!("View Finished Event");
                         }
                         _ => {

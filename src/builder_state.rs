@@ -2,58 +2,42 @@
 // This file is part of the HotShot Builder Protocol.
 //
 
-#![allow(unused_imports)]
 #![allow(unused_variables)]
-use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::hash::BuildHasher;
-use std::marker::PhantomData;
-use std::sync::{Arc, Mutex};
-use bincode::de;
-use futures::{Future, select};
-use async_std::task::{self, Builder};
-use async_trait::async_trait;
-use async_compatibility_layer::{channel::{UnboundedStream,UnboundedReceiver, UnboundedSender}, art::async_spawn, };
-use async_lock::RwLock;
-use hotshot_task_impls::transactions;
-use hotshot_types::traits::block_contents::{vid_commitment, TestableBlock};
-use hotshot_types::vote::Certificate;
-use sha2::{Digest, Sha256};
-
-use hotshot::rand::seq::index;
-use hotshot_testing::block_types::{TestBlockHeader, TestBlockPayload, TestTransaction};
+// use hotshot_testing::block_types::{TestBlockHeader, TestBlockPayload, TestTransaction};
 //use hotshot_task::event_stream::{ChannelStream, EventStream, StreamId};
-use tokio_stream::StreamExt;
-
-use tokio_stream::wrappers::UnboundedReceiverStream;
-
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
-    fmt::{Debug, Formatter},
-};
-use futures::Stream;
-
-use std::time::{SystemTime, UNIX_EPOCH};
-use async_broadcast::{broadcast, TryRecvError, Sender as BroadcastSender, Receiver as BroadcastReceiver, RecvError};
 
 // including the following from the hotshot
 use hotshot_types::{
-    traits::node_implementation::NodeType as BuilderType,
+    traits::{node_implementation::NodeType as BuilderType, block_contents::vid_commitment},
     data::{DAProposal, Leaf, QuorumProposal, VidCommitment, VidScheme, VidSchemeTrait, test_srs},
     simple_certificate::QuorumCertificate,
     message::Proposal,
-    traits::{block_contents::{BlockPayload, BlockHeader, Transaction}, signature_key::SignatureKey, election::Membership},
-    utils::BuilderCommitment
+    traits::{block_contents::{BlockPayload, BlockHeader}, election::Membership},
+    utils::BuilderCommitment,
+    vote::Certificate
 };
+use jf_primitives::signatures::bls_over_bn254::{SignKey, VerKey};
 use commit::{Commitment, Committable};
 
-use jf_primitives::signatures::bls_over_bn254::{BLSOverBN254CurveSignatureScheme, KeyPair, SignKey, VerKey};
 use futures::future::select_all;
 use async_std::task::JoinHandle;
+use async_broadcast::{Receiver as BroadcastReceiver, RecvError};
+use async_std::task;
+use async_trait::async_trait;
+use async_compatibility_layer::channel:: UnboundedSender;
+use async_lock::RwLock;
+
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
+use std::time::SystemTime;
+use std::fmt::Debug;
+use std::cmp::PartialEq;
+
+use crate::service::GlobalState;
 
 pub type TxTimeStamp = u128;
-const NUM_NODES_IN_VID_COMPUTATION: usize = 8;
+//const NUM_NODES_IN_VID_COMPUTATION: usize = 8;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TransactionSource {
@@ -104,11 +88,6 @@ pub enum Status {
     ShouldExit,
     ShouldContinue,
 }
-
-use std::cmp::{PartialEq, Ord, PartialOrd};
-use std::hash::Hash;
-
-use crate::service::GlobalState;
 
 #[derive(Debug, Clone)]
 pub struct BuilderState<TYPES: BuilderType>{
