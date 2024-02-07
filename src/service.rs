@@ -40,7 +40,7 @@ use hotshot_types::{
     message::{MessageKind, SequencingMessage},
     traits::{
         election::Membership, node_implementation::NodeType as BuilderType, storage::Storage,
-        signature_key::SignatureKey,block_contents::BlockHeader, consensus_api::ConsensusApi
+        signature_key::SignatureKey,block_contents::{BlockHeader,BlockPayload}, consensus_api::ConsensusApi
     },
     utils::BuilderCommitment
 };
@@ -53,10 +53,11 @@ use async_broadcast::{broadcast, Sender as BroadcastSender, Receiver as Broadcas
 use futures::future::ready;
 use crate::builder_state::{BuilderState, MessageType, ResponseMessage, RequestMessage};
 use crate::builder_state::{TransactionMessage, TransactionSource, DecideMessage, DAProposalMessage, QCMessage};
-
+use tagged_base64::TaggedBase64;
 
 use hs_builder_api::{data_source::BuilderDataSource, block_metadata::BlockMetadata, builder::BuildError};
-
+use async_trait::async_trait;
+use async_std::task::JoinHandle;
 use sha2::{Digest, Sha256};
 #[derive(clap::Args, Default)]
 pub struct Options {
@@ -66,23 +67,28 @@ pub struct Options {
 //
 #[derive(Debug)]
 pub struct GlobalState<Types: BuilderType>{
-    pub block_hash_to_block: HashMap<BuilderCommitment, Types::BlockPayload>,
-    pub vid_to_potential_builder_state: HashMap<VidCommitment, BuilderState<Types>>,
+    //pub block_hash_to_block: HashMap<BuilderCommitment, Types::BlockPayload>,
+    pub block_hash_to_block: HashMap<BuilderCommitment, (Types::BlockPayload, <<Types as BuilderType>::BlockPayload as BlockPayload>::Metadata, Arc<JoinHandle<()>>)>,
+    //pub vid_to_potential_builder_state: HashMap<VidCommitment, BuilderState<Types>>,
     pub request_sender: BroadcastSender<RequestMessage>,
-    pub response_receiver: UnboundedReceiver<ResponseMessage>,
+    pub response_receiver: UnboundedReceiver<ResponseMessage<Types>>,
 }
 
 impl<Types: BuilderType> GlobalState<Types>{
     pub fn remove_handles(&mut self, vidcommitment: VidCommitment, block_hashes: Vec<BuilderCommitment>) {
-        self.vid_to_potential_builder_state.remove(&vidcommitment);
+        //self.vid_to_potential_builder_state.remove(&vidcommitment);
         for block_hash in block_hashes {
             self.block_hash_to_block.remove(&block_hash);
         }
     }
 }
-use hotshot_types::traits::node_implementation::NodeType;
+//use hotshot_types::traits::node_implementation::NodeType;
 
-impl<Types:BuilderType + NodeType> BuilderDataSource<Types> for GlobalState<Types>
+#[async_trait]
+impl<Types:BuilderType> BuilderDataSource<Types> for GlobalState<Types>
+where
+    for<'a> <<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType: From<&'a tagged_base64::TaggedBase64>,
+    TaggedBase64: From<<<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType>
 {
     async fn get_available_blocks(
         &self,
@@ -93,15 +99,38 @@ impl<Types:BuilderType + NodeType> BuilderDataSource<Types> for GlobalState<Type
             requested_vid_commitment: for_parent.clone(),
         };
         self.request_sender.broadcast(req_msg).await.unwrap();
+        let response_received = self.response_receiver.recv().await;
+        
+        match response_received {
+            Ok(response) =>{
+                let block_metadata = BlockMetadata::<Types>{
+                    block_hash: response.block_hash,
+                    block_size: response.block_size,
+                    offered_fee: response.offered_fee,
+                    _phantom: Default::default(),
+                };
+                Ok(vec![block_metadata])
+
+            }
+            _ => {
+                Err(BuildError::Error{message: "No blocks available".to_string()})
+            }
+        }
     }
     async fn claim_block(
         &self,
         block_hash: &BuilderCommitment,
         signature: &<<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<Types::BlockPayload, BuildError> {
-        //unimplemented!()
-        let block = self.block_hash_to_block.get(&block_hash).unwrap().clone();
-        Ok(block)
+        // TODO: Verify the signature??
+        
+        if let Some(block) = self.block_hash_to_block.get(block_hash){
+            Ok(block.0.clone())
+        } else {
+            Err(BuildError::Error{message: "Block not found".to_string()})
+        }
+        // TODO: should we remove the block from the hashmap?
+
     }
     async fn submit_txn(&self, txn: <Types as BuilderType>::Transaction) -> Result<(), BuildError> {
         unimplemented!()
@@ -120,7 +149,6 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
     da_sender: BroadcastSender<MessageType<Types>>,
     qc_sender: BroadcastSender<MessageType<Types>>,
     req_sender: BroadcastSender<MessageType<Types>>,
-    response_receiver: BroadcastReceiver<ResponseMessage>,
 
 ) -> Result<(),()>
 //where //TODO

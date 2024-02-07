@@ -50,6 +50,7 @@ use commit::{Commitment, Committable};
 
 use jf_primitives::signatures::bls_over_bn254::{BLSOverBN254CurveSignatureScheme, KeyPair, SignKey, VerKey};
 use futures::future::select_all;
+use async_std::task::JoinHandle;
 
 pub type TxTimeStamp = u128;
 const NUM_NODES_IN_VID_COMPUTATION: usize = 8;
@@ -89,11 +90,14 @@ pub struct RequestMessage{
     //pub total_nodes: usize
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct ResponseMessage{
+#[derive(Debug, Clone)]
+pub struct ResponseMessage<TYPES: BuilderType>{
     pub block_hash: BuilderCommitment, //TODO: Need to pull out from hotshot
     pub block_size: u64,
     pub offered_fee: u64,
+    pub block_payload: TYPES::BlockPayload,
+    pub metadata: <<TYPES as BuilderType>::BlockPayload as BlockPayload>::Metadata,
+    pub join_handle: Arc::<JoinHandle<()>>,
 }
 
 pub enum Status {
@@ -154,10 +158,13 @@ pub struct BuilderState<TYPES: BuilderType>{
     pub global_state: Arc::<RwLock::<GlobalState<TYPES>>>,
 
     // response sender
-    pub response_sender: UnboundedSender<ResponseMessage>,
+    pub response_sender: UnboundedSender<ResponseMessage<TYPES>>,
 
     // quorum membership
     pub quorum_membership: Arc<TYPES::Membership>,
+
+    // builder Commitements
+    pub builder_commitments: Vec<BuilderCommitment>,
 }
 /// Trait to hold the helper functions for the builder
 #[async_trait]
@@ -181,10 +188,13 @@ pub trait BuilderProgress<TYPES: BuilderType> {
     async fn spawn_clone(self, da_proposal: DAProposal<TYPES>, quorum_proposal: QuorumProposal<TYPES>, leader: TYPES::SignatureKey);
 
     /// build a block
-    async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<ResponseMessage>;
+    async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<ResponseMessage<TYPES>>;
 
     /// Event Loop
     async fn event_loop(mut self);
+
+    /// process the block request
+    async fn process_block_request(&mut self, req: RequestMessage);
 }
 
 
@@ -258,6 +268,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
 
         // generate the vid commitment; num nodes are received through hotshot api in service.rs and passed along with message onto channel
         let total_nodes = da_msg.total_nodes;
+
         let payload_vid_commitment = vid_commitment(&encoded_txns, total_nodes);
         
         if !self.da_proposal_payload_commit_to_da_proposal.contains_key(&payload_vid_commitment) {
@@ -270,11 +281,13 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
             if let Entry::Occupied(qc_proposal_data) = self.quorum_proposal_payload_commit_to_quorum_proposal.entry(payload_vid_commitment.clone()) {
                 let qc_proposal_data = qc_proposal_data.remove();
-                let self_clone = self.clone();
-                self_clone.spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
+                
+                //let self_clone = self.clone();
+                
+                self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
 
                 // register the clone to the global state
-                self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
+                //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
             } else {
                 self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal_data);    
             }
@@ -290,6 +303,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // check for the leaf commitment
         // check for signature validation and correct leader (both of these are done in the service.rs i.e. before putting hotshot events onto the da channel)
         // can use this commitment to match the da proposal or vice-versa
+        // TODO: if this special value
         if qc_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0 ||
            qc_msg.proposal.data.justify_qc.get_data().leaf_commit != self.built_from_view_vid_leaf.2 {
                 println!("Either View number or leaf commit does not match the built-in info, so ignoring it");
@@ -305,11 +319,11 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
                 if let Entry::Occupied(da_proposal_data) = self.da_proposal_payload_commit_to_da_proposal.entry(payload_vid_commitment.clone()) {
                     let da_proposal_data = da_proposal_data.remove();
-                    let self_clone = self.clone();
-                    self_clone.spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
+                    //let self_clone = self.clone();
+                    self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
 
                     // registed the clone to the global state
-                    self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
+                    //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
                 
                 } else {
                     self.quorum_proposal_payload_commit_to_quorum_proposal.insert(payload_vid_commitment, qc_proposal_data.clone());
@@ -322,6 +336,9 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     async fn process_decide_event(&mut self,  decide_msg: DecideMessage<TYPES>) -> Option<Status>
     {
 
+        // special clone already launched the clone, then exit
+        // if you haven't launched the clone, then you don't exit, you need atleast one clone to function properly
+        // the special value can be 0 itself, or a view number 0 is also right answer
         let leaf_chain = decide_msg.leaf_chain;
         let qc = decide_msg.qc;
         let block_size = decide_msg.block_size;
@@ -335,6 +352,11 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
 
         if self.built_from_view_vid_leaf.0 <= leaf_view_number{
             println!("The decide event is not for the next view, so ignoring it");
+               // convert leaf commitments into buildercommiments
+            //let leaf_commitments:Vec<BuilderCommitment> = leaf_chain.iter().map(|leaf| leaf.get_block_payload().unwrap().builder_commitment(&leaf.get_block_header().metadata())).collect();
+            
+            // remove the handles from the global state
+            self.global_state.write_arc().await.remove_handles(self.built_from_view_vid_leaf.1, self.builder_commitments.clone());
             return Some(Status::ShouldExit);
         }
 
@@ -366,12 +388,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 }
             }
         }
-        // convert leaf commitments into buildercommiments
-        let leaf_commitments:Vec<BuilderCommitment> = leaf_chain.iter().map(|leaf| leaf.get_block_payload().unwrap().builder_commitment(&leaf.get_block_header().metadata())).collect();
-
-        self.global_state.write_arc().await.remove_handles(self.built_from_view_vid_leaf.1, leaf_commitments);
-        // can use get_mut() also
-
+     
         return Some(Status::ShouldContinue);
     }
 
@@ -409,7 +426,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
 
      // build a block
-    async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<ResponseMessage>{
+    async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<ResponseMessage<TYPES>>{
 
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
             self.timestamp_to_tx.iter().filter_map(|(ts, tx_hash)| {
@@ -420,7 +437,10 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             
             let block_hash = payload.builder_commitment(&metadata);
             
-            //let num_txns = <TYPES::BlockPayload as TestBlockPayload>::txn_count(&payload);// TODO: figure out
+            // add the local builder commitment list
+            self.builder_commitments.push(block_hash.clone());
+
+            //let num_txns = <TYPES::BlockPayload as TestBlockPayload>::txn_count(&payload);
             let encoded_txns:Vec<u8> = payload.encode().unwrap().into_iter().collect();
 
 
@@ -449,22 +469,33 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 vid.disperse(encoded_txns).unwrap();
             });
 
-            //  // calculate vid shares
-            //  let vid_disperse = spawn_blocking(move || {
-            //     let vid = VidScheme::new(chunk_size, num_quorum_committee, &srs).unwrap();
-            //     vid.disperse(encoded_transactions.clone()).unwrap()
-            // })
-            // .await;
-            
-        
-        
             //self.global_state.write().block_hash_to_block.insert(block_hash, (payload, metadata, join_handle));
             //let mut global_state = self.global_state.write().unwrap();
-            self.global_state.write_arc().await.block_hash_to_block.insert(block_hash, payload);
-            return Some(ResponseMessage{block_hash: block_hash, block_size: block_size, offered_fee: offered_fee});
+            //self.global_state.write_arc().await.block_hash_to_block.insert(block_hash.clone(), (payload, metadata, join_handle));
+            return Some(ResponseMessage{block_hash: block_hash, block_size: block_size, offered_fee: offered_fee, block_payload: payload, metadata: metadata, join_handle: Arc::new(join_handle)});
         };
 
         None
+    }
+
+    async fn process_block_request(&mut self, req: RequestMessage){
+        let requested_vid_commitment = req.requested_vid_commitment;
+        //let vid_nodes = req.total_nodes;
+        if requested_vid_commitment == self.built_from_view_vid_leaf.1{
+                let response = self.build_block(requested_vid_commitment).await;
+                match response{
+                    Some(response)=>{
+                        // send the response back
+                        self.response_sender.send(response.clone()).await.unwrap();
+                        //let inner = Arc::unwrap_or_clone(response.join_handle);
+                        self.global_state.write_arc().await.block_hash_to_block.insert(response.block_hash, (response.block_payload, response.metadata, response.join_handle));
+                    }
+                    None => {
+                        println!("No response to send");
+                    }
+                }
+                
+        }
     }
 
     async fn event_loop(mut self) {
@@ -473,28 +504,9 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                     //let builder_state = builder_state.lock().unwrap();
                     while let Ok(req) = self.req_receiver.recv().await {
                         if let MessageType::RequestMessage(req) = req {
-
-                            let requested_vid_commitment = req.requested_vid_commitment;
-                            //let vid_nodes = req.total_nodes;
-                            if requested_vid_commitment == self.built_from_view_vid_leaf.1{
-                                    let response = self.build_block(requested_vid_commitment).await;
-                                    match response{
-                                        Some(response)=>{
-                                            // send the response back
-                                            self.response_sender.send(response).await.unwrap();
-                                        }
-                                        None => {
-                                            println!("No response to send");
-                                        }
-                                    }
-                            }
+                            self.process_block_request(req).await;
                         }
-                    //     //... handle requests
-                    //selft says do I have a block for this set of txns? if so, return that header?? MPSC [async_compatility]
-                    //     // else iterate through and call build block, and add block to blockmap in globalstate
-                    //     // do validity check for the requester as well i.e are they leader for one of the next k views
-
-                    }
+                    };
 
                     let (received_msg, channel_index, _)= select_all([self.tx_receiver.recv(), self.decide_receiver.recv(), self.da_proposal_receiver.recv(), 
                                                                                                          self.qc_receiver.recv(), self.req_receiver.recv()]).await;
@@ -506,9 +518,9 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                 // request message
                                 MessageType::RequestMessage(req) => {
                                     println!("Received request msg in builder {}: {:?} from index {}", self.builder_id.0, req, channel_index);
-                                    // store in the rtx_msgs
-                                    //rreq_msgs.push(req.clone());
-                                    //builder_state.process_request(req).await;
+                                    
+                                    self.process_block_request(req).await;
+                                    
                                 }
 
                                 // transaction message
@@ -530,6 +542,8 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                     println!("Received decide msg in builder {}: {:?} from index {}", self.builder_id.0, rdecide_msg, channel_index);
                                     // store in the rdecide_msgs
                                     self.process_decide_event(rdecide_msg).await;
+                                    // TODO
+                                    // if should exit, then break out of the loop
                                 }
 
                                 // DA proposal message
@@ -569,7 +583,10 @@ pub enum MessageType<TYPES: BuilderType>{
 }
 
 impl<TYPES:BuilderType> BuilderState<TYPES>{
-    pub fn new(builder_id: (VerKey, SignKey), view_vid_leaf:(TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>), tx_receiver: BroadcastReceiver<MessageType<TYPES>>, decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>, req_receiver: BroadcastReceiver<MessageType<TYPES>>, global_state: Arc<RwLock<GlobalState<TYPES>>>, response_sender: UnboundedSender<ResponseMessage>, quorum_membership: Arc<TYPES::Membership>)-> Self{
+    pub fn new(builder_id: (VerKey, SignKey), view_vid_leaf:(TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>), tx_receiver: BroadcastReceiver<MessageType<TYPES>>, 
+               decide_receiver: BroadcastReceiver<MessageType<TYPES>>, da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>, qc_receiver: BroadcastReceiver<MessageType<TYPES>>, 
+               req_receiver: BroadcastReceiver<MessageType<TYPES>>, global_state: Arc<RwLock<GlobalState<TYPES>>>, response_sender: UnboundedSender<ResponseMessage<TYPES>>, 
+               quorum_membership: Arc<TYPES::Membership>)-> Self{
        BuilderState{
                     builder_id: builder_id,
                     timestamp_to_tx: BTreeMap::new(),
@@ -587,6 +604,7 @@ impl<TYPES:BuilderType> BuilderState<TYPES>{
                     global_state: global_state,
                     response_sender: response_sender,
                     quorum_membership: quorum_membership,
+                    builder_commitments: vec![],
                 } 
    }
 

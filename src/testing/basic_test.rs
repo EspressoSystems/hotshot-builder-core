@@ -10,7 +10,10 @@ use async_std::task::{self, Builder};
 use std::sync::{Arc, Mutex};
 use sha2::{Digest, Sha256};
 use futures::future::select_all;
-pub use hotshot_testing::{block_types::{TestTransaction, TestBlockHeader, TestBlockPayload, genesis_vid_commitment}, state_types::TestState};
+pub use hotshot_testing::{
+    block_types::{TestTransaction, TestBlockHeader, TestBlockPayload, genesis_vid_commitment}, 
+    state_types::{TestInstanceState, TestValidatedState},
+};
 pub use hotshot_types::{
     traits::node_implementation::NodeType as BuilderType,
     data::{ViewNumber, Leaf, DAProposal, QuorumProposal},
@@ -32,7 +35,7 @@ mod tests {
     use std::{collections::HashSet, env, hash::Hash, marker::PhantomData};
 
     use hotshot::{rand::seq::index, types::SignatureKey};
-    use hotshot_types::{data::QuorumProposal, message::Message, traits::{block_contents::BlockHeader, state::ConsensusTime}, vote::HasViewNumber};
+    use hotshot_types::{data::QuorumProposal, message::Message, traits::block_contents::BlockHeader, vote::HasViewNumber};
 
     use crate::builder_state::{TransactionMessage, TransactionSource, DecideMessage, DAProposalMessage, QCMessage};
 
@@ -70,7 +73,8 @@ mod tests {
             type SignatureKey = BLSPubKey;
             type Transaction = TestTransaction;
             type ElectionConfigType = StaticElectionConfig;
-            type StateType = TestState;
+            type ValidatedState = TestValidatedState;
+            type InstanceState = TestInstanceState;
             type Membership = GeneralStaticCommittee<TestTypes, Self::SignatureKey>;
         }
 
@@ -135,7 +139,7 @@ mod tests {
             
             let qc_signature = da_signature.clone();
             let qc_proposal = QuorumProposal::<TestTypes>{
-                block_header: TestBlockHeader::genesis().0,
+                block_header: TestBlockHeader::genesis(&TestInstanceState {}).0,
                 view_number: ViewNumber::new(i as u64),
                 justify_qc: QuorumCertificate::<TestTypes>::genesis(),
                 timeout_certificate: None,
