@@ -397,6 +397,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     // spawn a clone of the builder state
     async fn spawn_clone(mut self, da_proposal: DAProposal<TYPES>, quorum_proposal: QuorumProposal<TYPES>, leader: TYPES::SignatureKey)
     {
+        println!("Spawning a clone");
         self.built_from_view_vid_leaf.0 = quorum_proposal.view_number;
         self.built_from_view_vid_leaf.1 = quorum_proposal.block_header.payload_commitment();
         
@@ -518,10 +519,12 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
 
     async fn event_loop(mut self) {
-            task::spawn(async move{
+            let builder_handle = task::spawn(async move{
                 loop{   
+                    println!("In event loop");
                     //let builder_state = builder_state.lock().unwrap();
-                    while let Ok(req) = self.req_receiver.recv().await {
+                    while let Ok(req) = self.req_receiver.try_recv() {
+                        println!("Received request msg in builder {}: {:?} from index", self.builder_keys.0, req);
                         if let MessageType::RequestMessage(req) = req {
                             self.process_block_request(req).await;
                         }
@@ -598,8 +601,10 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                         }
                     }
             
-                }
-    });
+                };
+            });
+
+            builder_handle.await;
     }
 }
 /// Unifies the possible messages that can be received by the builder
