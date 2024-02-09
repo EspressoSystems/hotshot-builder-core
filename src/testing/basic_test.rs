@@ -4,12 +4,10 @@
 
 //! Builder Phase 1 Testing
 //! 
-
 #![allow(unused_imports)]
-use async_std::task::{self, Builder};
+use async_std::task;
 use std::sync::{Arc, Mutex};
 use sha2::{Digest, Sha256};
-use futures::future::select_all;
 pub use hotshot_testing::{
     block_types::{TestTransaction, TestBlockHeader, TestBlockPayload, genesis_vid_commitment}, 
     state_types::{TestInstanceState, TestValidatedState},
@@ -26,19 +24,19 @@ pub use hotshot::traits::election::static_committee::{GeneralStaticCommittee, St
 pub use crate::builder_state::{BuilderState,MessageType, BuilderProgress, ResponseMessage};
 pub use async_broadcast::{broadcast, TryRecvError, Sender as BroadcastSender, Receiver as BroadcastReceiver, RecvError};
 // tests
-use commit::{Commitment, Committable, CommitmentBoundsArkless};
+use commit::{Commitment, CommitmentBoundsArkless};
 use async_compatibility_layer::art::{async_sleep, async_spawn};
+use tracing;
 /// The following tests are performed:
 #[cfg(test)]
 mod tests {
 
-    use core::num;
-    use std::{collections::HashSet, env, hash::Hash, marker::PhantomData};
+    use std::{hash::Hash, marker::PhantomData};
 
-    use async_compatibility_layer::channel::{unbounded, UnboundedReceiver};
-    use hotshot::{rand::seq::index, types::SignatureKey};
-    use hotshot_testing::state_types::TestTypes;
+    use async_compatibility_layer::channel::unbounded;
+    use hotshot::types::SignatureKey;
     use hotshot_types::{data::QuorumProposal, message::Message, traits::{block_contents::{vid_commitment, BlockHeader}, election::Membership}, vote::HasViewNumber};
+    //use tracing::instrument;
 
     use crate::builder_state::{TransactionMessage, TransactionSource, DecideMessage, DAProposalMessage, QCMessage, RequestMessage};
     use crate::service::GlobalState;
@@ -54,9 +52,11 @@ mod tests {
     const TEST_NUM_NODES_IN_VID_COMPUTATION: usize = 4;
     /// This test simulates multiple builders receiving messages from the channels and processing them
     #[async_std::test]
+    //#[instrument]
     async fn test_channel(){
-        //env::set_var("RUST_ASYNC_STD_THREAD_COUNT", "10");
-        println!("Testing the channel");
+        async_compatibility_layer::logging::setup_logging();
+        async_compatibility_layer::logging::setup_backtrace();
+        tracing::info!("Testing the builder core with multiple messages from the channels");
         #[derive(
             Copy,
             Clone,
@@ -87,12 +87,12 @@ mod tests {
         let multiplication_factor = 5;
 
         // settingup the broadcast channels i.e [From hostshot: (tx, decide, da, qc, )], [From api:(req - broadcast, res - mpsc channel) ]
-        let (tx_sender, mut tx_receiver) = broadcast::<MessageType<TestTypes>>(num_test_messages*multiplication_factor);
-        let (decide_sender, mut decide_receiver) = broadcast::<MessageType<TestTypes>>(num_test_messages*multiplication_factor);
-        let (da_sender, mut da_receiver) = broadcast::<MessageType<TestTypes>>(num_test_messages*multiplication_factor);
-        let (qc_sender, mut qc_receiver) = broadcast::<MessageType<TestTypes>>(num_test_messages*multiplication_factor);
-        let (req_sender, mut req_receiver) = broadcast::<MessageType<TestTypes>>(num_test_messages*multiplication_factor);
-        let (res_sender, mut res_receiver) = unbounded();
+        let (tx_sender, tx_receiver) = broadcast::<MessageType<TestTypes>>(num_test_messages*multiplication_factor);
+        let (decide_sender, decide_receiver) = broadcast::<MessageType<TestTypes>>(num_test_messages*multiplication_factor);
+        let (da_sender, da_receiver) = broadcast::<MessageType<TestTypes>>(num_test_messages*multiplication_factor);
+        let (qc_sender, qc_receiver) = broadcast::<MessageType<TestTypes>>(num_test_messages*multiplication_factor);
+        let (req_sender, req_receiver) = broadcast::<MessageType<TestTypes>>(num_test_messages*multiplication_factor);
+        let (res_sender, res_receiver) = unbounded();
         
         // to store all the sent messages
         let mut stx_msgs = Vec::new();
@@ -114,7 +114,7 @@ mod tests {
                 tx: tx.clone(),
                 tx_type: TransactionSource::HotShot,
             };
-            
+            tracing::debug!("Sending transaction message: {:?}", stx_msg);
             // Prepare the decide message
             let qc = QuorumCertificate::<TestTypes>::genesis();
             let sdecide_msg = DecideMessage::<TestTypes>{
@@ -149,9 +149,9 @@ mod tests {
             };
             
             // calculate the vid commitment over the encoded_transactions
-            println!("Encoded transactions: {:?}\n Num nodes:{}", encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION);
+            tracing::debug!("Encoded transactions: {:?}\n Num nodes:{}", encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION);
             let encoded_txns_vid_commitment = vid_commitment(&encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION); 
-            println!("Encoded transactions vid commitment: {:?}", encoded_txns_vid_commitment);
+            tracing::debug!("Encoded transactions vid commitment: {:?}", encoded_txns_vid_commitment);
             let block_header = TestBlockHeader{
                 block_number: i as u64,
                 payload_commitment: encoded_txns_vid_commitment,
@@ -235,9 +235,9 @@ mod tests {
                                                             tx_receiver, decide_receiver, da_receiver, qc_receiver, req_receiver, global_state, res_sender, Arc::new(quorum_membershiop)); 
             
                                                             //builder_state.event_loop().await;
-            builder_state.event_loop().await;
+            builder_state.event_loop();
         });
         handle.await;
-        
+        task::sleep(std::time::Duration::from_secs(240)).await;
     }
 }

@@ -2,37 +2,28 @@
 // This file is part of the HotShot Builder Protocol.
 //
 
-#![allow(unused_variables)]
-// use hotshot_testing::block_types::{TestBlockHeader, TestBlockPayload, TestTransaction};
-//use hotshot_task::event_stream::{ChannelStream, EventStream, StreamId};
-
-//use hotshot_task_impls::da;
-// including the following from the hotshot
 use hotshot_types::{
     traits::{node_implementation::{NodeType as BuilderType,ConsensusTime}, block_contents::vid_commitment, signature_key::SignatureKey},
-    data::{DAProposal, Leaf, QuorumProposal, VidCommitment, VidScheme, VidSchemeTrait, test_srs, ViewNumber},
+    data::{DAProposal, Leaf, QuorumProposal, VidCommitment, VidScheme, VidSchemeTrait, test_srs},
     simple_certificate::QuorumCertificate,
     message::Proposal,
     traits::{block_contents::{BlockPayload, BlockHeader}, election::Membership},
     utils::BuilderCommitment,
     vote::Certificate,
 };
-//use jf_primitives::signatures::bls_over_bn254::{SignKey, VerKey};
+
 use commit::{Commitment, Committable};
 
-use futures::{future, StreamExt};//::select_all;
+use futures::StreamExt;//::select_all;
 use async_std::task::JoinHandle;
-use async_broadcast::{Receiver as BroadcastReceiver, RecvError};
+use async_broadcast::Receiver as BroadcastReceiver;
 use async_std::task;
 use async_trait::async_trait;
 use async_compatibility_layer::channel:: UnboundedSender;
 use async_lock::RwLock;
-use async_compatibility_layer::art::{async_sleep, async_spawn};
+use async_compatibility_layer::art::async_spawn;
 
-//use futures_lite::{future::block_on, stream::StreamExt};
-use futures::stream;//::{select, select_all};
-//use sha2::digest::crypto_common::rand_core::block;
-
+use core::panic;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -43,43 +34,47 @@ use std::cmp::PartialEq;
 use crate::service::GlobalState;
 
 pub type TxTimeStamp = u128;
-//const NUM_NODES_IN_VID_COMPUTATION: usize = 8;
 
+/// Enum to hold the different sources of the transaction
 #[derive(Clone, Debug, PartialEq)]
 pub enum TransactionSource {
     External, // txn from the external source i.e private mempool
     HotShot, // txn from the HotShot network i.e public mempool
 }
 
+/// Transaction Message to be put on the tx channel
 #[derive(Clone, Debug, PartialEq)]
 pub struct TransactionMessage<TYPES:BuilderType>{
     pub tx: TYPES::Transaction,
     pub tx_type: TransactionSource,
 }
+/// Decide Message to be put on the decide channel
 #[derive(Clone, Debug, PartialEq)]
 pub struct DecideMessage<TYPES:BuilderType>{
     pub leaf_chain: Arc<Vec<Leaf<TYPES>>>,
     pub qc: Arc<QuorumCertificate<TYPES>>,
     pub block_size: Option<u64>
 }
+/// DA Proposal Message to be put on the da proposal channel
 #[derive(Clone, Debug, PartialEq)]
 pub struct DAProposalMessage<TYPES:BuilderType>{
     pub proposal: Proposal<TYPES, DAProposal<TYPES>>,
     pub sender: TYPES::SignatureKey,
     pub total_nodes: usize,
 }
+/// QC Message to be put on the quorum proposal channel
 #[derive(Clone, Debug, PartialEq)]
 pub struct QCMessage<TYPES:BuilderType>{
     pub proposal: Proposal<TYPES, QuorumProposal<TYPES>>,
     pub sender: TYPES::SignatureKey,
 }
-
+/// Request Message to be put on the request channel
 #[derive(Clone, Debug, PartialEq)]
 pub struct RequestMessage{
     pub requested_vid_commitment: VidCommitment,
     //pub total_nodes: usize
 }
-
+/// Response Message to be put on the response channel
 #[derive(Debug, Clone)]
 pub struct ResponseMessage<TYPES: BuilderType>{
     pub block_hash: BuilderCommitment, //TODO: Need to pull out from hotshot
@@ -91,7 +86,7 @@ pub struct ResponseMessage<TYPES: BuilderType>{
     pub signature:<<TYPES as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     pub sender: TYPES::SignatureKey,
 }
-
+/// Enum to hold the status out of the decide event
 pub enum Status {
     ShouldExit,
     ShouldContinue,
@@ -100,18 +95,19 @@ pub enum Status {
 #[derive(Debug, Clone)]
 pub struct BuilderState<TYPES: BuilderType>{
 
+    // identity keys for the builder
     pub builder_keys: (TYPES::SignatureKey, <<TYPES as BuilderType>::SignatureKey as SignatureKey>::PrivateKey), //TODO (pub,priv) key of the builder, may be good to keep a ref
     
     // timestamp to tx hash, used for ordering for the transactions
     pub timestamp_to_tx: BTreeMap<TxTimeStamp, Commitment<TYPES::Transaction>>,
     
-    // transaction hash to transaction data for efficient lookup
+    // transaction hash to available transaction data
     pub tx_hash_to_available_txns: HashMap<Commitment<TYPES::Transaction>,(TxTimeStamp, TYPES::Transaction, TransactionSource)>,
 
     /// Included txs set while building blocks
     pub included_txns: HashSet<Commitment<TYPES::Transaction>>,
  
-    /// block hash to the full block
+    /// block hash to the block payload
     pub block_hash_to_block: HashMap<VidCommitment, TYPES::BlockPayload>,
 
     /// da_proposal_payload_commit to da_proposal
@@ -132,16 +128,16 @@ pub struct BuilderState<TYPES: BuilderType>{
     /// decide receiver
     pub decide_receiver: BroadcastReceiver<MessageType<TYPES>>,
     
-    /// da proposal event channel
+    /// da proposal receiver
     pub da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>,
     
-    /// quorum proposal event channel
+    /// quorum proposal receiver
     pub qc_receiver: BroadcastReceiver<MessageType<TYPES>>,
 
-    // channel receiver for the requests
+    // channel receiver for the block requests
     pub req_receiver: BroadcastReceiver<MessageType<TYPES>>,
 
-    // global state handle
+    // global state handle, defined in the service.rs
     pub global_state: Arc::<RwLock::<GlobalState<TYPES>>>,
 
     // response sender
@@ -157,46 +153,44 @@ pub struct BuilderState<TYPES: BuilderType>{
 #[async_trait]
 pub trait BuilderProgress<TYPES: BuilderType> {
     /// process the external transaction
-    async fn process_external_transaction(&mut self, tx: TYPES::Transaction);
+    fn process_external_transaction(&mut self, tx: TYPES::Transaction);
     
     /// process the hotshot transaction
-    async fn process_hotshot_transaction(&mut self,  tx: TYPES::Transaction);
+    fn process_hotshot_transaction(&mut self,  tx: TYPES::Transaction);
     
     /// process the DA proposal
-    async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>);
+    fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>);
     
     /// process the quorum proposal
-    async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>);
+    fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>);
     
     /// process the decide event
     async fn process_decide_event(&mut self, decide_msg: DecideMessage<TYPES>) -> Option<Status>;
 
     /// spawn a clone of builder
-    async fn spawn_clone(self, da_proposal: DAProposal<TYPES>, quorum_proposal: QuorumProposal<TYPES>, leader: TYPES::SignatureKey);
+    fn spawn_clone(self, da_proposal: DAProposal<TYPES>, quorum_proposal: QuorumProposal<TYPES>, leader: TYPES::SignatureKey);
 
     /// build a block
-    async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<ResponseMessage<TYPES>>;
+    fn build_block(&mut self, matching_vid: VidCommitment) -> Option<ResponseMessage<TYPES>>;
 
     /// Event Loop
-    async fn event_loop(mut self);
-
+    fn event_loop(self);
+    
     /// process the block request
     async fn process_block_request(&mut self, req: RequestMessage);
-
-    /// loop function
-    async fn loop_function(&mut self);
 
 }
 
 
 #[async_trait]
+//#[tracing::instrument(skip_all)]
 impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
 
     /// processing the external i.e private mempool transaction
-    async fn process_external_transaction(&mut self, tx: TYPES::Transaction)
+    fn process_external_transaction(&mut self, tx: TYPES::Transaction)
     {
         // PRIVATE MEMPOOL TRANSACTION PROCESSING
-        println!("Processing external transaction");
+        tracing::info!("Processing external transaction");
         // check if the transaction already exists in either the included set or the local tx pool
         // if it exits, then we can ignore it and return
         // else we can insert it into local tx pool
@@ -204,7 +198,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         let tx_hash = tx.commit();
         // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
         if self.tx_hash_to_available_txns.contains_key(&tx_hash) || self.included_txns.contains(&tx_hash) {
-                println!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
+                tracing::info!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
                 return;
         }
         else {
@@ -218,13 +212,13 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
     
     /// processing the hotshot i.e public mempool transaction
-    async fn process_hotshot_transaction(&mut self, tx: TYPES::Transaction)
+    fn process_hotshot_transaction(&mut self, tx: TYPES::Transaction)
     {
         let tx_hash = tx.commit();
         // HOTSHOT MEMPOOL TRANSACTION PROCESSING
         // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
         if self.tx_hash_to_available_txns.contains_key(&tx_hash) || self.included_txns.contains(&tx_hash) {
-            println!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
+            tracing::info!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
             return;
         } else {
                 // get the current timestamp in nanoseconds
@@ -237,7 +231,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
     
     /// processing the DA proposal
-    async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>)
+    fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>)
     {
         // Validation
         // check for view number
@@ -246,10 +240,10 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // bootstrapping part
         // if the view number is 0 then keep going, and don't return from it
         if self.built_from_view_vid_leaf.0.get_u64() == 0 {
-            println!("In bootstrapping phase");
+            tracing::info!("In bootstrapping phase");
         }
         else if da_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0{
-                println!("View number does not match the built_from_view, so ignoring it");
+                tracing::info!("View number does not match the built_from_view, so ignoring it");
                 return;
         }
 
@@ -264,9 +258,9 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
 
         // generate the vid commitment; num nodes are received through hotshot api in service.rs and passed along with message onto channel
         let total_nodes = da_msg.total_nodes;
-        println!("Encoded txns in da proposal: {:?} and total nodes: {:?}", encoded_txns, total_nodes);
+        tracing::debug!("Encoded txns in da proposal: {:?} and total nodes: {:?}", encoded_txns, total_nodes);
         let payload_vid_commitment = vid_commitment(&encoded_txns, total_nodes); 
-        println!("Generated payload commitment from the da proposal: {:?}", payload_vid_commitment);
+        tracing::debug!("Generated payload commitment from the da proposal: {:?}", payload_vid_commitment);
         if !self.da_proposal_payload_commit_to_da_proposal.contains_key(&payload_vid_commitment) {
             let da_proposal_data = DAProposal {
                 encoded_transactions: encoded_txns.clone(),
@@ -277,16 +271,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
             if let Entry::Occupied(qc_proposal_data) = self.quorum_proposal_payload_commit_to_quorum_proposal.entry(payload_vid_commitment.clone()) {
                 let qc_proposal_data = qc_proposal_data.remove();
-                
-                //let self_clone = self.clone();
-                
-                //self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
-                // let self_clone = self.clone();
-                    
-                //     task::spawn(async move {
-                //         self_clone.spawn_clone(da_proposal_data, qc_proposal_data, sender).await
-                //     }).await;
-                self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
+                self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender);
                 // register the clone to the global state
                 //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
             } else {
@@ -297,7 +282,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
 
     /// processing the quorum proposal
-    async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>)
+    fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>)
     {
          // Validation
         // check for view number
@@ -308,32 +293,24 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // bootstrapping part
         // if the view number is 0 then keep going, and don't return from it
         if self.built_from_view_vid_leaf.0.get_u64() == 0{
-            println!("In bootstrapping phase");
+            tracing::info!("In bootstrapping phase");
         }
         else if qc_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0 ||
            qc_msg.proposal.data.justify_qc.get_data().leaf_commit != self.built_from_view_vid_leaf.2 {
-                println!("Either View number or leaf commit does not match the built-in info, so ignoring it");
+                tracing::info!("Either View number or leaf commit does not match the built-in info, so ignoring it");
                 return;
         }
         let qc_proposal_data = qc_msg.proposal.data;
         let sender = qc_msg.sender;
 
         let payload_vid_commitment = qc_proposal_data.block_header.payload_commitment();
-        println!("Extracted payload commitment from the quorum proposal: {:?}", payload_vid_commitment);
+        tracing::debug!("Extracted payload commitment from the quorum proposal: {:?}", payload_vid_commitment);
         // first check whether vid_commitment exists in the qc_payload_commit_to_qc hashmap, if yer, ignore it, otherwise validate it and later insert in
         if !self.quorum_proposal_payload_commit_to_quorum_proposal.contains_key(&payload_vid_commitment){
                 // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
                 if let Entry::Occupied(da_proposal_data) = self.da_proposal_payload_commit_to_da_proposal.entry(payload_vid_commitment.clone()) {
                     let da_proposal_data = da_proposal_data.remove();
-                    //let self_clone = self.clone();
-                    // let self_clone = self.clone();
-                    
-                    // task::spawn(async move {
-                    //     self_clone.spawn_clone(da_proposal_data, qc_proposal_data, sender).await
-                    // }).await;
-                    self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
-
-
+                    self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender);
                     // registed the clone to the global state
                     //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
                 
@@ -352,13 +329,13 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // if you haven't launched the clone, then you don't exit, you need atleast one clone to function properly
         // the special value can be 0 itself, or a view number 0 is also right answer
         let leaf_chain = decide_msg.leaf_chain;
-        let qc = decide_msg.qc;
-        let block_size = decide_msg.block_size;
+        let _qc = decide_msg.qc;
+        let _block_size = decide_msg.block_size;
 
         
-        let latest_decide_parent_commitment = leaf_chain[0].parent_commitment;
+        let _latest_decide_parent_commitment = leaf_chain[0].parent_commitment;
         
-        let latest_decide_commitment = leaf_chain[0].commit();
+        let _latest_decide_commitment = leaf_chain[0].commit();
         
         let leaf_view_number = leaf_chain[0].view_number;
 
@@ -367,11 +344,11 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // and not make any progress; so we need to handle that case
         // Adhoc logic: if the number of subscrived receivers are more than 1, it means that there exists a clone and we can safely exit
         if self.built_from_view_vid_leaf.0.get_u64() == 0 && self.tx_receiver.receiver_count() <=1 {
-            println!("In bootstrapping phase");
+            tracing::info!("In bootstrapping phase");
             //return Some(Status::ShouldContinue);
         }
         else if self.built_from_view_vid_leaf.0 <= leaf_view_number{
-            println!("The decide event is not for the next view, so ignoring it");
+            tracing::info!("The decide event is not for the next view, so ignoring it");
                // convert leaf commitments into buildercommiments
             //let leaf_commitments:Vec<BuilderCommitment> = leaf_chain.iter().map(|leaf| leaf.get_block_payload().unwrap().builder_commitment(&leaf.get_block_header().metadata())).collect();
             
@@ -386,7 +363,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             let block_payload = leaf.get_block_payload();
             match block_payload{
                 Some(block_payload) => {
-                    println!("Block payload in decide event {:?}", block_payload);
+                    tracing::debug!("Block payload in decide event {:?}", block_payload);
                     let metadata = leaf_chain[0].get_block_header().metadata();
                     let transactions_commitments = block_payload.transaction_commitments(&metadata);
                     // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx
@@ -405,7 +382,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                     }
                 },
                 None => {
-                    println!("Block payload is none");
+                    tracing::warn!("Block payload is none");
                 }
             }
         }
@@ -414,9 +391,9 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
 
     // spawn a clone of the builder state
-    async fn spawn_clone(mut self, da_proposal: DAProposal<TYPES>, quorum_proposal: QuorumProposal<TYPES>, leader: TYPES::SignatureKey)
+    fn spawn_clone(mut self, da_proposal: DAProposal<TYPES>, quorum_proposal: QuorumProposal<TYPES>, leader: TYPES::SignatureKey)
     {
-        println!("Spawning a clone");
+        tracing::debug!("Spawning a clone");
         self.built_from_view_vid_leaf.0 = quorum_proposal.view_number;
         self.built_from_view_vid_leaf.1 = quorum_proposal.block_header.payload_commitment();
         
@@ -444,15 +421,15 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 txn_info.remove_entry();
             });
         
-        self.event_loop().await;
+        self.event_loop();
     }
 
      // build a block
-    async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<ResponseMessage<TYPES>>{
+    fn build_block(&mut self, _matching_vid: VidCommitment) -> Option<ResponseMessage<TYPES>>{
 
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
-            self.timestamp_to_tx.iter().filter_map(|(ts, tx_hash)| {
-                self.tx_hash_to_available_txns.get(tx_hash).map(|(ts, tx, source)| {
+            self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
+                self.tx_hash_to_available_txns.get(tx_hash).map(|(_ts, tx, _source)| {
                     tx.clone()
                 })
         })) {
@@ -510,6 +487,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                         signature: signature_over_block_info, sender: self.builder_keys.0.clone()});
         };
 
+        tracing::warn!("build the block, returning None");
         None
     }
 
@@ -517,7 +495,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         let requested_vid_commitment = req.requested_vid_commitment;
         //let vid_nodes = req.total_nodes;
         if requested_vid_commitment == self.built_from_view_vid_leaf.1{
-                let response = self.build_block(requested_vid_commitment).await;
+                let response = self.build_block(requested_vid_commitment);
                 match response{
                     Some(response)=>{
                         // send the response back
@@ -530,311 +508,99 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                         self.global_state.write_arc().await.block_hash_to_block.insert(response.block_hash, (response.block_payload, response.metadata, response.join_handle, response.signature, response.sender));
                     }
                     None => {
-                        println!("No response to send");
+                        tracing::warn!("No response to send");
                     }
                 }
                 
         }
     }
+    #[tracing::instrument(skip_all, name = "Builder Event Loop")]
+    fn event_loop(mut self){
+        let _builder_handle = async_spawn(async move{
+                
+                loop{
 
-    async fn loop_function(&mut self){
-        loop{
-
-            // print 10 times the builderstate.built_from_view_vid_leaf and then sleep for some time
-            // for i in 0..10{
-            //     println!("In event loop for {:?}", self.built_from_view_vid_leaf);
-            // }
-            //task::sleep(std::time::Duration::from_secs(1)).await;
-
-
-        /*
-            if let Ok(tx) = self.tx_receiver.try_recv(){
-                println!("Received tx msg in builder {}: {:?} from index", self.builder_keys.0, tx);
-                if let MessageType::TransactionMessage(rtx_msg) = tx{
-                    if rtx_msg.tx_type == TransactionSource::HotShot {
-                        self.process_hotshot_transaction(rtx_msg.tx).await;
-                    } else {
-                        self.process_external_transaction(rtx_msg.tx).await;
-                    }
-                }
-            }
-
-            if let Ok(da) = self.da_proposal_receiver.try_recv(){
-                println!("Received da proposal msg in builder {}: {:?} from index", self.builder_keys.0, da);
-                if let MessageType::DAProposalMessage(rda_msg) = da{
-                    self.process_da_proposal(rda_msg).await;
-                }
-            }
-
-            if let Ok(qc) = self.qc_receiver.try_recv(){
-                println!("Received qc msg in builder {}: {:?} from index", self.builder_keys.0, qc);
-                if let MessageType::QCMessage(rqc_msg) = qc{
-                    self.process_quorum_proposal(rqc_msg).await;
-                }
-            }
-
-            if let Ok(decide) = self.decide_receiver.try_recv(){
-                println!("Received decide msg in builder {}: {:?} from index", self.builder_keys.0, decide);
-                if let MessageType::DecideMessage(rdecide_msg) = decide{
-                    let decide_status = self.process_decide_event(rdecide_msg).await;
-                    match decide_status{
-                        Some(Status::ShouldExit) => {
-                            break;
-                        }
-                        Some(Status::ShouldContinue) => {
-                            continue;
-                        }
-                        None => {
-                            continue;
-                        }
-                    }
-                }
-            }
-            
-         */
-
-            // println!("In event loop for {:?}", self.built_from_view_vid_leaf);
-            // println!("Receiver count: {:?}", self.tx_receiver.receiver_count());
-            // //let builder_state = builder_state.lock().unwrap();
-            // while let Ok(req) = self.req_receiver.try_recv() {
-            //     println!("Received request msg in builder {}: {:?} from index", self.builder_keys.0, req);
-            //     if let MessageType::RequestMessage(req) = req {
-            //         self.process_block_request(req).await;
-            //     }
-            // };
-
-            // let (received_msg, channel_index, _)= future::select_all([self.tx_receiver.recv(), self.da_proposal_receiver.recv(), 
-            //                                                self.qc_receiver.recv(), self.decide_receiver.recv(),self.req_receiver.recv()]).await;
-           //let y = x.next().await;
-            //println!("Received message: {:?}", y);
-            println!("In event loop for {:?}", self.built_from_view_vid_leaf);
-            
-            // get all the tx_messages from the tx_hash_to_available_txns
-            // for (tx_hash, (timestamp, tx, source)) in self.tx_hash_to_available_txns.iter(){
-            //     println!("Tx hash: {:?}, timestamp: {:?}, tx: {:?}, source: {:?}", tx_hash, timestamp, tx, source);
-            //     if tx.
-            // }
-            // get the length of the tx_hash_to_available_txns
-            //println!("Length of tx_hash_to_available_txns: {:?}", self.tx_hash_to_available_txns.len());
-            // if self.tx_hash_to_available_txns.len() == 3 {
-            //     // get the first transaction from the tx_hash_to_available_txns
-            //     break;
-            // }
-            futures::select!{
-                tx = self.tx_receiver.next() => {
-                    //println!("Received tx msg in builder {}: {:?} from index", self.builder_keys.0, tx);
-                    match tx {
-                        Some(tx) => {
-                            if let MessageType::TransactionMessage(rtx_msg) = tx {
-                                println!("Received tx msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rtx_msg);
-                                if rtx_msg.tx_type == TransactionSource::HotShot {
-                                    self.process_hotshot_transaction(rtx_msg.tx).await;
-                                } else {
-                                    self.process_external_transaction(rtx_msg.tx).await;
-                                }
-                                println!("tx map size: {}", self.tx_hash_to_available_txns.len());
-                                // if self.built_from_view_vid_leaf.0.get_u64() == 1 && self.tx_hash_to_available_txns.len() == 2 {
-                                //     // get the first transaction from the tx_hash_to_available_txns
-                                //     break;
-                                // }
-                            }
-                        }
-                        None => {
-                            println!("No more tx messages to consume");
-                        }
-                    }
-                }
-                da = self.da_proposal_receiver.next() => {
-                    //println!("Received da proposal msg in builder {}: {:?} from index", self.builder_keys.0, da);
-                    match da {
-                        Some(da) => {
-                            if let MessageType::DAProposalMessage(rda_msg) = da {
-                                println!("Received da proposal msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rda_msg.proposal.data.view_number);
-                                self.process_da_proposal(rda_msg).await;
-                            }
-                        }
-                        None => {
-                            println!("No more da proposal messages to consume");
-                        }
-                    }
-                }
-                qc = self.qc_receiver.next() => {
-                    //println!("Received qc msg in builder {}: {:?} from index", self.builder_keys.0, qc);
-                    match qc {
-                        Some(qc) => {
-                            if let MessageType::QCMessage(rqc_msg) = qc {
-                                println!("Received qc msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rqc_msg.proposal.data.view_number);
-                                self.process_quorum_proposal(rqc_msg).await;
-                            }
-                        }
-                        None => {
-                            println!("No more qc messages to consume");
-                        }
-                    }
-                }
-                decide = self.decide_receiver.next() => {
-                    println!("Received decide msg in builder {}: {:?} from index", self.builder_keys.0, decide);
-                    match decide {
-                        Some(decide) => {
-                            if let MessageType::DecideMessage(rdecide_msg) = decide {
-                                println!("Received decide msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rdecide_msg);
-                                let decide_status = self.process_decide_event(rdecide_msg).await;
-                                match decide_status{
-                                    Some(Status::ShouldExit) => {
-                                        break;
+                    futures::select!{
+                        tx = self.tx_receiver.next() => {
+                            //println!("Received tx msg in builder {}: {:?} from index", self.builder_keys.0, tx);
+                            match tx {
+                                Some(tx) => {
+                                    if let MessageType::TransactionMessage(rtx_msg) = tx {
+                                        //tracing::debug!("Received tx msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rtx_msg);
+                                        if rtx_msg.tx_type == TransactionSource::HotShot {
+                                            self.process_hotshot_transaction(rtx_msg.tx);
+                                        } else {
+                                            self.process_external_transaction(rtx_msg.tx);
+                                        }
+                                        tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
+                                        // if self.built_from_view_vid_leaf.0.get_u64() == 1 && self.tx_hash_to_available_txns.len() == 2 {
+                                        //     // get the first transaction from the tx_hash_to_available_txns
+                                        //     break;
+                                        // }
                                     }
-                                    Some(Status::ShouldContinue) => {
-                                        continue;
-                                    }
-                                    None => {
-                                        continue;
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            println!("No more decide messages to consume");
-                        }
-                    }
-                }
-            };
-            
-            
-            // let (received_msg, channel_index, _)= select_all([self.tx_receiver.next().await, self.da_proposal_receiver.next().await, 
-            //                                                 self.qc_receiver.next().await, self.decide_receiver.next().await,self.req_receiver.next().await]);
-
-            // let mut x = select_all([self.tx_receiver.into_stream(), self.da_proposal_receiver, 
-            //                                                 self.qc_receiver, self.decide_receiver,self.req_receiver]);
-            
-            // select! {   
-            //     received_tx_msg = self.tx_receiver.next().await.unwrap()=> {
-            //         println!("Received tx msg in builder {}: {:?} from index", self.builder_keys.0, received_tx_msg);
-            //         if let Some(received_tx_msg) = received_tx_msg {
-            //             if let MessageType::TransactionMessage(rtx_msg) = received_tx_msg {
-            //                 println!("Received tx msg in builder {}: {:?} from index", self.builder_keys.0, rtx_msg);
-            //                 if rtx_msg.tx_type == TransactionSource::HotShot {
-            //                     self.process_hotshot_transaction(rtx_msg.tx).await;
-            //                 } else {
-            //                     self.process_external_transaction(rtx_msg.tx).await;
-            //                 }
-            //             }
-            //         }
-            //     }
-            // }
-            
-            /*
-            let (received_msg, channel_index, _)= future::select_all([self.tx_receiver.recv(), self.da_proposal_receiver.recv(), 
-                                                           self.qc_receiver.recv(), self.decide_receiver.recv(),self.req_receiver.recv()]).await;
-            match received_msg {
-                Ok(received_msg) => {
-                    
-                    match received_msg {
-                        
-                        // request message
-                        MessageType::RequestMessage(req) => {
-                            println!("Received request msg in builder {}: {:?} from index {}", self.builder_keys.0, req, channel_index);
-                            
-                            self.process_block_request(req).await;
-                            
-                        }
-
-                        // transaction message
-                        MessageType::TransactionMessage(rtx_msg) => {
-                            println!("Received tx msg in builder {}: {:?} from index {}", self.builder_keys.0, rtx_msg, channel_index);
-                            
-                            //self.print_builder_state().await;
-                            // get the content from the rtx_msg's inside vec
-                            // Pass the tx msg to the handler
-                            println!("Local tx_maps before processing the transaction:\n Tx_hash_to_available_txns: {:?} \nTimestamp to tx {:?}\n Included txns{:?}", 
-                                        self.tx_hash_to_available_txns, self.timestamp_to_tx, self.included_txns);
-                        
-                            if rtx_msg.tx_type == TransactionSource::HotShot {
-                                self.process_hotshot_transaction(rtx_msg.tx).await;
-                            } else {
-                                self.process_external_transaction(rtx_msg.tx).await;
-                            }
-                            //self.print_builder_state().await;
-                            println!("Local tx_maps after processing the transaction:\n Tx_hash_to_available_txns: {:?} \nTimestamp to tx {:?}\n Included txns{:?}", 
-                                        self.tx_hash_to_available_txns, self.timestamp_to_tx, self.included_txns);
-                            
-                        }
-
-                        // decide message
-                        MessageType::DecideMessage(rdecide_msg) => {
-                            println!("Received decide msg in builder {}: {:?} from index {}", self.builder_keys.0, rdecide_msg, channel_index);
-                            // store in the rdecide_msgs
-                            //self.print_builder_state().await;
-                            let decide_status = self.process_decide_event(rdecide_msg).await;
-                            //self.print_builder_state().await;
-                            // TODO
-                            // if should exit, then break out of the loop
-                            match decide_status{
-                                Some(Status::ShouldExit) => {
-                                    break;
-                                }
-                                Some(Status::ShouldContinue) => {
-                                    continue;
                                 }
                                 None => {
-                                    continue;
+                                    tracing::info!("No more tx messages to consume");
                                 }
                             }
                         }
-
-                        // DA proposal message
-                        MessageType::DAProposalMessage(rda_msg) => {
-                            println!("Received da proposal msg in builder {}: {:?} from index {}", self.builder_keys.0, rda_msg, channel_index);
-                            //self.print_builder_state().await;
-                            // print only the keys in self.da_proposal_payload_commit_to_da_proposal map
-                            println!("DA proposal payload commit to da proposal map keys before processing: {:?}", self.da_proposal_payload_commit_to_da_proposal.keys());
-                            self.process_da_proposal(rda_msg).await;
-                            println!("DA proposal payload commit to da proposal map keys after processing: {:?}", self.da_proposal_payload_commit_to_da_proposal.keys());
-                            //self.print_builder_state().await;
-
+                        da = self.da_proposal_receiver.next() => {
+                            //println!("Received da proposal msg in builder {}: {:?} from index", self.builder_keys.0, da);
+                            match da {
+                                Some(da) => {
+                                    if let MessageType::DAProposalMessage(rda_msg) = da {
+                                        tracing::debug!("Received da proposal msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rda_msg.proposal.data.view_number);
+                                        self.process_da_proposal(rda_msg);
+                                    }
+                                }
+                                None => {
+                                    tracing::info!("No more da proposal messages to consume");
+                                }
+                            }
                         }
-                        // QC proposal message
-                        MessageType::QCMessage(rqc_msg) => {
-                            println!("Received qc msg in builder {}: {:?} from index {}", self.builder_keys.0, rqc_msg, channel_index);
-                            //self.print_builder_state().await;
-                            println!("QC proposal payload commit to QC proposal map keys before processing: {:?}", self.quorum_proposal_payload_commit_to_quorum_proposal.keys());
-                            self.process_quorum_proposal(rqc_msg).await;
-                            println!("QC proposal payload commit to QC proposal map keys before processing: {:?}", self.quorum_proposal_payload_commit_to_quorum_proposal.keys());
-
-                            //self.print_builder_state().await;
+                        qc = self.qc_receiver.next() => {
+                            //println!("Received qc msg in builder {}: {:?} from index", self.builder_keys.0, qc);
+                            match qc {
+                                Some(qc) => {
+                                    if let MessageType::QCMessage(rqc_msg) = qc {
+                                        tracing::debug!("Received qc msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rqc_msg.proposal.data.view_number);
+                                        self.process_quorum_proposal(rqc_msg);
+                                    }
+                                }
+                                None => {
+                                    tracing::info!("No more qc messages to consume");
+                                }
+                            }
                         }
-                    }
-                    
+                        decide = self.decide_receiver.next() => {
+                            match decide {
+                                Some(decide) => {
+                                    if let MessageType::DecideMessage(rdecide_msg) = decide {
+                                        tracing::debug!("Received decide msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rdecide_msg);
+                                        let decide_status = self.process_decide_event(rdecide_msg).await;
+                                        match decide_status{
+                                            Some(Status::ShouldExit) => {
+                                                break;
+                                            }
+                                            Some(Status::ShouldContinue) => {
+                                                continue;
+                                            }
+                                            None => {
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
+                                None => {
+                                    tracing::info!("No more decide messages to consume");
+                                }
+                            }
+                        }
+                    };  
+                   
                 }
-                Err(err) => {
-                    println!("Error in builder event loop: {:?}", err);
-                    if err == RecvError::Closed {
-                        println!("The channel {} is closed", channel_index);
-                        //break;
-                        //channel_close_index.insert(channel_index);
-                    }
-                    else{
-                        println!("No more messages to consume {}", channel_index);
-                        break;
-                    }
-                }
-            }
-            
-        */
-        };
-    }
-    async fn event_loop(mut self){
-        
-        //let builder_handle = task::spawn(async move{
-        let builder_handle = async_spawn(async move{
-                
-                //let mut x = futures::stream::select(self.tx_receiver, self.da_proposal_receiver);
-                
-                self.loop_function().await;
                 
             });
-            
-            //builder_handle
-            builder_handle.await;
             
     }
 }
