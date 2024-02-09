@@ -27,6 +27,8 @@ use async_std::task;
 use async_trait::async_trait;
 use async_compatibility_layer::channel:: UnboundedSender;
 use async_lock::RwLock;
+use async_compatibility_layer::art::{async_sleep, async_spawn};
+
 //use futures_lite::{future::block_on, stream::StreamExt};
 use futures::stream;//::{select, select_all};
 //use sha2::digest::crypto_common::rand_core::block;
@@ -822,7 +824,8 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
     async fn event_loop(mut self){
         
-            let builder_handle = task::spawn(async move{
+        //let builder_handle = task::spawn(async move{
+        let builder_handle = async_spawn(async move{
                 
                 //let mut x = futures::stream::select(self.tx_receiver, self.da_proposal_receiver);
                 

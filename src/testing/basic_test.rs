@@ -27,6 +27,7 @@ pub use crate::builder_state::{BuilderState,MessageType, BuilderProgress, Respon
 pub use async_broadcast::{broadcast, TryRecvError, Sender as BroadcastSender, Receiver as BroadcastReceiver, RecvError};
 // tests
 use commit::{Commitment, Committable, CommitmentBoundsArkless};
+use async_compatibility_layer::art::{async_sleep, async_spawn};
 /// The following tests are performed:
 #[cfg(test)]
 mod tests {
@@ -228,7 +229,7 @@ mod tests {
         assert_eq!(quorum_membershiop.total_nodes(), TEST_NUM_NODES_IN_VID_COMPUTATION);
 
 
-        let handle = task::spawn(async move{
+        let handle = async_spawn(async move{
             let mut builder_state = BuilderState::<TestTypes>::new((builder_pub_key, builder_private_key), 
                                                             (ViewNumber::new(0), genesis_vid_commitment(), Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage()), 
                                                             tx_receiver, decide_receiver, da_receiver, qc_receiver, req_receiver, global_state, res_sender, Arc::new(quorum_membershiop)); 
