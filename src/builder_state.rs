@@ -834,7 +834,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             });
             
             //builder_handle
-            //builder_handle.await;
+            builder_handle.await;
             
     }
 }
