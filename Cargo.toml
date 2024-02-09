@@ -44,9 +44,9 @@ atomic_store = { git = "https://github.com/EspressoSystems/atomicstore.git", tag
 unix-time = "0.1.5"
 async-broadcast = "0.6.0"
 sha2 = "0.10"
-jf-primitives = { git = "https://github.com/EspressoSystems/jellyfish" }
+#jf-primitives = { git = "https://github.com/EspressoSystems/jellyfish" }
 
-#hs-builder-api = {git = "https://github.com/EspressoSystems/hs-builder-api", branch="main"}
-hs-builder-api = {path="../hs-builder-api"}
+hs-builder-api = {git = "https://github.com/EspressoSystems/hs-builder-api", branch="builder_specific_information"}
+#hs-builder-api = {path="../hs-builder-api"}
 tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64", tag = "0.3.4" }
 futures-lite = "2.2.0"
