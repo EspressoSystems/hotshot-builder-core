@@ -1,3 +1,7 @@
+// Copyright (c) 2024 Espresso Systems (espressosys.com)
+// This file is part of the HotShot Builder Protocol.
+//
+
 //! Builder Phase 1
 //! It mainly provides two API services to external users:
 //! 1. Serves a proposer(leader)'s request to provide blocks information
@@ -13,7 +17,7 @@
 //!
 
 // providing the API services to the external users
-pub mod api;
+// pub mod api;
 
 // providing the core services to support above API services
 pub mod builder_state;

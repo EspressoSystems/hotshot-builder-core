@@ -1,3 +1,7 @@
+// Copyright (c) 2024 Espresso Systems (espressosys.com)
+// This file is part of the HotShot Builder Protocol.
+//
+
 //! Builder Phase 1
 //! It mainly provides two API services to external users:
 //! 1. Serves a proposer(leader)'s request to provide blocks information
@@ -11,76 +15,129 @@
 //!     b. Quorum Proposal
 //!     c. Decide Event
 //!
-// TODO no warning for unused imports
-#![allow(unused_imports)]
 #![allow(unused_variables)]
-pub use hotshot::{traits::NodeImplementation, types::SystemContextHandle};
-//use async_compatibility_layer::{channel::UnboundedStream, art::async_spawn};
-use async_lock::RwLock;
-use commit::Committable;
-use futures::{Stream, stream::StreamExt};
-use hotshot_task::{
-    boxed_sync,
-    event_stream::{ChannelStream, EventStream, StreamId},
-    global_registry::GlobalRegistry,
-    task::FilterEvent,
-    BoxSyncFuture,
-};
-use hotshot_task_impls::events::HotShotEvent;
-use hotshot_testing::state_types::TestTypes;
-use hotshot_types::simple_vote::QuorumData;
+use hotshot::{traits::NodeImplementation, types::SystemContextHandle, HotShotConsensusApi};
+use hotshot_task::task::FilterEvent;
 use hotshot_types::{
-    consensus::Consensus,
-    error::HotShotError,
-    event::{EventType, Event},
-    message::{MessageKind, SequencingMessage},
+    event::EventType,
     traits::{
-        election::Membership, node_implementation::NodeType as BuilderType, state::ConsensusTime, storage::Storage,
+        node_implementation::NodeType as BuilderType,
+        signature_key::SignatureKey,block_contents::{BlockHeader,BlockPayload}, consensus_api::ConsensusApi
     },
+    utils::BuilderCommitment,
+    data::VidCommitment
 };
-use hotshot_types::{data::Leaf, simple_certificate::QuorumCertificate};
+use hs_builder_api::{data_source::BuilderDataSource, block_info::{AvailableBlockData, AvailableBlockInfo}, builder::BuildError};
 
-use std::sync::Arc;
+use futures::stream::StreamExt;
+use async_compatibility_layer::channel::UnboundedReceiver;
+use async_broadcast::Sender as BroadcastSender;
+use async_trait::async_trait;
+use async_std::task::JoinHandle;
+
+use std::{collections::HashMap, sync::Arc};
+use tagged_base64::TaggedBase64;
 use tracing::error;
+use sha2::{Digest, Sha256};
 
-//use crate::builder_state::{MessageType, BuilderType, TransactionMessage, DecideMessage, QuorumProposalMessage, QCMessage};
-use async_broadcast::{broadcast, Sender as BroadcastSender, Receiver as BroadcastReceiver};
-use futures::future::ready;
-use crate::builder_state::{BuilderState, MessageType};
-use crate::builder_state::{TransactionMessage, TransactionType, DecideMessage, DAProposalMessage, QCMessage};
+use crate::builder_state::{TransactionMessage, TransactionSource, DecideMessage, DAProposalMessage, QCMessage};
+use crate::builder_state::{ MessageType, ResponseMessage, RequestMessage};
+
 #[derive(clap::Args, Default)]
 pub struct Options {
     #[clap(short, long, env = "ESPRESSO_BUILDER_PORT")]
     pub port: u16
 }
+//
+#[derive(Debug)]
+pub struct GlobalState<Types: BuilderType>{
+    pub block_hash_to_block: HashMap<BuilderCommitment, (Types::BlockPayload, <<Types as BuilderType>::BlockPayload as BlockPayload>::Metadata, Arc<JoinHandle<()>>, 
+                                                            <<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,Types::SignatureKey)>,
+    pub request_sender: BroadcastSender<MessageType<Types>>,
+    pub response_receiver: UnboundedReceiver<ResponseMessage<Types>>,
+}
 
+impl<Types: BuilderType> GlobalState<Types>{
+    pub fn remove_handles(&mut self, vidcommitment: VidCommitment, block_hashes: Vec<BuilderCommitment>) {
+        tracing::info!("Removing handles for vid commitment {:?}", vidcommitment);
+        for block_hash in block_hashes {
+            self.block_hash_to_block.remove(&block_hash);
+        }
+    }
+    pub fn new(request_sender: BroadcastSender<MessageType<Types>>, response_receiver: UnboundedReceiver<ResponseMessage<Types>>) -> Self {
+        GlobalState{
+            block_hash_to_block: Default::default(),
+            request_sender: request_sender,
+            response_receiver: response_receiver,
+        }
+    }
+}
+//use hotshot_types::traits::node_implementation::NodeType;
 
-// async fn process_events() -> Result<(), Error> {
-//     loop {
-//         // wait for an event
-//         // process the event
-//         // if the event is a transaction, then process it
-//         // if the event is a DA proposal, then process it
-//         // if the event is a QC proposal, then process it
-//         // if the event is a decide event, then process it
-//     }
-// }
+#[async_trait]
+impl<Types:BuilderType> BuilderDataSource<Types> for GlobalState<Types>
+where
+    for<'a> <<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType: From<&'a tagged_base64::TaggedBase64>,
+    TaggedBase64: From<<<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType>
+{
+    async fn get_available_blocks(
+        &self,
+        for_parent: &VidCommitment,
+    ) -> Result<Vec<AvailableBlockInfo<Types>>, BuildError> {
 
-// following could be used if we need additiona processing for the events we received before passing to a builder
-async fn process_da_proposal<T:BuilderType>(builder_info: &mut BuilderState<T>){
-    unimplemented!("Process DA Proposal");
+        let req_msg = RequestMessage{
+            requested_vid_commitment: for_parent.clone(),
+        };
+        self.request_sender.broadcast(MessageType::RequestMessage(req_msg)).await.unwrap();
+        let response_received = self.response_receiver.recv().await;
+        
+        match response_received {
+            Ok(response) =>{
+                let block_metadata = AvailableBlockInfo::<Types>{
+                    block_hash: response.block_hash,
+                    block_size: response.block_size,
+                    offered_fee: response.offered_fee,
+                    signature: response.signature,
+                    sender: response.sender,
+                    _phantom: Default::default(),
+                };
+                Ok(vec![block_metadata])
+
+            }
+            _ => {
+                Err(BuildError::Error{message: "No blocks available".to_string()})
+            }
+        }
+    }
+    async fn claim_block(
+        &self,
+        block_hash: &BuilderCommitment,
+        signature: &<<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
+    ) -> Result<AvailableBlockData<Types>, BuildError> {
+        // TODO: Verify the signature??
+        
+        if let Some(block) = self.block_hash_to_block.get(block_hash){
+            //Ok(block.0.clone())
+            let block_data = AvailableBlockData::<Types>{
+                block_payload: block.0.clone(),
+                signature: block.3.clone(),
+                sender: block.4.clone(),
+                _phantom: Default::default(),
+            };
+            Ok(block_data)
+        } else {
+            Err(BuildError::Error{message: "Block not found".to_string()})
+        }
+        // TODO: should we remove the block from the hashmap?
+
+    }
+    async fn submit_txn(&self, txn: <Types as BuilderType>::Transaction) -> Result<(), BuildError> {
+        unimplemented!()
+    }
 }
 
 
-async fn process_qc_proposal<T:BuilderType>(builder_info: &mut BuilderState<T>){
-    unimplemented!("Process QC Proposal");
-}
-
-
-async fn process_decide_event<T:BuilderType>(builder_info: &mut BuilderState<T>, ) {
-   unimplemented!("Process Decide Event");
-}
-
+// impl api // from the hs-builder-api/src/
 /// Run an instance of the default Espresso builder service.
 pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplementation<Types>, D>(
     options: Options,
@@ -89,15 +146,12 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
     tx_sender: BroadcastSender<MessageType<Types>>,
     decide_sender: BroadcastSender<MessageType<Types>>,
     da_sender: BroadcastSender<MessageType<Types>>,
-    qc_sender: BroadcastSender<MessageType<Types>>
-
+    qc_sender: BroadcastSender<MessageType<Types>>,
 ) -> Result<(),()>
 //where //TODO
     //Payload<Types>: availability::QueryablePayload
     // Might need to bound D with something...
 {
-        
-        // hear out for events from the context handle and execute them
         loop {
             let (mut event_stream, _streamid) = hotshot.get_event_stream(FilterEvent::default()).await;
             match event_stream.next().await {
@@ -119,7 +173,7 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
                             for tx_message in transactions {
                                     let tx_msg = TransactionMessage::<Types>{
                                         tx: tx_message,
-                                        tx_type: TransactionType::HotShot,
+                                        tx_type: TransactionSource::HotShot,
                                     };
                                     tx_sender.broadcast(MessageType::TransactionMessage(tx_msg)).await.unwrap(); 
                             }
@@ -127,22 +181,43 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
                         // DA proposal event
                         EventType::DAProposal{proposal, sender}=> {
                             // process the DA proposal
-                            // process_da_proposal(da_proposal, data_source.clone()).await?;
-                            let da_msg = DAProposalMessage::<Types>{
-                                proposal: proposal,
-                                sender: sender,
-                            };
-                            da_sender.broadcast(MessageType::DAProposalMessage(da_msg)).await.unwrap();
-                            
+                            // get the leader for current view
+                            let leader = hotshot.get_leader(proposal.data.view_number).await;
+                            // get the encoded transactions hash
+                            let encoded_txns_hash = Sha256::digest(&proposal.data.encoded_transactions);
+                            // check if the sender is the leader and the signature is valid; if yes, broadcast the DA proposal
+                            if leader == sender && sender.validate(&proposal.signature, &encoded_txns_hash){
+
+                                // get the num of VID nodes
+                                let c_api: HotShotConsensusApi<Types, I> = HotShotConsensusApi {
+                                    inner: hotshot.hotshot.inner.clone(),
+                                };
+
+                                let total_nodes = c_api.total_nodes();
+
+                                let da_msg = DAProposalMessage::<Types>{
+                                    proposal: proposal,
+                                    sender: sender,
+                                    total_nodes: total_nodes.into(),
+                                };
+                                da_sender.broadcast(MessageType::DAProposalMessage(da_msg)).await.unwrap();
+                            }
                         }
                         // QC proposal event
                         EventType::QuorumProposal{proposal, sender} => {
                             // process the QC proposal
-                            let qc_msg = QCMessage::<Types>{
-                                proposal: proposal,
-                                sender: sender,
-                            };
-                            qc_sender.broadcast(MessageType::QCMessage(qc_msg)).await.unwrap();
+                            // get the leader for current view
+                            let leader = hotshot.get_leader(proposal.data.view_number).await;
+                            // get the payload commitment
+                            let payload_commitment = proposal.data.block_header.payload_commitment();
+                            // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
+                            if sender == leader && sender.validate(&proposal.signature, payload_commitment.as_ref()) {
+                                let qc_msg = QCMessage::<Types>{
+                                    proposal: proposal,
+                                    sender: sender,
+                                };
+                                qc_sender.broadcast(MessageType::QCMessage(qc_msg)).await.unwrap();
+                            }
                         }
                         // decide event
                         EventType::Decide {
@@ -159,6 +234,7 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
                         }
                         // not sure whether we need it or not //TODO
                         EventType::ViewFinished{view_number} => {
+                            tracing::info!("View Finished Event for view number: {:?}", view_number);
                             unimplemented!("View Finished Event");
                         }
                         _ => {
@@ -171,3 +247,4 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
         }
         
 }
+
