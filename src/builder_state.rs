@@ -279,11 +279,12 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 //let self_clone = self.clone();
                 
                 //self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
-                let self_clone = self.clone();
+                // let self_clone = self.clone();
                     
-                    task::spawn(async move {
-                        self_clone.spawn_clone(da_proposal_data, qc_proposal_data, sender).await
-                    }).await;
+                //     task::spawn(async move {
+                //         self_clone.spawn_clone(da_proposal_data, qc_proposal_data, sender).await
+                //     }).await;
+                self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
                 // register the clone to the global state
                 //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
             } else {
@@ -323,11 +324,13 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 if let Entry::Occupied(da_proposal_data) = self.da_proposal_payload_commit_to_da_proposal.entry(payload_vid_commitment.clone()) {
                     let da_proposal_data = da_proposal_data.remove();
                     //let self_clone = self.clone();
-                    let self_clone = self.clone();
+                    // let self_clone = self.clone();
                     
-                    task::spawn(async move {
-                        self_clone.spawn_clone(da_proposal_data, qc_proposal_data, sender).await
-                    }).await;
+                    // task::spawn(async move {
+                    //     self_clone.spawn_clone(da_proposal_data, qc_proposal_data, sender).await
+                    // }).await;
+                    self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender).await;
+
 
                     // registed the clone to the global state
                     //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
@@ -827,6 +830,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 
             });
             
+            //builder_handle
             //builder_handle.await;
             
     }
