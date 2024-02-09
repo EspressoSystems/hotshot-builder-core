@@ -51,18 +51,15 @@ pub struct Options {
 //
 #[derive(Debug)]
 pub struct GlobalState<Types: BuilderType>{
-    //pub block_hash_to_block: HashMap<BuilderCommitment, Types::BlockPayload>,
     pub block_hash_to_block: HashMap<BuilderCommitment, (Types::BlockPayload, <<Types as BuilderType>::BlockPayload as BlockPayload>::Metadata, Arc<JoinHandle<()>>, 
                                                             <<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,Types::SignatureKey)>,
-    //pub vid_to_potential_builder_state: HashMap<VidCommitment, BuilderState<Types>>,
     pub request_sender: BroadcastSender<MessageType<Types>>,
     pub response_receiver: UnboundedReceiver<ResponseMessage<Types>>,
 }
 
 impl<Types: BuilderType> GlobalState<Types>{
     pub fn remove_handles(&mut self, vidcommitment: VidCommitment, block_hashes: Vec<BuilderCommitment>) {
-        //self.vid_to_potential_builder_state.remove(&vidcommitment);
-        println!("Removing handles for vid commitment {:?}", vidcommitment);
+        tracing::info!("Removing handles for vid commitment {:?}", vidcommitment);
         for block_hash in block_hashes {
             self.block_hash_to_block.remove(&block_hash);
         }
@@ -237,7 +234,7 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
                         }
                         // not sure whether we need it or not //TODO
                         EventType::ViewFinished{view_number} => {
-                            println!("View Finished Event for view number: {:?}", view_number);
+                            tracing::info!("View Finished Event for view number: {:?}", view_number);
                             unimplemented!("View Finished Event");
                         }
                         _ => {
