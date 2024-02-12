@@ -53,7 +53,6 @@ mod tests {
     }
 
     use super::*;
-    const TEST_NUM_NODES_IN_VID_COMPUTATION: usize = 4;
     /// This test simulates multiple builders receiving messages from the channels and processing them
     #[async_std::test]
     //#[instrument]
@@ -89,6 +88,7 @@ mod tests {
         // no of test messages to send
         let num_test_messages = 3;
         let multiplication_factor = 5;
+        const TEST_NUM_NODES_IN_VID_COMPUTATION: usize = 4;
 
         // settingup the broadcast channels i.e [From hostshot: (tx, decide, da, qc, )], [From api:(req - broadcast, res - mpsc channel) ]
         let (tx_sender, tx_receiver) = broadcast::<MessageType<TestTypes>>(num_test_messages*multiplication_factor);
@@ -104,7 +104,7 @@ mod tests {
         let mut sda_msgs: Vec<DAProposalMessage<TestTypes>> = Vec::new();
         let mut sqc_msgs: Vec<QCMessage<TestTypes>> = Vec::new();
         let mut sreq_msgs: Vec<MessageType<TestTypes>> = Vec::new();
-        let mut sres_msgs: Vec<ResponseMessage<TestTypes>> = Vec::new();
+        let mut rres_msgs: Vec<ResponseMessage<TestTypes>> = Vec::new();
 
         
         // generate num_test messages for each type and send it to the respective channels;
@@ -147,7 +147,7 @@ mod tests {
             
             // Prepare the QC proposal message
             // calculate the vid commitment over the encoded_transactions
-            tracing::debug!("Encoded transactions: {:?}\n Num nodes:{}", encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION);
+            tracing::debug!("Encoded transactions: {:?} Num nodes:{}", encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION);
             let encoded_txns_vid_commitment = vid_commitment(&encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION); 
             tracing::debug!("Encoded transactions vid commitment: {:?}", encoded_txns_vid_commitment);
             
@@ -170,12 +170,15 @@ mod tests {
                         justify_qc: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.clone(),
                         parent_commitment: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.get_data().leaf_commit,
                         block_header: sqc_msgs[(i-1) as usize].proposal.data.block_header.clone(),
+                        // todo currently this is set to None in builder_state, see whether needs to make None here also
                         block_payload: Some(BlockPayload::from_bytes(sda_msgs[(i-1) as usize].proposal.data.encoded_transactions.clone().into_iter(), metadata)),
                         proposer_id: sqc_msgs[(i-1) as usize].proposal.data.proposer_id,
                     };
+                    
                     let q_data = QuorumData::<TestTypes>{
                         leaf_commit: leaf.commit(),
                     };
+
                     let justify_qc = SimpleCertificate::<TestTypes, QuorumData<TestTypes>, SuccessThreshold>{
                         data: q_data.clone(),
                         vote_commitment: q_data.commit(),
@@ -247,6 +250,9 @@ mod tests {
             tx_sender.broadcast(MessageType::TransactionMessage(stx_msg.clone())).await.unwrap();
             da_sender.broadcast(MessageType::DAProposalMessage(sda_msg.clone())).await.unwrap();
             qc_sender.broadcast(MessageType::QCMessage(sqc_msg.clone())).await.unwrap();
+            
+            // add some delay before sending the decide messages so that builder_state can have some time to process da and qc messages
+            //task::sleep(std::time::Duration::from_secs(1)).await;
             //decide_sender.broadcast(MessageType::DecideMessage(sdecide_msg.clone())).await.unwrap();
             
             //TODO: sending request message onto channel also
@@ -257,13 +263,11 @@ mod tests {
             });
 
             stx_msgs.push(stx_msg);
-            //sdecide_msgs.push(sdecide_msg);
+            sdecide_msgs.push(sdecide_msg);
             sda_msgs.push(sda_msg);
             sqc_msgs.push(sqc_msg);
-            //sreq_msgs.push(request_message);
+            sreq_msgs.push(request_message);
         }
-
-        
         // form the quorum election config, required for the VID computation inside the builder_state
         let quorum_election_config = <<TestTypes as BuilderType>::Membership as Membership<TestTypes>>::default_election_config(TEST_NUM_NODES_IN_VID_COMPUTATION as u64);
         
@@ -282,8 +286,8 @@ mod tests {
         assert_eq!(quorum_membership.total_nodes(), TEST_NUM_NODES_IN_VID_COMPUTATION);
 
         // instantiate the global state also
-        let global_state = Arc::new(RwLock::new(GlobalState::<TestTypes>::new(req_sender, res_receiver)));
-
+        let global_state = Arc::new(RwLock::new(GlobalState::<TestTypes>::new(req_sender.clone(), res_receiver)));
+        let global_state_clone = global_state.clone();
         // generate the keys for the buidler
         let seed = [201 as u8; 32];
         let (builder_pub_key, builder_private_key) = BLSPubKey::generated_from_seed_indexed(seed,2011 as u64);
@@ -296,7 +300,31 @@ mod tests {
                                                             //builder_state.event_loop().await;
             builder_state.event_loop();
         });
+
         handle.await;
-        task::sleep(std::time::Duration::from_secs(240)).await;
+
+        // go through the request messages in sreq_msgs and send the request message
+        for req_msg in sreq_msgs.iter(){
+            task::sleep(std::time::Duration::from_secs(1)).await;
+            req_sender.broadcast(req_msg.clone()).await.unwrap();
+        }
+        
+        task::sleep(std::time::Duration::from_secs(2)).await;
+        // go through the decide messages in s_decide_msgs and send the request message
+        for decide_msg in sdecide_msgs.iter(){
+            task::sleep(std::time::Duration::from_secs(1)).await;
+            decide_sender.broadcast(MessageType::DecideMessage(decide_msg.clone())).await.unwrap();
+        }
+
+        //let responses:Vec<ResponseMessage<TestTypes>> = Vec::new();
+        
+        while let Ok(res_msg) = global_state_clone.write_arc().await.response_receiver.try_recv(){
+            rres_msgs.push(res_msg);
+            if rres_msgs.len() == (num_test_messages-1) as usize{
+                break;
+            }
+        }
+        assert_eq!(rres_msgs.len(), (num_test_messages-1) as usize);
+        //task::sleep(std::time::Duration::from_secs(60)).await;
     }
 }

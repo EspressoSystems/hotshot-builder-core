@@ -317,11 +317,15 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         if self.built_from_view_vid_leaf.0.get_u64() == 0{
             tracing::info!("In bootstrapping phase");
         }
-        else if qc_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0 ||
-           qc_msg.proposal.data.justify_qc.get_data().leaf_commit != self.built_from_view_vid_leaf.2 {
-                tracing::info!("Either View number or leaf commit does not match the built-in info, so ignoring it");
-                return;
+        else if qc_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0{
+            tracing::info!("Either View number or leaf commit does not match the built-in info, so ignoring it");
+            return;
         }
+        // else if qc_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0 ||
+        //    qc_msg.proposal.data.justify_qc.get_data().leaf_commit != self.built_from_view_vid_leaf.2 {
+        //         tracing::info!("Either View number or leaf commit does not match the built-in info, so ignoring it");
+        //         return;
+        // }
         let qc_proposal_data = qc_msg.proposal.data;
         let sender = qc_msg.sender;
 
@@ -376,7 +380,11 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // handle the case when we hear a decide event before we have atleast one clone, in that case, we might exit the builder
         // and not make any progress; so we need to handle that case
         // Adhoc logic: if the number of subscrived receivers are more than 1, it means that there exists a clone and we can safely exit
-        if self.built_from_view_vid_leaf.0.get_u64() == 0 && self.tx_receiver.receiver_count() <=1 {
+        // if self.built_from_view_vid_leaf.0.get_u64() == 0 && self.tx_receiver.receiver_count() <=1 {
+        //     tracing::info!("In bootstrapping phase");
+        //     //return Some(Status::ShouldContinue);
+        // }
+        if self.built_from_view_vid_leaf.0.get_u64() == 0{
             tracing::info!("In bootstrapping phase");
             //return Some(Status::ShouldContinue);
         }
@@ -466,7 +474,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
                                            builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
     fn build_block(&mut self, _matching_vid: VidCommitment) -> Option<ResponseMessage<TYPES>>{
-
+        
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
             self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
                 self.tx_hash_to_available_txns.get(tx_hash).map(|(_ts, tx, _source)| {
@@ -507,27 +515,33 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 let vid = VidScheme::new(chunk_size, num_quorum_committee, &srs).unwrap();
                 vid.disperse(encoded_txns).unwrap();
             });
-
+            
+            // let join_handle = task::spawn(async move{
+            //     println!("Calculating VID");
+            // });
             //self.global_state.write().block_hash_to_block.insert(block_hash, (payload, metadata, join_handle));
             //let mut global_state = self.global_state.write().unwrap();
             //self.global_state.write_arc().await.block_hash_to_block.insert(block_hash.clone(), (payload, metadata, join_handle));
             
             // to sign combine the block_hash i.e builder commitment, block size and offered fee
             let mut combined_bytes: Vec<u8> = Vec::new();
-            combined_bytes.extend_from_slice(&block_size.to_be_bytes());
+            // TODO: see why it is signing is not working with 48 bytes, however it is working with 32 bytes
+            //combined_bytes.extend_from_slice(&block_size.to_ne_bytes());
             combined_bytes.extend_from_slice(block_hash.as_ref());
-            combined_bytes.extend_from_slice(&offered_fee.to_be_bytes());
+            //combined_bytes.extend_from_slice(&offered_fee.to_ne_bytes());
 
             let signature_over_block_info = <TYPES as BuilderType>::SignatureKey::sign(
-                &self.builder_keys.1, combined_bytes.as_slice())
-                .expect("Failed to sign tx hash");
+                &self.builder_keys.1, combined_bytes.as_ref()
+            ).expect("Failed to sign tx hash");
             //let signature = self.builder_keys.0.sign(&block_hash);
             return Some(ResponseMessage{block_hash: block_hash, block_size: block_size, offered_fee: offered_fee, 
                                         block_payload: payload, metadata: metadata, join_handle: Arc::new(join_handle), 
                                         signature: signature_over_block_info, sender: self.builder_keys.0.clone()});
         };
 
-        tracing::warn!("build the block, returning None");
+        
+
+        tracing::warn!("build block, returning None");
         None
     }
 
@@ -538,6 +552,8 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 let response = self.build_block(requested_vid_commitment);
                 match response{
                     Some(response)=>{
+
+                        tracing::info!("Builder {:?} Sending response {:?} to the request{:?}", self.built_from_view_vid_leaf, response, req);
                         // send the response back
                         self.response_sender.send(response.clone()).await.unwrap();
                         //let inner = Arc::unwrap_or_clone(response.join_handle);
@@ -553,6 +569,9 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 }
                 
         }
+        else {
+            tracing::info!("Builder {:?} Requested VID commitment does not match the built_from_view, so ignoring it", self.built_from_view_vid_leaf);
+        }
     }
     #[tracing::instrument(skip_all, name = "event loop", 
                                     fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(), 
@@ -564,7 +583,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 loop{
 
                     while let Ok(req) = self.req_receiver.try_recv() {
-                         tracing::info!("Received request msg in builder {}: {:?} from index", self.builder_keys.0, req);
+                         tracing::info!("Received request msg in builder {:?}: {:?}", self.built_from_view_vid_leaf, req);
                          if let MessageType::RequestMessage(req) = req {
                              self.process_block_request(req).await;
                          }
@@ -572,7 +591,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                     
                     futures::select!{
                         req = self.req_receiver.next() => {
-                            tracing::info!("Received request msg in builder {}: {:?} from index", self.builder_keys.0, req);
+                            tracing::info!("Received request msg in builder {:?}: {:?}", self.built_from_view_vid_leaf, req);
                             match req {
                                 Some(req) => {
                                     if let MessageType::RequestMessage(req) = req {
@@ -643,12 +662,15 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                         let decide_status = self.process_decide_event(rdecide_msg).await;
                                         match decide_status{
                                             Some(Status::ShouldExit) => {
+                                                tracing::debug!("Exiting the builder {:?}", self.built_from_view_vid_leaf);
                                                 break;
                                             }
                                             Some(Status::ShouldContinue) => {
+                                                tracing::debug!("continue the builder {:?}", self.built_from_view_vid_leaf);
                                                 continue;
                                             }
                                             None => {
+                                                tracing::debug!("None type: continue the builder {:?}", self.built_from_view_vid_leaf);
                                                 continue;
                                             }
                                         }
