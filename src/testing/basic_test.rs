@@ -13,9 +13,12 @@ pub use hotshot_testing::{
     state_types::{TestInstanceState, TestValidatedState},
 };
 pub use hotshot_types::{
-    traits::node_implementation::{NodeType as BuilderType, ConsensusTime},
+    traits::{
+        node_implementation::{NodeType as BuilderType, ConsensusTime, NodeType},
+        block_contents::BlockPayload,
+    },
     data::{ViewNumber, Leaf, DAProposal, QuorumProposal},
-    simple_certificate::QuorumCertificate,
+    simple_certificate::{QuorumCertificate,SimpleCertificate, SuccessThreshold},
     signature_key::{BLSPubKey,BLSPrivKey},
     message::Proposal,
 };
@@ -34,8 +37,9 @@ mod tests {
     use std::{hash::Hash, marker::PhantomData};
 
     use async_compatibility_layer::channel::unbounded;
+    use commit::Committable;
     use hotshot::types::SignatureKey;
-    use hotshot_types::{data::QuorumProposal, message::Message, traits::{block_contents::{vid_commitment, BlockHeader}, election::Membership}, vote::HasViewNumber};
+    use hotshot_types::{data::QuorumProposal, message::Message, simple_certificate::Threshold, simple_vote::QuorumData, traits::{block_contents::{vid_commitment, BlockHeader}, election::Membership}, utils::View, vote::{Certificate, HasViewNumber}};
     //use tracing::instrument;
 
     use crate::builder_state::{TransactionMessage, TransactionSource, DecideMessage, DAProposalMessage, QCMessage, RequestMessage};
@@ -95,115 +99,168 @@ mod tests {
         let (res_sender, res_receiver) = unbounded();
         
         // to store all the sent messages
-        let mut stx_msgs = Vec::new();
-        let mut sdecide_msgs = Vec::new();
-        let mut sda_msgs = Vec::new();
-        let mut sqc_msgs = Vec::new();
-        let mut sreq_msgs = Vec::new();
+        let mut stx_msgs: Vec<TransactionMessage<TestTypes>> = Vec::new();
+        let mut sdecide_msgs: Vec<DecideMessage<TestTypes>> = Vec::new();
+        let mut sda_msgs: Vec<DAProposalMessage<TestTypes>> = Vec::new();
+        let mut sqc_msgs: Vec<QCMessage<TestTypes>> = Vec::new();
+        let mut sreq_msgs: Vec<MessageType<TestTypes>> = Vec::new();
         let mut sres_msgs: Vec<ResponseMessage<TestTypes>> = Vec::new();
 
         
         // generate num_test messages for each type and send it to the respective channels;
         for i in 0..num_test_messages as u32{
-            // pass a msg to the tx channel
+            
+            // Prepare the transaction message
             let tx = TestTransaction(vec![i as u8]);
             let encoded_transactions = TestTransaction::encode(vec![tx.clone()]).unwrap();
             
-            // Prepare the transaction message
             let stx_msg = TransactionMessage::<TestTypes>{
                 tx: tx.clone(),
                 tx_type: TransactionSource::HotShot,
             };
-            tracing::debug!("Sending transaction message: {:?}", stx_msg);
-            // Prepare the decide message
-            let qc = QuorumCertificate::<TestTypes>::genesis();
-            let sdecide_msg = DecideMessage::<TestTypes>{
-                leaf_chain: Arc::new(vec![Leaf::genesis(&TestInstanceState {})]),
-                qc: Arc::new(qc),
-                block_size: Some(i as u64),
-            };
-            
+
             // Prepare the DA proposal message
             let da_proposal = DAProposal {
                 encoded_transactions: encoded_transactions.clone(),
                 metadata: (),
-                view_number: ViewNumber::new((i+1) as u64),
+                view_number: ViewNumber::new(i as u64),
             };
             let encoded_transactions_hash = Sha256::digest(&encoded_transactions);
             let seed = [i as u8; 32];
             let (pub_key, private_key) = BLSPubKey::generated_from_seed_indexed(seed,i as u64);
             let da_signature =
-                <TestTypes as hotshot_types::traits::node_implementation::NodeType>::SignatureKey::sign(
-                    &private_key,
-                    &encoded_transactions_hash,
-                )
-                .expect("Failed to sign encoded tx hash while preparing da proposal");
+            <TestTypes as hotshot_types::traits::node_implementation::NodeType>::SignatureKey::sign(
+                &private_key,
+                &encoded_transactions_hash,
+            )
+            .expect("Failed to sign encoded tx hash while preparing da proposal");
+
             let sda_msg = DAProposalMessage::<TestTypes>{
                 proposal: Proposal{
-                                data: da_proposal, 
-                                signature: da_signature.clone(), 
-                                _pd: PhantomData
-                                },
+                    data: da_proposal, 
+                    signature: da_signature.clone(), 
+                    _pd: PhantomData
+                },
                 sender: pub_key,
                 total_nodes: TEST_NUM_NODES_IN_VID_COMPUTATION,
             };
             
+            // Prepare the QC proposal message
             // calculate the vid commitment over the encoded_transactions
             tracing::debug!("Encoded transactions: {:?}\n Num nodes:{}", encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION);
             let encoded_txns_vid_commitment = vid_commitment(&encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION); 
             tracing::debug!("Encoded transactions vid commitment: {:?}", encoded_txns_vid_commitment);
+            
             let block_header = TestBlockHeader{
                 block_number: i as u64,
                 payload_commitment: encoded_txns_vid_commitment,
             };
-            // Prepare the QC proposal message
-            //let qc_signature = da_signature.clone();
+            
+            let justify_qc = match i{
+                0 => QuorumCertificate::<TestTypes>::genesis(),
+                _ => {
+                    let previous_qc = sqc_msgs[(i-1) as usize].proposal.data.justify_qc.clone();
+                    // Construct a leaf
+                    
+                    //let metadata  = block_header.metadata();
+                    let metadata = sqc_msgs[(i-1) as usize].proposal.data.block_header.metadata();
+                    
+                    let leaf: Leaf<_> = Leaf {
+                        view_number: sqc_msgs[(i-1) as usize].proposal.data.view_number.clone(),
+                        justify_qc: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.clone(),
+                        parent_commitment: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.get_data().leaf_commit,
+                        block_header: sqc_msgs[(i-1) as usize].proposal.data.block_header.clone(),
+                        block_payload: Some(BlockPayload::from_bytes(sda_msgs[(i-1) as usize].proposal.data.encoded_transactions.clone().into_iter(), metadata)),
+                        proposer_id: sqc_msgs[(i-1) as usize].proposal.data.proposer_id,
+                    };
+                    let q_data = QuorumData::<TestTypes>{
+                        leaf_commit: leaf.commit(),
+                    };
+                    let justify_qc = SimpleCertificate::<TestTypes, QuorumData<TestTypes>, SuccessThreshold>{
+                        data: q_data.clone(),
+                        vote_commitment: q_data.commit(),
+                        view_number: previous_qc.get_view_number(),
+                        signatures: previous_qc.signatures.clone(),
+                        is_genesis: true, // todo setting true because we don't have signatures of QCType
+                        _pd: PhantomData,
+                    };
+                    justify_qc
+                },
+            };
+
+            //<TestTypes as BuilderType>::SignatureKey::sign(private_key, encoded_txns_vid_commitment.as_ref()).unwrap(),
             let qc_proposal = QuorumProposal::<TestTypes>{
                 //block_header: TestBlockHeader::genesis(&TestInstanceState {}).0,
                 block_header: block_header,
-                view_number: ViewNumber::new((i+1) as u64),
-                justify_qc: QuorumCertificate::<TestTypes>::genesis(),
+                view_number: ViewNumber::new(i as u64),
+                justify_qc: justify_qc.clone(),
                 timeout_certificate: None,
                 proposer_id: pub_key
             };
             
             let payload_commitment = qc_proposal.block_header.payload_commitment();
-
+            
             // let leaf_commit = qc_proposal.justify_qc.data.commit();
             let qc_signature = <TestTypes as hotshot_types::traits::node_implementation::NodeType>::SignatureKey::sign(
                 &private_key,
                 payload_commitment.as_ref(),
             ).expect("Failed to sign payload commitment while preparing QC proposal");
-
-            let requested_vid_commitment = qc_proposal.block_header.payload_commitment();
+            
             
             let sqc_msg = QCMessage::<TestTypes>{
                 proposal: Proposal{
-                    data:qc_proposal, 
+                    data:qc_proposal.clone(), 
                     signature: qc_signature, 
                     _pd: PhantomData
                 },
                 sender: pub_key,
             };
 
+            // Prepare the decide message
+            // let qc = QuorumCertificate::<TestTypes>::genesis();
+            let leaf = match i{
+                0 => Leaf::genesis(&TestInstanceState {}),
+                _ => {
+                    let current_leaf: Leaf<_> = Leaf {
+                        view_number: ViewNumber::new(i as u64),
+                        justify_qc: justify_qc.clone(),
+                        parent_commitment: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.get_data().leaf_commit,
+                        block_header: qc_proposal.block_header.clone(),
+                        block_payload: Some(BlockPayload::from_bytes(encoded_transactions.clone().into_iter(), qc_proposal.block_header.metadata())),
+                        proposer_id: qc_proposal.proposer_id,
+                    };
+                    current_leaf
+                }, 
+            };
+        
+            
+
+            let sdecide_msg = DecideMessage::<TestTypes>{
+                leaf_chain: Arc::new(vec![leaf.clone()]),
+                qc: Arc::new(justify_qc),
+                block_size: Some(encoded_transactions.len() as u64),
+            };
+            
             // validate the signature before pushing the message to the builder_state channels
             // currently this step happens in the service.rs, wheneve we receiver an hotshot event
+            tracing::debug!("Sending transaction message: {:?}", stx_msg);
             tx_sender.broadcast(MessageType::TransactionMessage(stx_msg.clone())).await.unwrap();
             da_sender.broadcast(MessageType::DAProposalMessage(sda_msg.clone())).await.unwrap();
             qc_sender.broadcast(MessageType::QCMessage(sqc_msg.clone())).await.unwrap();
             //decide_sender.broadcast(MessageType::DecideMessage(sdecide_msg.clone())).await.unwrap();
-
+            
             //TODO: sending request message onto channel also
             // send the request message as well
+            let requested_vid_commitment = payload_commitment;
             let request_message = MessageType::<TestTypes>::RequestMessage(RequestMessage{
                 requested_vid_commitment: requested_vid_commitment,
             });
 
             stx_msgs.push(stx_msg);
-            sdecide_msgs.push(sdecide_msg);
+            //sdecide_msgs.push(sdecide_msg);
             sda_msgs.push(sda_msg);
             sqc_msgs.push(sqc_msg);
-            sreq_msgs.push(request_message);
+            //sreq_msgs.push(request_message);
         }
 
         
