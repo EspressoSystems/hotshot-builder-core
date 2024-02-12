@@ -520,7 +520,27 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 
                 loop{
 
+                    while let Ok(req) = self.req_receiver.try_recv() {
+                         println!("Received request msg in builder {}: {:?} from index", self.builder_keys.0, req);
+                         if let MessageType::RequestMessage(req) = req {
+                             self.process_block_request(req).await;
+                         }
+                    };
+                    
                     futures::select!{
+                        req = self.req_receiver.next() => {
+                            println!("Received request msg in builder {}: {:?} from index", self.builder_keys.0, req);
+                            match req {
+                                Some(req) => {
+                                    if let MessageType::RequestMessage(req) = req {
+                                        self.process_block_request(req).await;
+                                    }
+                                }
+                                None => {
+                                    tracing::info!("No more request messages to consume");
+                                }
+                            }
+                        },
                         tx = self.tx_receiver.next() => {
                             //println!("Received tx msg in builder {}: {:?} from index", self.builder_keys.0, tx);
                             match tx {
@@ -543,7 +563,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                     tracing::info!("No more tx messages to consume");
                                 }
                             }
-                        }
+                        },
                         da = self.da_proposal_receiver.next() => {
                             //println!("Received da proposal msg in builder {}: {:?} from index", self.builder_keys.0, da);
                             match da {
@@ -557,7 +577,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                     tracing::info!("No more da proposal messages to consume");
                                 }
                             }
-                        }
+                        },
                         qc = self.qc_receiver.next() => {
                             //println!("Received qc msg in builder {}: {:?} from index", self.builder_keys.0, qc);
                             match qc {
@@ -571,7 +591,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                     tracing::info!("No more qc messages to consume");
                                 }
                             }
-                        }
+                        },
                         decide = self.decide_receiver.next() => {
                             match decide {
                                 Some(decide) => {
@@ -595,7 +615,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                     tracing::info!("No more decide messages to consume");
                                 }
                             }
-                        }
+                        },
                     };  
                    
                 }
