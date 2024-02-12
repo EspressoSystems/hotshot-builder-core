@@ -206,33 +206,35 @@ mod tests {
             sreq_msgs.push(request_message);
         }
 
-        // instantiate the global state also
-        let global_state = Arc::new(RwLock::new(GlobalState::<TestTypes>::new(req_sender, res_receiver)));
-
-        let seed = [201 as u8; 32];
-        let (builder_pub_key, builder_private_key) = BLSPubKey::generated_from_seed_indexed(seed,2011 as u64);
-
+        
+        // form the quorum election config, required for the VID computation inside the builder_state
         let quorum_election_config = <<TestTypes as BuilderType>::Membership as Membership<TestTypes>>::default_election_config(TEST_NUM_NODES_IN_VID_COMPUTATION as u64);
         
         let mut commitee_stake_table_entries = vec![];
         for i in 0..TEST_NUM_NODES_IN_VID_COMPUTATION {
-            let (pub_key, private_key) = BLSPubKey::generated_from_seed_indexed([i as u8; 32],i as u64);
+            let (pub_key, _private_key) = BLSPubKey::generated_from_seed_indexed([i as u8; 32],i as u64);
             let stake = i as u64;
             commitee_stake_table_entries.push(pub_key.get_stake_table_entry(stake));
         }
-        
-        let quorum_membershiop = <<TestTypes as BuilderType>::Membership as Membership<TestTypes>>::create_election(
+
+        let quorum_membership = <<TestTypes as BuilderType>::Membership as Membership<TestTypes>>::create_election(
             commitee_stake_table_entries,
             quorum_election_config
         );
 
-        assert_eq!(quorum_membershiop.total_nodes(), TEST_NUM_NODES_IN_VID_COMPUTATION);
+        assert_eq!(quorum_membership.total_nodes(), TEST_NUM_NODES_IN_VID_COMPUTATION);
 
+        // instantiate the global state also
+        let global_state = Arc::new(RwLock::new(GlobalState::<TestTypes>::new(req_sender, res_receiver)));
+
+        // generate the keys for the buidler
+        let seed = [201 as u8; 32];
+        let (builder_pub_key, builder_private_key) = BLSPubKey::generated_from_seed_indexed(seed,2011 as u64);
 
         let handle = async_spawn(async move{
             let mut builder_state = BuilderState::<TestTypes>::new((builder_pub_key, builder_private_key), 
                                                             (ViewNumber::new(0), genesis_vid_commitment(), Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage()), 
-                                                            tx_receiver, decide_receiver, da_receiver, qc_receiver, req_receiver, global_state, res_sender, Arc::new(quorum_membershiop)); 
+                                                            tx_receiver, decide_receiver, da_receiver, qc_receiver, req_receiver, global_state, res_sender, Arc::new(quorum_membership)); 
             
                                                             //builder_state.event_loop().await;
             builder_state.event_loop();
