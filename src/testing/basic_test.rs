@@ -159,37 +159,55 @@ mod tests {
             let justify_qc = match i{
                 0 => QuorumCertificate::<TestTypes>::genesis(),
                 _ => {
-                    let previous_qc = sqc_msgs[(i-1) as usize].proposal.data.justify_qc.clone();
+                    let previous_justify_qc = sqc_msgs[(i-1) as usize].proposal.data.justify_qc.clone();
+                    
                     // Construct a leaf
                     
                     //let metadata  = block_header.metadata();
-                    let metadata = sqc_msgs[(i-1) as usize].proposal.data.block_header.metadata();
+                    let _metadata = sqc_msgs[(i-1) as usize].proposal.data.block_header.metadata();
                     
+                    // let leaf: Leaf<_> = Leaf {
+                    //     view_number: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.view_number.clone(),
+                    //     justify_qc: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.clone(),
+                    //     parent_commitment: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.get_data().leaf_commit,
+                    //     block_header: sqc_msgs[(i-1) as usize].proposal.data.block_header.clone(),
+                    //     // todo currently this is set to None in builder_state, see whether needs to make None here also
+                    //     block_payload: Some(BlockPayload::from_bytes(sda_msgs[(i-1) as usize].proposal.data.encoded_transactions.clone().into_iter(), metadata)),
+                    //     proposer_id: sqc_msgs[(i-1) as usize].proposal.data.proposer_id,
+                    // };
+
                     let leaf: Leaf<_> = Leaf {
                         view_number: sqc_msgs[(i-1) as usize].proposal.data.view_number.clone(),
                         justify_qc: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.clone(),
                         parent_commitment: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.get_data().leaf_commit,
                         block_header: sqc_msgs[(i-1) as usize].proposal.data.block_header.clone(),
-                        // todo currently this is set to None in builder_state, see whether needs to make None here also
-                        block_payload: Some(BlockPayload::from_bytes(sda_msgs[(i-1) as usize].proposal.data.encoded_transactions.clone().into_iter(), metadata)),
+                        block_payload: None,
                         proposer_id: sqc_msgs[(i-1) as usize].proposal.data.proposer_id,
                     };
-                    
+
                     let q_data = QuorumData::<TestTypes>{
                         leaf_commit: leaf.commit(),
+                    };
+                    
+                    let previous_qc_view_number = sqc_msgs[(i-1) as usize].proposal.data.view_number.get_u64();
+                    let view_number = if previous_qc_view_number == 0 && previous_justify_qc.view_number.get_u64() == 0{
+                        ViewNumber::new(0)
+                    } else {
+                        ViewNumber::new(1+previous_justify_qc.view_number.get_u64())
                     };
 
                     let justify_qc = SimpleCertificate::<TestTypes, QuorumData<TestTypes>, SuccessThreshold>{
                         data: q_data.clone(),
                         vote_commitment: q_data.commit(),
-                        view_number: previous_qc.get_view_number(),
-                        signatures: previous_qc.signatures.clone(),
+                        view_number: view_number,
+                        signatures: previous_justify_qc.signatures.clone(),
                         is_genesis: true, // todo setting true because we don't have signatures of QCType
                         _pd: PhantomData,
                     };
                     justify_qc
                 },
             };
+            tracing::debug!("Iteration: {} justify_qc: {:?}", i, justify_qc);
 
             //<TestTypes as BuilderType>::SignatureKey::sign(private_key, encoded_txns_vid_commitment.as_ref()).unwrap(),
             let qc_proposal = QuorumProposal::<TestTypes>{

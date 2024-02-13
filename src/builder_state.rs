@@ -251,10 +251,14 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         if self.built_from_view_vid_leaf.0.get_u64() == 0 {
             tracing::info!("In bootstrapping phase");
         }
-        else if da_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0{
-                tracing::info!("View number does not match the built_from_view, so ignoring it");
-                return;
+        else if da_msg.proposal.data.view_number <= self.built_from_view_vid_leaf.0{
+            tracing::info!("View number is lesser or equal from the built_from_view, so returning");
+            return;
         }
+        // else if da_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0{
+        //         tracing::info!("View number does not match the built_from_view, so ignoring it");
+        //         return;
+        // }
 
         let da_proposal_data = da_msg.proposal.data.clone();
         let sender = da_msg.sender;
@@ -317,8 +321,10 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         if self.built_from_view_vid_leaf.0.get_u64() == 0{
             tracing::info!("In bootstrapping phase");
         }
-        else if qc_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0{
-            tracing::info!("Either View number or leaf commit does not match the built-in info, so ignoring it");
+        else if qc_msg.proposal.data.justify_qc.view_number != self.built_from_view_vid_leaf.0 ||
+            qc_msg.proposal.data.justify_qc.get_data().leaf_commit != self.built_from_view_vid_leaf.2
+        {
+            tracing::info!("Either View number or leaf commit from justify qc does not match the built-in info, so returning");
             return;
         }
         // else if qc_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0 ||
@@ -380,11 +386,11 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // handle the case when we hear a decide event before we have atleast one clone, in that case, we might exit the builder
         // and not make any progress; so we need to handle that case
         // Adhoc logic: if the number of subscrived receivers are more than 1, it means that there exists a clone and we can safely exit
-        // if self.built_from_view_vid_leaf.0.get_u64() == 0 && self.tx_receiver.receiver_count() <=1 {
+        // if self.built_from_view_vid_leaf.0.get_u64() == 0{
         //     tracing::info!("In bootstrapping phase");
         //     //return Some(Status::ShouldContinue);
         // }
-        if self.built_from_view_vid_leaf.0.get_u64() == 0{
+        if self.built_from_view_vid_leaf.0.get_u64() == 0 && self.tx_receiver.receiver_count() <=1 {
             tracing::info!("In bootstrapping phase");
             //return Some(Status::ShouldContinue);
         }
