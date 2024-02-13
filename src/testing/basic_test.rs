@@ -53,7 +53,6 @@ mod tests {
     }
 
     use super::*;
-    const TEST_NUM_NODES_IN_VID_COMPUTATION: usize = 4;
     /// This test simulates multiple builders receiving messages from the channels and processing them
     #[async_std::test]
     //#[instrument]
