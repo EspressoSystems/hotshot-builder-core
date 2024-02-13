@@ -338,9 +338,9 @@ mod tests {
         
         while let Ok(res_msg) = global_state_clone.write_arc().await.response_receiver.try_recv(){
             rres_msgs.push(res_msg);
-            if rres_msgs.len() == (num_test_messages-1) as usize{
-                break;
-            }
+            // if rres_msgs.len() == (num_test_messages-1) as usize{
+            //     break;
+            // }
         }
         assert_eq!(rres_msgs.len(), (num_test_messages-1) as usize);
         //task::sleep(std::time::Duration::from_secs(60)).await;
