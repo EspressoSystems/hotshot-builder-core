@@ -212,6 +212,10 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
     
     /// processing the hotshot i.e public mempool transaction
+    #[tracing::instrument(skip_all, name = "process hotshot transaction", 
+                                    fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(), 
+                                           builder_vid=%self.built_from_view_vid_leaf.1.clone(),
+                                           builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
     fn process_hotshot_transaction(&mut self, tx: TYPES::Transaction)
     {
         let tx_hash = tx.commit();
@@ -231,6 +235,11 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
     
     /// processing the DA proposal
+    //#[tracing::instrument(skip_all, name = "Process DA Proposal", fields(builder_id=%self.built_from_view_vid_leaf.0.get_u64(), builder_commitments=%self.built_from_view_vid_leaf.1.clone()))]
+    #[tracing::instrument(skip_all, name = "process da proposal", 
+                                    fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(), 
+                                           builder_vid=%self.built_from_view_vid_leaf.1.clone(),
+                                           builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
     fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>)
     {
         // Validation
@@ -239,14 +248,14 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
 
         // bootstrapping part
         // if the view number is 0 then keep going, and don't return from it
-        if self.built_from_view_vid_leaf.0.get_u64() == 0 {
+        if self.built_from_view_vid_leaf.0.get_u64() == 0 && self.tx_receiver.receiver_count() <=1{
             tracing::info!("In bootstrapping phase");
         }
-        else if da_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0{
-                tracing::info!("View number does not match the built_from_view, so ignoring it");
-                return;
+        else if da_msg.proposal.data.view_number <= self.built_from_view_vid_leaf.0{
+            tracing::info!("View number is lesser or equal from the built_from_view, so returning");
+            return;
         }
-
+    
         let da_proposal_data = da_msg.proposal.data.clone();
         let sender = da_msg.sender;
 
@@ -271,9 +280,17 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
             // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
             if let Entry::Occupied(qc_proposal_data) = self.quorum_proposal_payload_commit_to_quorum_proposal.entry(payload_vid_commitment.clone()) {
                 let qc_proposal_data = qc_proposal_data.remove();
-                self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender);
-                // register the clone to the global state
-                //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
+                
+                // make sure we don't clone for the bootstrapping da and qc proposals
+                if qc_proposal_data.view_number.get_u64() != 0 {
+                    tracing::info!("Spawning a clone");
+                    self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender);
+                    // register the clone to the global state
+                    //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
+                }
+                else {
+                    tracing::info!("Not spawning a clone despite matching DA and QC proposals, as they corresponds to bootstrapping phase");
+                }
             } else {
                 self.da_proposal_payload_commit_to_da_proposal.insert(payload_vid_commitment, da_proposal_data);    
             }
@@ -282,6 +299,11 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
 
     /// processing the quorum proposal
+    //#[tracing::instrument(skip_all, name = "Process Quorum Proposal")]
+    #[tracing::instrument(skip_all, name = "process quorum proposal", 
+                                    fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(), 
+                                           builder_vid=%self.built_from_view_vid_leaf.1.clone(),
+                                           builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
     fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>)
     {
          // Validation
@@ -292,13 +314,14 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
        
         // bootstrapping part
         // if the view number is 0 then keep going, and don't return from it
-        if self.built_from_view_vid_leaf.0.get_u64() == 0{
+        if self.built_from_view_vid_leaf.0.get_u64() == 0 && self.tx_receiver.receiver_count() <=1{
             tracing::info!("In bootstrapping phase");
         }
-        else if qc_msg.proposal.data.view_number != self.built_from_view_vid_leaf.0 ||
-           qc_msg.proposal.data.justify_qc.get_data().leaf_commit != self.built_from_view_vid_leaf.2 {
-                tracing::info!("Either View number or leaf commit does not match the built-in info, so ignoring it");
-                return;
+        else if qc_msg.proposal.data.justify_qc.view_number != self.built_from_view_vid_leaf.0 ||
+            qc_msg.proposal.data.justify_qc.get_data().leaf_commit != self.built_from_view_vid_leaf.2
+        {
+            tracing::info!("Either View number or leaf commit from justify qc does not match the built-in info, so returning");
+            return;
         }
         let qc_proposal_data = qc_msg.proposal.data;
         let sender = qc_msg.sender;
@@ -310,10 +333,17 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
                 if let Entry::Occupied(da_proposal_data) = self.da_proposal_payload_commit_to_da_proposal.entry(payload_vid_commitment.clone()) {
                     let da_proposal_data = da_proposal_data.remove();
-                    self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender);
-                    // registed the clone to the global state
-                    //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
-                
+                    
+                    // make sure we don't clone for the bootstrapping da and qc proposals
+                    if da_proposal_data.view_number.get_u64() != 0 {
+                        tracing::info!("Spawning a clone");
+                        self.clone().spawn_clone(da_proposal_data, qc_proposal_data, sender);
+                        // registed the clone to the global state
+                        //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
+                    }
+                    else{
+                    tracing::info!("Not spawning a clone despite matching DA and QC proposals, as they corresponds to bootstrapping phase");
+                    }
                 } else {
                     self.quorum_proposal_payload_commit_to_quorum_proposal.insert(payload_vid_commitment, qc_proposal_data.clone());
                 }
@@ -322,6 +352,10 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
     
     /// processing the decide event
+    #[tracing::instrument(skip_all, name = "process decide event", 
+                                    fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(), 
+                                           builder_vid=%self.built_from_view_vid_leaf.1.clone(),
+                                           builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
     async fn process_decide_event(&mut self,  decide_msg: DecideMessage<TYPES>) -> Option<Status>
     {
 
@@ -391,9 +425,12 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
 
     // spawn a clone of the builder state
+    #[tracing::instrument(skip_all, name = "spwan_clone", 
+                                    fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(), 
+                                           builder_vid=%self.built_from_view_vid_leaf.1.clone(),
+                                           builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
     fn spawn_clone(mut self, da_proposal: DAProposal<TYPES>, quorum_proposal: QuorumProposal<TYPES>, leader: TYPES::SignatureKey)
     {
-        tracing::debug!("Spawning a clone");
         self.built_from_view_vid_leaf.0 = quorum_proposal.view_number;
         self.built_from_view_vid_leaf.1 = quorum_proposal.block_header.payload_commitment();
         
@@ -407,8 +444,6 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         };
         self.built_from_view_vid_leaf.2 = leaf.commit();
         
-        // let block_payload_txns = TestBlockPayload::from_bytes(encoded_txns.clone().into_iter(), &()).transactions;
-        // let encoded_txns_hash = Sha256::digest(&encoded_txns);
         let payload = <TYPES::BlockPayload as BlockPayload>::from_bytes(
             da_proposal.encoded_transactions.clone().into_iter(),
             quorum_proposal.block_header.metadata(),
@@ -424,9 +459,13 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         self.event_loop();
     }
 
-     // build a block
+    // build a block
+    #[tracing::instrument(skip_all, name = "build block", 
+                                    fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(), 
+                                           builder_vid=%self.built_from_view_vid_leaf.1.clone(),
+                                           builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
     fn build_block(&mut self, _matching_vid: VidCommitment) -> Option<ResponseMessage<TYPES>>{
-
+        
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
             self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
                 self.tx_hash_to_available_txns.get(tx_hash).map(|(_ts, tx, _source)| {
@@ -467,27 +506,29 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 let vid = VidScheme::new(chunk_size, num_quorum_committee, &srs).unwrap();
                 vid.disperse(encoded_txns).unwrap();
             });
-
             //self.global_state.write().block_hash_to_block.insert(block_hash, (payload, metadata, join_handle));
             //let mut global_state = self.global_state.write().unwrap();
             //self.global_state.write_arc().await.block_hash_to_block.insert(block_hash.clone(), (payload, metadata, join_handle));
             
             // to sign combine the block_hash i.e builder commitment, block size and offered fee
             let mut combined_bytes: Vec<u8> = Vec::new();
-            combined_bytes.extend_from_slice(&block_size.to_be_bytes());
+            // TODO: see why it is signing is not working with 48 bytes, however it is working with 32 bytes
+            //combined_bytes.extend_from_slice(&block_size.to_ne_bytes());
             combined_bytes.extend_from_slice(block_hash.as_ref());
-            combined_bytes.extend_from_slice(&offered_fee.to_be_bytes());
+            //combined_bytes.extend_from_slice(&offered_fee.to_ne_bytes());
 
             let signature_over_block_info = <TYPES as BuilderType>::SignatureKey::sign(
-                &self.builder_keys.1, combined_bytes.as_slice())
-                .expect("Failed to sign tx hash");
+                &self.builder_keys.1, combined_bytes.as_ref()
+            ).expect("Failed to sign tx hash");
             //let signature = self.builder_keys.0.sign(&block_hash);
             return Some(ResponseMessage{block_hash: block_hash, block_size: block_size, offered_fee: offered_fee, 
                                         block_payload: payload, metadata: metadata, join_handle: Arc::new(join_handle), 
                                         signature: signature_over_block_info, sender: self.builder_keys.0.clone()});
         };
 
-        tracing::warn!("build the block, returning None");
+        
+
+        tracing::warn!("build block, returning None");
         None
     }
 
@@ -498,6 +539,8 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 let response = self.build_block(requested_vid_commitment);
                 match response{
                     Some(response)=>{
+
+                        tracing::info!("Builder {:?} Sending response {:?} to the request{:?}", self.built_from_view_vid_leaf, response, req);
                         // send the response back
                         self.response_sender.send(response.clone()).await.unwrap();
                         //let inner = Arc::unwrap_or_clone(response.join_handle);
@@ -513,43 +556,65 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                 }
                 
         }
+        else {
+            tracing::info!("Builder {:?} Requested VID commitment does not match the built_from_view, so ignoring it", self.built_from_view_vid_leaf);
+        }
     }
-    #[tracing::instrument(skip_all, name = "Builder Event Loop")]
+    #[tracing::instrument(skip_all, name = "event loop", 
+                                    fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(), 
+                                           builder_vid=%self.built_from_view_vid_leaf.1.clone(),
+                                           builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
     fn event_loop(mut self){
         let _builder_handle = async_spawn(async move{
                 
                 loop{
 
+                    while let Ok(req) = self.req_receiver.try_recv() {
+                         tracing::info!("Received request msg in builder {:?}: {:?}", self.built_from_view_vid_leaf, req);
+                         if let MessageType::RequestMessage(req) = req {
+                             self.process_block_request(req).await;
+                         }
+                    };
+                    
                     futures::select!{
+                        req = self.req_receiver.next() => {
+                            tracing::info!("Received request msg in builder {:?}: {:?}", self.built_from_view_vid_leaf, req);
+                            match req {
+                                Some(req) => {
+                                    if let MessageType::RequestMessage(req) = req {
+                                        self.process_block_request(req).await;
+                                    }
+                                }
+                                None => {
+                                    tracing::info!("No more request messages to consume");
+                                }
+                            }
+                        },
                         tx = self.tx_receiver.next() => {
                             //println!("Received tx msg in builder {}: {:?} from index", self.builder_keys.0, tx);
                             match tx {
                                 Some(tx) => {
                                     if let MessageType::TransactionMessage(rtx_msg) = tx {
-                                        //tracing::debug!("Received tx msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rtx_msg);
+                                        tracing::debug!("Received tx msg in builder {:?}:\n {:?}", self.built_from_view_vid_leaf, rtx_msg);
                                         if rtx_msg.tx_type == TransactionSource::HotShot {
                                             self.process_hotshot_transaction(rtx_msg.tx);
                                         } else {
                                             self.process_external_transaction(rtx_msg.tx);
                                         }
                                         tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
-                                        // if self.built_from_view_vid_leaf.0.get_u64() == 1 && self.tx_hash_to_available_txns.len() == 2 {
-                                        //     // get the first transaction from the tx_hash_to_available_txns
-                                        //     break;
-                                        // }
                                     }
                                 }
                                 None => {
                                     tracing::info!("No more tx messages to consume");
                                 }
                             }
-                        }
+                        },
                         da = self.da_proposal_receiver.next() => {
-                            //println!("Received da proposal msg in builder {}: {:?} from index", self.builder_keys.0, da);
                             match da {
                                 Some(da) => {
                                     if let MessageType::DAProposalMessage(rda_msg) = da {
-                                        tracing::debug!("Received da proposal msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rda_msg.proposal.data.view_number);
+                                        tracing::debug!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_view_vid_leaf, rda_msg);
+                                        //tracing::debug!("Received da proposal msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rda_msg.proposal.data.view_number);
                                         self.process_da_proposal(rda_msg);
                                     }
                                 }
@@ -557,13 +622,13 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                     tracing::info!("No more da proposal messages to consume");
                                 }
                             }
-                        }
+                        },
                         qc = self.qc_receiver.next() => {
                             //println!("Received qc msg in builder {}: {:?} from index", self.builder_keys.0, qc);
                             match qc {
                                 Some(qc) => {
                                     if let MessageType::QCMessage(rqc_msg) = qc {
-                                        tracing::debug!("Received qc msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rqc_msg.proposal.data.view_number);
+                                        tracing::debug!("Received qc msg in builder {:?}:\n {:?} from index", self.built_from_view_vid_leaf, rqc_msg);
                                         self.process_quorum_proposal(rqc_msg);
                                     }
                                 }
@@ -571,21 +636,24 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                     tracing::info!("No more qc messages to consume");
                                 }
                             }
-                        }
+                        },
                         decide = self.decide_receiver.next() => {
                             match decide {
                                 Some(decide) => {
                                     if let MessageType::DecideMessage(rdecide_msg) = decide {
-                                        tracing::debug!("Received decide msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rdecide_msg);
+                                        tracing::debug!("Received decide msg in builder {:?}:\n {:?} from index", self.built_from_view_vid_leaf, rdecide_msg);
                                         let decide_status = self.process_decide_event(rdecide_msg).await;
                                         match decide_status{
                                             Some(Status::ShouldExit) => {
+                                                tracing::debug!("Exiting the builder {:?}", self.built_from_view_vid_leaf);
                                                 break;
                                             }
                                             Some(Status::ShouldContinue) => {
+                                                tracing::debug!("continue the builder {:?}", self.built_from_view_vid_leaf);
                                                 continue;
                                             }
                                             None => {
+                                                tracing::debug!("None type: continue the builder {:?}", self.built_from_view_vid_leaf);
                                                 continue;
                                             }
                                         }
@@ -595,7 +663,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                     tracing::info!("No more decide messages to consume");
                                 }
                             }
-                        }
+                        },
                     };  
                    
                 }
