@@ -86,7 +86,7 @@ mod tests {
             type Membership = GeneralStaticCommittee<TestTypes, Self::SignatureKey>;
         }
         // no of test messages to send
-        let num_test_messages = 3;
+        let num_test_messages = 10;
         let multiplication_factor = 5;
         const TEST_NUM_NODES_IN_VID_COMPUTATION: usize = 4;
 
