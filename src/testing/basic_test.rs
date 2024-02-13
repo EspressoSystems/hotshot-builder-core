@@ -104,6 +104,7 @@ mod tests {
         let mut sda_msgs: Vec<DAProposalMessage<TestTypes>> = Vec::new();
         let mut sqc_msgs: Vec<QCMessage<TestTypes>> = Vec::new();
         let mut sreq_msgs: Vec<MessageType<TestTypes>> = Vec::new();
+        // storing response messages
         let mut rres_msgs: Vec<ResponseMessage<TestTypes>> = Vec::new();
 
         
@@ -168,22 +169,9 @@ mod tests {
                 0 => QuorumCertificate::<TestTypes>::genesis(),
                 _ => {
                     let previous_justify_qc = sqc_msgs[(i-1) as usize].proposal.data.justify_qc.clone();
-                    
-                    // Construct a leaf
-                    
-                    //let metadata  = block_header.metadata();
+                    // metadata
                     let _metadata = sqc_msgs[(i-1) as usize].proposal.data.block_header.metadata();
-                    
-                    // let leaf: Leaf<_> = Leaf {
-                    //     view_number: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.view_number.clone(),
-                    //     justify_qc: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.clone(),
-                    //     parent_commitment: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.get_data().leaf_commit,
-                    //     block_header: sqc_msgs[(i-1) as usize].proposal.data.block_header.clone(),
-                    //     // todo currently this is set to None in builder_state, see whether needs to make None here also
-                    //     block_payload: Some(BlockPayload::from_bytes(sda_msgs[(i-1) as usize].proposal.data.encoded_transactions.clone().into_iter(), metadata)),
-                    //     proposer_id: sqc_msgs[(i-1) as usize].proposal.data.proposer_id,
-                    // };
-
+                    // Construct a leaf
                     let leaf: Leaf<_> = Leaf {
                         view_number: sqc_msgs[(i-1) as usize].proposal.data.view_number.clone(),
                         justify_qc: sqc_msgs[(i-1) as usize].proposal.data.justify_qc.clone(),
@@ -217,7 +205,6 @@ mod tests {
             };
             tracing::debug!("Iteration: {} justify_qc: {:?}", i, justify_qc);
 
-            //<TestTypes as BuilderType>::SignatureKey::sign(private_key, encoded_txns_vid_commitment.as_ref()).unwrap(),
             let qc_proposal = QuorumProposal::<TestTypes>{
                 //block_header: TestBlockHeader::genesis(&TestInstanceState {}).0,
                 block_header: block_header,
@@ -229,7 +216,6 @@ mod tests {
             
             let payload_commitment = qc_proposal.block_header.payload_commitment();
             
-            // let leaf_commit = qc_proposal.justify_qc.data.commit();
             let qc_signature = <TestTypes as hotshot_types::traits::node_implementation::NodeType>::SignatureKey::sign(
                 &private_key,
                 payload_commitment.as_ref(),
@@ -262,8 +248,6 @@ mod tests {
                 }, 
             };
         
-            
-
             let sdecide_msg = DecideMessage::<TestTypes>{
                 leaf_chain: Arc::new(vec![leaf.clone()]),
                 qc: Arc::new(justify_qc),
@@ -277,12 +261,7 @@ mod tests {
             da_sender.broadcast(MessageType::DAProposalMessage(sda_msg.clone())).await.unwrap();
             qc_sender.broadcast(MessageType::QCMessage(sqc_msg.clone())).await.unwrap();
             
-            // add some delay before sending the decide messages so that builder_state can have some time to process da and qc messages
-            //task::sleep(std::time::Duration::from_secs(1)).await;
-            //decide_sender.broadcast(MessageType::DecideMessage(sdecide_msg.clone())).await.unwrap();
-            
-            //TODO: sending request message onto channel also
-            // send the request message as well
+            // send decide and request messages later
             let requested_vid_commitment = payload_commitment;
             let request_message = MessageType::<TestTypes>::RequestMessage(RequestMessage{
                 requested_vid_commitment: requested_vid_commitment,
@@ -342,8 +321,6 @@ mod tests {
             decide_sender.broadcast(MessageType::DecideMessage(decide_msg.clone())).await.unwrap();
         }
 
-        //let responses:Vec<ResponseMessage<TestTypes>> = Vec::new();
-        
         while let Ok(res_msg) = global_state_clone.write_arc().await.response_receiver.try_recv(){
             rres_msgs.push(res_msg);
             // if rres_msgs.len() == (num_test_messages-1) as usize{

@@ -235,7 +235,6 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
     }
     
     /// processing the DA proposal
-    //#[tracing::instrument(skip_all, name = "Process DA Proposal", fields(builder_id=%self.built_from_view_vid_leaf.0.get_u64(), builder_commitments=%self.built_from_view_vid_leaf.1.clone()))]
     #[tracing::instrument(skip_all, name = "process da proposal", 
                                     fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(), 
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
@@ -247,7 +246,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // check for signature validation and correct leader (both of these are done in the service.rs i.e. before putting hotshot events onto the da channel)
 
         // bootstrapping part
-        // if the view number is 0 then keep going, and don't return from it
+        // if the view number is 0 and no more clone is active then keep going, and don't return from it
         if self.built_from_view_vid_leaf.0.get_u64() == 0 && self.tx_receiver.receiver_count() <=1{
             tracing::info!("In bootstrapping phase");
         }
@@ -313,7 +312,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
         // can use this commitment to match the da proposal or vice-versa
        
         // bootstrapping part
-        // if the view number is 0 then keep going, and don't return from it
+        // if the view number is 0 and no more clone is active then keep going, and don't return from it
         if self.built_from_view_vid_leaf.0.get_u64() == 0 && self.tx_receiver.receiver_count() <=1{
             tracing::info!("In bootstrapping phase");
         }
@@ -543,11 +542,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                         tracing::info!("Builder {:?} Sending response {:?} to the request{:?}", self.built_from_view_vid_leaf, response, req);
                         // send the response back
                         self.response_sender.send(response.clone()).await.unwrap();
-                        //let inner = Arc::unwrap_or_clone(response.join_handle);
-                        // generate signature over the block payload and metadata and sent it back
-                        
-                        // again sign over the block hash
-                        
+                        // write to global state as well
                         self.global_state.write_arc().await.block_hash_to_block.insert(response.block_hash, (response.block_payload, response.metadata, response.join_handle, response.signature, response.sender));
                     }
                     None => {
@@ -591,7 +586,6 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                             }
                         },
                         tx = self.tx_receiver.next() => {
-                            //println!("Received tx msg in builder {}: {:?} from index", self.builder_keys.0, tx);
                             match tx {
                                 Some(tx) => {
                                     if let MessageType::TransactionMessage(rtx_msg) = tx {
@@ -614,7 +608,6 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                                 Some(da) => {
                                     if let MessageType::DAProposalMessage(rda_msg) = da {
                                         tracing::debug!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_view_vid_leaf, rda_msg);
-                                        //tracing::debug!("Received da proposal msg in builder {:?}: {:?} from index", self.built_from_view_vid_leaf.0, rda_msg.proposal.data.view_number);
                                         self.process_da_proposal(rda_msg);
                                     }
                                 }
@@ -624,7 +617,6 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES>{
                             }
                         },
                         qc = self.qc_receiver.next() => {
-                            //println!("Received qc msg in builder {}: {:?} from index", self.builder_keys.0, qc);
                             match qc {
                                 Some(qc) => {
                                     if let MessageType::QCMessage(rqc_msg) = qc {
