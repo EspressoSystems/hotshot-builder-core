@@ -9,10 +9,6 @@ use async_std::task;
 pub use hotshot::traits::election::static_committee::{
     GeneralStaticCommittee, StaticElectionConfig,
 };
-pub use hotshot_testing::{
-    block_types::{genesis_vid_commitment, TestBlockHeader, TestBlockPayload, TestTransaction},
-    state_types::{TestInstanceState, TestValidatedState},
-};
 pub use hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal, ViewNumber},
     message::Proposal,

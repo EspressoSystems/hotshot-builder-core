@@ -24,13 +24,6 @@ pub use hotshot::{
 use async_lock::RwLock;
 use commit::Committable;
 
-use hotshot_task::{
-    boxed_sync,
-    event_stream::{ChannelStream, EventStream, StreamId},
-    global_registry::GlobalRegistry,
-    task::FilterEvent,
-    BoxSyncFuture,
-};
 use hotshot_task_impls::events::HotShotEvent;
 use hotshot_types::simple_vote::QuorumData;
 use hotshot_types::{

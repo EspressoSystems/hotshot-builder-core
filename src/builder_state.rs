@@ -4,6 +4,7 @@
 
 use hotshot_types::{
     data::{test_srs, DAProposal, Leaf, QuorumProposal, VidCommitment, VidScheme, VidSchemeTrait},
+    event::LeafChain,
     message::Proposal,
     simple_certificate::QuorumCertificate,
     traits::{
@@ -58,7 +59,7 @@ pub struct TransactionMessage<TYPES: BuilderType> {
 /// Decide Message to be put on the decide channel
 #[derive(Clone, Debug, PartialEq)]
 pub struct DecideMessage<TYPES: BuilderType> {
-    pub leaf_chain: Arc<Vec<Leaf<TYPES>>>,
+    pub leaf_chain: Arc<LeafChain<TYPES>>,
     pub qc: Arc<QuorumCertificate<TYPES>>,
     pub block_size: Option<u64>,
 }
@@ -410,11 +411,11 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let _qc = decide_msg.qc;
         let _block_size = decide_msg.block_size;
 
-        let _latest_decide_parent_commitment = leaf_chain[0].parent_commitment;
+        let _latest_decide_parent_commitment = leaf_chain[0].0.parent_commitment;
 
-        let _latest_decide_commitment = leaf_chain[0].commit();
+        let _latest_decide_commitment = leaf_chain[0].0.commit();
 
-        let leaf_view_number = leaf_chain[0].view_number;
+        let leaf_view_number = leaf_chain[0].0.view_number;
 
         // bootstrapping case
         // handle the case when we hear a decide event before we have atleast one clone, in that case, we might exit the builder
@@ -440,11 +441,11 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
         // go through all the leafs
         for leaf in leaf_chain.iter() {
-            let block_payload = leaf.get_block_payload();
+            let block_payload = leaf.0.get_block_payload();
             match block_payload {
                 Some(block_payload) => {
                     tracing::debug!("Block payload in decide event {:?}", block_payload);
-                    let metadata = leaf_chain[0].get_block_header().metadata();
+                    let metadata = leaf_chain[0].0.get_block_header().metadata();
                     let transactions_commitments = block_payload.transaction_commitments(&metadata);
                     // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx
                     //let transactions:Vec<TYPES::Transaction> = vec![];

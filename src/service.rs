@@ -17,7 +17,6 @@
 //!
 #![allow(unused_variables)]
 use hotshot::{traits::NodeImplementation, types::SystemContextHandle, HotShotConsensusApi};
-use hotshot_task::task::FilterEvent;
 use hotshot_types::{
     data::VidCommitment,
     event::EventType,
@@ -168,7 +167,7 @@ where
 pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplementation<Types>, D>(
     options: Options,
     data_source: D, // contains both the tx's and blocks local pool
-    mut hotshot: SystemContextHandle<Types, I>,
+    hotshot: SystemContextHandle<Types, I>,
     tx_sender: BroadcastSender<MessageType<Types>>,
     decide_sender: BroadcastSender<MessageType<Types>>,
     da_sender: BroadcastSender<MessageType<Types>>,
@@ -179,7 +178,7 @@ pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplement
     // Might need to bound D with something...
 {
     loop {
-        let (mut event_stream, _streamid) = hotshot.get_event_stream(FilterEvent::default()).await;
+        let mut event_stream = hotshot.get_event_stream();
         match event_stream.next().await {
             None => {
                 //TODO should we panic here?
