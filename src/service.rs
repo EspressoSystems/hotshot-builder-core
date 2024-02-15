@@ -94,7 +94,6 @@ impl<Types: BuilderType> GlobalState<Types> {
         }
     }
 }
-//use hotshot_types::traits::node_implementation::NodeType;
 
 #[async_trait]
 impl<Types: BuilderType> BuilderDataSource<Types> for GlobalState<Types>

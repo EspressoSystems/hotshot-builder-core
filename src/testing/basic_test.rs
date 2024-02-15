@@ -51,7 +51,11 @@ mod tests {
         utils::View,
         vote::{Certificate, HasViewNumber},
     };
-    //use tracing::instrument;
+
+    use hotshot_example_types::{
+        block_types::{genesis_vid_commitment, TestBlockHeader, TestBlockPayload, TestTransaction},
+        state_types::{TestInstanceState, TestValidatedState},
+    };
 
     use crate::builder_state::{
         DAProposalMessage, DecideMessage, QCMessage, RequestMessage, TransactionMessage,
@@ -67,6 +71,7 @@ mod tests {
     }
 
     use super::*;
+    use serde::{Deserialize, Serialize};
     /// This test simulates multiple builders receiving messages from the channels and processing them
     #[async_std::test]
     //#[instrument]
@@ -84,8 +89,8 @@ mod tests {
             Eq,
             PartialOrd,
             Ord,
-            serde::Serialize,
-            serde::Deserialize,
+            Serialize,
+            Deserialize,
         )]
         struct TestTypes;
         impl BuilderType for TestTypes {
@@ -310,7 +315,7 @@ mod tests {
             };
 
             let sdecide_msg = DecideMessage::<TestTypes> {
-                leaf_chain: Arc::new(vec![leaf.clone()]),
+                leaf_chain: Arc::new(vec![(leaf.clone(), None)]),
                 qc: Arc::new(justify_qc),
                 block_size: Some(encoded_transactions.len() as u64),
             };
