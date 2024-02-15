@@ -1,7 +1,8 @@
 // Copyright (c) 2024 Espresso Systems (espressosys.com)
 // This file is part of the HotShot Builder Protocol.
 //
-
+#![allow(clippy::redundant_field_names)]
+#![allow(clippy::too_many_arguments)]
 use hotshot_types::{
     data::{test_srs, DAProposal, Leaf, QuorumProposal, VidCommitment, VidScheme, VidSchemeTrait},
     event::LeafChain,
@@ -217,7 +218,6 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             || self.included_txns.contains(&tx_hash)
         {
             tracing::info!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
-            return;
         } else {
             // get the current timestamp in nanoseconds; it used for ordering the transactions
             let tx_timestamp = SystemTime::now()
@@ -226,7 +226,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 .as_nanos();
 
             // insert into both timestamp_tx and tx_hash_tx maps
-            self.timestamp_to_tx.insert(tx_timestamp, tx_hash.clone());
+            self.timestamp_to_tx.insert(tx_timestamp, tx_hash);
             self.tx_hash_to_available_txns
                 .insert(tx_hash, (tx_timestamp, tx, TransactionSource::External));
         }
@@ -254,7 +254,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 .as_nanos();
 
             // insert into both timestamp_tx and tx_hash_tx maps
-            self.timestamp_to_tx.insert(tx_timestamp, tx_hash.clone());
+            self.timestamp_to_tx.insert(tx_timestamp, tx_hash);
             self.tx_hash_to_available_txns
                 .insert(tx_hash, (tx_timestamp, tx, TransactionSource::HotShot));
         }
@@ -302,9 +302,9 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             "Generated payload commitment from the da proposal: {:?}",
             payload_vid_commitment
         );
-        if !self
+        if let std::collections::hash_map::Entry::Vacant(e) = self
             .da_proposal_payload_commit_to_da_proposal
-            .contains_key(&payload_vid_commitment)
+            .entry(payload_vid_commitment)
         {
             let da_proposal_data = DAProposal {
                 encoded_transactions: encoded_txns.clone(),
@@ -315,7 +315,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
             if let Entry::Occupied(qc_proposal_data) = self
                 .quorum_proposal_payload_commit_to_quorum_proposal
-                .entry(payload_vid_commitment.clone())
+                .entry(payload_vid_commitment)
             {
                 let qc_proposal_data = qc_proposal_data.remove();
 
@@ -330,8 +330,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     tracing::info!("Not spawning a clone despite matching DA and QC proposals, as they corresponds to bootstrapping phase");
                 }
             } else {
-                self.da_proposal_payload_commit_to_da_proposal
-                    .insert(payload_vid_commitment, da_proposal_data);
+                e.insert(da_proposal_data);
             }
         }
     }
@@ -370,14 +369,14 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             payload_vid_commitment
         );
         // first check whether vid_commitment exists in the qc_payload_commit_to_qc hashmap, if yer, ignore it, otherwise validate it and later insert in
-        if !self
+        if let std::collections::hash_map::Entry::Vacant(e) = self
             .quorum_proposal_payload_commit_to_quorum_proposal
-            .contains_key(&payload_vid_commitment)
+            .entry(payload_vid_commitment)
         {
             // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
             if let Entry::Occupied(da_proposal_data) = self
                 .da_proposal_payload_commit_to_da_proposal
-                .entry(payload_vid_commitment.clone())
+                .entry(payload_vid_commitment)
             {
                 let da_proposal_data = da_proposal_data.remove();
 
@@ -392,8 +391,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     tracing::info!("Not spawning a clone despite matching DA and QC proposals, as they corresponds to bootstrapping phase");
                 }
             } else {
-                self.quorum_proposal_payload_commit_to_quorum_proposal
-                    .insert(payload_vid_commitment, qc_proposal_data.clone());
+                e.insert(qc_proposal_data.clone());
             }
         }
     }
@@ -446,18 +444,17 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 Some(block_payload) => {
                     tracing::debug!("Block payload in decide event {:?}", block_payload);
                     let metadata = leaf_chain[0].0.get_block_header().metadata();
-                    let transactions_commitments = block_payload.transaction_commitments(&metadata);
+                    let transactions_commitments = block_payload.transaction_commitments(metadata);
                     // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx
                     //let transactions:Vec<TYPES::Transaction> = vec![];
                     for tx_hash in transactions_commitments.iter() {
                         // remove the transaction from the timestamp_to_tx map
-                        if let Some((timestamp, _, _)) =
-                            self.tx_hash_to_available_txns.get(&tx_hash)
+                        if let Some((timestamp, _, _)) = self.tx_hash_to_available_txns.get(tx_hash)
                         {
                             if self.timestamp_to_tx.contains_key(timestamp) {
                                 self.timestamp_to_tx.remove(timestamp);
                             }
-                            self.tx_hash_to_available_txns.remove(&tx_hash);
+                            self.tx_hash_to_available_txns.remove(tx_hash);
                         }
 
                         // maybe in the future, remove from the included_txns set also
@@ -535,7 +532,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             self.builder_commitments.push(block_hash.clone());
 
             //let num_txns = <TYPES::BlockPayload as TestBlockPayload>::txn_count(&payload);
-            let encoded_txns: Vec<u8> = payload.encode().unwrap().into_iter().collect();
+            let encoded_txns: Vec<u8> = payload.encode().unwrap().collect();
 
             let block_size: u64 = encoded_txns.len() as u64;
 

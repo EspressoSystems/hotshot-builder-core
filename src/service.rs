@@ -16,6 +16,7 @@
 //!     c. Decide Event
 //!
 #![allow(unused_variables)]
+#![allow(clippy::redundant_field_names)]
 use hotshot::{traits::NodeImplementation, types::SystemContextHandle, HotShotConsensusApi};
 use hotshot_types::{
     data::VidCommitment,
@@ -56,6 +57,7 @@ pub struct Options {
     pub port: u16,
 }
 //
+#[allow(clippy::type_complexity)]
 #[derive(Debug)]
 pub struct GlobalState<Types: BuilderType> {
     pub block_hash_to_block: HashMap<
@@ -108,7 +110,7 @@ where
         for_parent: &VidCommitment,
     ) -> Result<Vec<AvailableBlockInfo<Types>>, BuildError> {
         let req_msg = RequestMessage {
-            requested_vid_commitment: for_parent.clone(),
+            requested_vid_commitment: *for_parent,
         };
         self.request_sender
             .broadcast(MessageType::RequestMessage(req_msg))

@@ -5,6 +5,7 @@
 //! Builder Phase 1 Testing
 //!
 #![allow(unused_imports)]
+#![allow(clippy::redundant_field_names)]
 use async_std::task;
 pub use hotshot::traits::election::static_committee::{
     GeneralStaticCommittee, StaticElectionConfig,
@@ -180,10 +181,6 @@ mod tests {
                 "Encoded transactions vid commitment: {:?}",
                 encoded_txns_vid_commitment
             );
-            let block_header = TestBlockHeader {
-                block_number: i as u64,
-                payload_commitment: encoded_txns_vid_commitment,
-            };
             // Prepare the QC proposal message
             // calculate the vid commitment over the encoded_transactions
             tracing::debug!(
@@ -386,7 +383,7 @@ mod tests {
             BLSPubKey::generated_from_seed_indexed(seed, 2011 as u64);
 
         let handle = async_spawn(async move {
-            let mut builder_state = BuilderState::<TestTypes>::new(
+            let builder_state = BuilderState::<TestTypes>::new(
                 (builder_pub_key, builder_private_key),
                 (
                     ViewNumber::new(0),
