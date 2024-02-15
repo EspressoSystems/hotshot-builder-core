@@ -213,7 +213,7 @@ mod tests {
                         .metadata();
                     // Construct a leaf
                     let leaf: Leaf<_> = Leaf {
-                        view_number: sqc_msgs[(i - 1) as usize].proposal.data.view_number.clone(),
+                        view_number: sqc_msgs[(i - 1) as usize].proposal.data.view_number,
                         justify_qc: sqc_msgs[(i - 1) as usize].proposal.data.justify_qc.clone(),
                         parent_commitment: sqc_msgs[(i - 1) as usize]
                             .proposal
@@ -246,17 +246,15 @@ mod tests {
                     } else {
                         ViewNumber::new(1 + previous_justify_qc.view_number.get_u64())
                     };
-
-                    let justify_qc =
-                        SimpleCertificate::<TestTypes, QuorumData<TestTypes>, SuccessThreshold> {
-                            data: q_data.clone(),
-                            vote_commitment: q_data.commit(),
-                            view_number: view_number,
-                            signatures: previous_justify_qc.signatures.clone(),
-                            is_genesis: true, // todo setting true because we don't have signatures of QCType
-                            _pd: PhantomData,
-                        };
-                    justify_qc
+                    // form a justify qc
+                    SimpleCertificate::<TestTypes, QuorumData<TestTypes>, SuccessThreshold> {
+                        data: q_data.clone(),
+                        vote_commitment: q_data.commit(),
+                        view_number: view_number,
+                        signatures: previous_justify_qc.signatures.clone(),
+                        is_genesis: true, // todo setting true because we don't have signatures of QCType
+                        _pd: PhantomData,
+                    }
                 }
             };
             tracing::debug!("Iteration: {} justify_qc: {:?}", i, justify_qc);
@@ -378,9 +376,9 @@ mod tests {
         )));
         let global_state_clone = global_state.clone();
         // generate the keys for the buidler
-        let seed = [201 as u8; 32];
+        let seed = [201_u8; 32];
         let (builder_pub_key, builder_private_key) =
-            BLSPubKey::generated_from_seed_indexed(seed, 2011 as u64);
+            BLSPubKey::generated_from_seed_indexed(seed, 2011_u64);
 
         let handle = async_spawn(async move {
             let builder_state = BuilderState::<TestTypes>::new(
@@ -433,7 +431,7 @@ mod tests {
             //     break;
             // }
         }
-        assert_eq!(rres_msgs.len(), (num_test_messages - 1) as usize);
+        assert_eq!(rres_msgs.len(), (num_test_messages - 1));
         //task::sleep(std::time::Duration::from_secs(60)).await;
     }
 }
