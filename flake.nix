@@ -1,4 +1,4 @@
-# Copyright (c) 2022 Espresso Systems (espressosys.com)
+# Copyright (c) 2024 Espresso Systems (espressosys.com)
 # This file is part of the HotShot Builder library.
 #
 # This program is free software: you can redistribute it and/or modify it under the terms of the GNU
