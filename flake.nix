@@ -1,5 +1,5 @@
 # Copyright (c) 2022 Espresso Systems (espressosys.com)
-# This file is part of the HotShot Query Service library.
+# This file is part of the HotShot Builder Core library.
 #
 # This program is free software: you can redistribute it and/or modify it under the terms of the GNU
 # General Public License as published by the Free Software Foundation, either version 3 of the
@@ -11,7 +11,7 @@
 # see <https://www.gnu.org/licenses/>.
 
 {
-  description = "Generic query service for HotShot applications";
+  description = "Generic Builder Core for HotShot applications";
 
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
