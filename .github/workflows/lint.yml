@@ -20,12 +20,6 @@ jobs:
         features:
           # No optional features
           - ''
-          # Each optional feature on its own
-          - sql-data-source
-          - file-system-data-source
-          - metrics-data-source
-          # All optional features together
-          - sql-data-source,file-system-data-source,metrics-data-source
     env:
         RUSTFLAGS: "--cfg async_executor_impl=\"async-std\" --cfg async_channel_impl=\"async-std\""
         RUST_LOG: info

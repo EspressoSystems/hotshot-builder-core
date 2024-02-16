@@ -14,21 +14,16 @@
 //!     a. DA Proposal
 //!     b. Quorum Proposal
 //!     c. Decide Event
-//! 
+//!
 #![allow(unused_imports)]
 
-pub use hotshot::{traits::NodeImplementation, types::Event, SystemContext, types::SystemContextHandle};
+pub use hotshot::{
+    traits::NodeImplementation, types::Event, types::SystemContextHandle, SystemContext,
+};
 //use async_compatibility_layer::channel::UnboundedStream;
 use async_lock::RwLock;
 use commit::Committable;
 
-use hotshot_task::{
-    boxed_sync,
-    event_stream::{ChannelStream, EventStream, StreamId},
-    global_registry::GlobalRegistry,
-    task::FilterEvent,
-    BoxSyncFuture,
-};
 use hotshot_task_impls::events::HotShotEvent;
 use hotshot_types::simple_vote::QuorumData;
 use hotshot_types::{
@@ -36,22 +31,19 @@ use hotshot_types::{
     error::HotShotError,
     event::EventType,
     message::{MessageKind, SequencingMessage},
-    traits::{
-        election::Membership, node_implementation::NodeType, storage::Storage,
-    },
+    traits::{election::Membership, node_implementation::NodeType, storage::Storage},
 };
 use hotshot_types::{data::Leaf, simple_certificate::QuorumCertificate};
 
-use std::{sync::Arc, time::Instant, collections::HashSet};
+use std::{collections::HashSet, sync::Arc, time::Instant};
 use tracing::error;
 
 //use crate::builder_state::{BuilderState, BuilderType, GlobalId};
 
-
 /*
 
 
-// process the hotshot transaction event 
+// process the hotshot transaction event
 pub async fn process_hotshot_transaction<Types: NodeType, I: NodeImplementation<TYPES>>(
     event_stream: ChannelStream<HotShotEvent<Types>>,
     handle: SystemContextHandle<Types, I>,
@@ -71,11 +63,11 @@ pub async fn process_hotshot_transaction<Types: NodeType, I: NodeImplementation<
 
 // Used by the third API service i.e. to submit a transaction externally (priavate mempool)
 async fn process_external_transaction<T:BuilderType>(builder_info: &mut BuilderState<T>, tx_hash: T::TransactionCommit, tx: T::Transaction){
-    
+
     // go through the builderinfo.transactionspool btree map check if it already exits based on its transaction hash
     // if it does not exist, then add it to the builderinfo.transactionspool btree map
     // if it exists, then ignore it
-    
+
     if let Ok(mut txid_to_tx) = builder_info.txid_to_tx.lock() {
         if txid_to_tx.contains_key(&tx_hash) {
             println!("Transaction already exists in the builderinfo.txid_to_tx hashmap");
@@ -99,12 +91,12 @@ async fn process_external_transaction<T:BuilderType>(builder_info: &mut BuilderS
             }
 
             txid_to_tx.insert(tx_hash, tx);
-            
+
         }
     }
         // Code to handle when the transaction hash exists in the map
 }
-      
 
-      
+
+
 */
