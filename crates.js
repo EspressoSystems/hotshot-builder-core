@@ -1,0 +1,1 @@
+window.ALL_CRATES = ["hs_builder_core"];
