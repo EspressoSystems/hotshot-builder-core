@@ -266,6 +266,7 @@ mod tests {
                 justify_qc: justify_qc.clone(),
                 timeout_certificate: None,
                 proposer_id: pub_key,
+                upgrade_certificate: None,
             };
 
             let payload_commitment = qc_proposal.block_header.payload_commitment();
