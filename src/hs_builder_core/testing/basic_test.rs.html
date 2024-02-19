@@ -436,6 +436,7 @@
 <a href="#435" id="435">435</a>
 <a href="#436" id="436">436</a>
 <a href="#437" id="437">437</a>
+<a href="#438" id="438">438</a>
 </pre></div><pre class="rust"><code><span class="comment">// Copyright (c) 2024 Espresso Systems (espressosys.com)
 // This file is part of the HotShot Builder Protocol.
 //
@@ -704,6 +705,7 @@
                 justify_qc: justify_qc.clone(),
                 timeout_certificate: <span class="prelude-val">None</span>,
                 proposer_id: pub_key,
+                upgrade_certificate: <span class="prelude-val">None</span>,
             };
 
             <span class="kw">let </span>payload_commitment = qc_proposal.block_header.payload_commitment();
