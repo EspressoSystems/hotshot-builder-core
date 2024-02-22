@@ -165,7 +165,8 @@ where
 }
 
 #[async_trait]
-impl<Types:BuilderType> ReadState for GlobalState<Types> {
+impl<Types:BuilderType> ReadState for GlobalState<Types> 
+{
      type State = Self;
 
      async fn read<T>(
@@ -175,7 +176,6 @@ impl<Types:BuilderType> ReadState for GlobalState<Types> {
          op(self).await
      }
 }
-
 
 // impl api // from the hs-builder-api/src/
 /// Run an instance of the default Espresso builder service.
