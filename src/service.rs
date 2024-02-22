@@ -179,7 +179,7 @@ impl<Types:BuilderType> ReadState for GlobalState<Types>
 
 // impl api // from the hs-builder-api/src/
 /// Run an instance of the default Espresso builder service.
-pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplementation<Types>, D>(
+pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplementation<Types>>(
     //options: Options,
     //data_source: D, // contains both the tx's and blocks local pool
     hotshot: SystemContextHandle<Types, I>,
