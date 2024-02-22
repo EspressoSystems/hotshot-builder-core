@@ -45,7 +45,8 @@ use sha2::{Digest, Sha256};
 use std::{collections::HashMap, sync::Arc};
 use tagged_base64::TaggedBase64;
 use tracing::error;
-
+use tide_disco::method::ReadState;
+use futures::future::BoxFuture;
 use crate::builder_state::{
     DAProposalMessage, DecideMessage, QCMessage, TransactionMessage, TransactionSource,
 };
@@ -162,6 +163,19 @@ where
         unimplemented!()
     }
 }
+
+#[async_trait]
+impl<Types:BuilderType> ReadState for GlobalState<Types> {
+     type State = Self;
+
+     async fn read<T>(
+         &self,
+         op: impl Send + for<'a> FnOnce(&'a Self::State) -> BoxFuture<'a, T> + 'async_trait,
+     ) -> T {
+         op(self).await
+     }
+}
+
 
 // impl api // from the hs-builder-api/src/
 /// Run an instance of the default Espresso builder service.

@@ -3026,6 +3026,7 @@ dependencies = [
  "serde",
  "sha2 0.10.8",
  "tagged-base64",
+ "tide-disco",
  "tracing",
 ]
 
@@ -6668,7 +6669,7 @@ dependencies = [
 [[package]]
 name = "tide-disco"
 version = "0.4.6"
-source = "git+https://github.com/EspressoSystems/tide-disco.git?tag=v0.4.6#4ced31cef8aae769994098d245e026c127801b74"
+source = "git+https://github.com/EspressoSystems/tide-disco?tag=v0.4.6#4ced31cef8aae769994098d245e026c127801b74"
 dependencies = [
  "async-std",
  "async-trait",
