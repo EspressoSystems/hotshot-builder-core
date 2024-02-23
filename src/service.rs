@@ -24,7 +24,7 @@ use hotshot_types::{
     traits::{
         block_contents::{BlockHeader, BlockPayload},
         consensus_api::ConsensusApi,
-        node_implementation::NodeType as BuilderType,
+        node_implementation::NodeType,
         signature_key::SignatureKey,
     },
     utils::BuilderCommitment,
@@ -41,17 +41,17 @@ use async_std::task::JoinHandle;
 use async_trait::async_trait;
 use futures::stream::StreamExt;
 
-use sha2::{Digest, Sha256};
-use std::{collections::HashMap, sync::Arc};
-use tagged_base64::TaggedBase64;
-use tracing::error;
-use tide_disco::method::ReadState;
-use futures::future::BoxFuture;
 use crate::builder_state::{
     DAProposalMessage, DecideMessage, QCMessage, TransactionMessage, TransactionSource,
 };
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
-
+use futures::future::BoxFuture;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::{collections::HashMap, sync::Arc};
+use tagged_base64::TaggedBase64;
+use tide_disco::method::ReadState;
+use tracing::error;
 #[derive(clap::Args, Default)]
 pub struct Options {
     #[clap(short, long, env = "ESPRESSO_BUILDER_PORT")]
@@ -60,14 +60,14 @@ pub struct Options {
 //
 #[allow(clippy::type_complexity)]
 #[derive(Debug)]
-pub struct GlobalState<Types: BuilderType> {
+pub struct GlobalState<Types: NodeType> {
     pub block_hash_to_block: HashMap<
         BuilderCommitment,
         (
             Types::BlockPayload,
-            <<Types as BuilderType>::BlockPayload as BlockPayload>::Metadata,
+            <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
             Arc<JoinHandle<()>>,
-            <<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
+            <<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
             Types::SignatureKey,
         ),
     >,
@@ -75,7 +75,7 @@ pub struct GlobalState<Types: BuilderType> {
     pub response_receiver: UnboundedReceiver<ResponseMessage<Types>>,
 }
 
-impl<Types: BuilderType> GlobalState<Types> {
+impl<Types: NodeType> GlobalState<Types> {
     pub fn remove_handles(
         &mut self,
         vidcommitment: VidCommitment,
@@ -99,12 +99,10 @@ impl<Types: BuilderType> GlobalState<Types> {
 }
 
 #[async_trait]
-impl<Types: BuilderType> BuilderDataSource<Types> for GlobalState<Types>
+impl<Types: NodeType> BuilderDataSource<Types> for GlobalState<Types>
 where
-    for<'a> <<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType:
-        From<&'a tagged_base64::TaggedBase64>,
-    TaggedBase64:
-        From<<<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType>,
+    <<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType:
+        for<'a> TryFrom<&'a tagged_base64::TaggedBase64> + Into<tagged_base64::TaggedBase64>,
 {
     async fn get_available_blocks(
         &self,
@@ -139,7 +137,7 @@ where
     async fn claim_block(
         &self,
         block_hash: &BuilderCommitment,
-        signature: &<<Types as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
+        signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockData<Types>, BuildError> {
         // TODO: Verify the signature??
 
@@ -159,27 +157,26 @@ where
         }
         // TODO: should we remove the block from the hashmap?
     }
-    async fn submit_txn(&self, txn: <Types as BuilderType>::Transaction) -> Result<(), BuildError> {
+    async fn submit_txn(&self, txn: <Types as NodeType>::Transaction) -> Result<(), BuildError> {
         unimplemented!()
     }
 }
 
 #[async_trait]
-impl<Types:BuilderType> ReadState for GlobalState<Types> 
-{
-     type State = Self;
+impl<Types: NodeType> ReadState for GlobalState<Types> {
+    type State = Self;
 
-     async fn read<T>(
-         &self,
-         op: impl Send + for<'a> FnOnce(&'a Self::State) -> BoxFuture<'a, T> + 'async_trait,
-     ) -> T {
-         op(self).await
-     }
+    async fn read<T>(
+        &self,
+        op: impl Send + for<'a> FnOnce(&'a Self::State) -> BoxFuture<'a, T> + 'async_trait,
+    ) -> T {
+        op(self).await
+    }
 }
 
 // impl api // from the hs-builder-api/src/
 /// Run an instance of the default Espresso builder service.
-pub async fn run_standalone_builder_service<Types: BuilderType, I: NodeImplementation<Types>>(
+pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementation<Types>>(
     //options: Options,
     //data_source: D, // contains both the tx's and blocks local pool
     hotshot: SystemContextHandle<Types, I>,

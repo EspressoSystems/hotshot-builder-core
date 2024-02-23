@@ -10,7 +10,7 @@ use hotshot_types::{
     simple_certificate::QuorumCertificate,
     traits::{
         block_contents::vid_commitment,
-        node_implementation::{ConsensusTime, NodeType as BuilderType},
+        node_implementation::{ConsensusTime, NodeType},
         signature_key::SignatureKey,
     },
     traits::{
@@ -53,27 +53,27 @@ pub enum TransactionSource {
 
 /// Transaction Message to be put on the tx channel
 #[derive(Clone, Debug, PartialEq)]
-pub struct TransactionMessage<TYPES: BuilderType> {
+pub struct TransactionMessage<TYPES: NodeType> {
     pub tx: TYPES::Transaction,
     pub tx_type: TransactionSource,
 }
 /// Decide Message to be put on the decide channel
 #[derive(Clone, Debug, PartialEq)]
-pub struct DecideMessage<TYPES: BuilderType> {
+pub struct DecideMessage<TYPES: NodeType> {
     pub leaf_chain: Arc<LeafChain<TYPES>>,
     pub qc: Arc<QuorumCertificate<TYPES>>,
     pub block_size: Option<u64>,
 }
 /// DA Proposal Message to be put on the da proposal channel
 #[derive(Clone, Debug, PartialEq)]
-pub struct DAProposalMessage<TYPES: BuilderType> {
+pub struct DAProposalMessage<TYPES: NodeType> {
     pub proposal: Proposal<TYPES, DAProposal<TYPES>>,
     pub sender: TYPES::SignatureKey,
     pub total_nodes: usize,
 }
 /// QC Message to be put on the quorum proposal channel
 #[derive(Clone, Debug, PartialEq)]
-pub struct QCMessage<TYPES: BuilderType> {
+pub struct QCMessage<TYPES: NodeType> {
     pub proposal: Proposal<TYPES, QuorumProposal<TYPES>>,
     pub sender: TYPES::SignatureKey,
 }
@@ -85,15 +85,15 @@ pub struct RequestMessage {
 }
 /// Response Message to be put on the response channel
 #[derive(Debug, Clone)]
-pub struct ResponseMessage<TYPES: BuilderType> {
+pub struct ResponseMessage<TYPES: NodeType> {
     pub block_hash: BuilderCommitment, //TODO: Need to pull out from hotshot
     pub block_size: u64,
     pub offered_fee: u64,
     pub block_payload: TYPES::BlockPayload,
-    pub metadata: <<TYPES as BuilderType>::BlockPayload as BlockPayload>::Metadata,
+    pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
     pub join_handle: Arc<JoinHandle<()>>,
     pub signature:
-        <<TYPES as BuilderType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
+        <<TYPES as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     pub sender: TYPES::SignatureKey,
 }
 /// Enum to hold the status out of the decide event
@@ -103,11 +103,11 @@ pub enum Status {
 }
 
 #[derive(Debug, Clone)]
-pub struct BuilderState<TYPES: BuilderType> {
+pub struct BuilderState<TYPES: NodeType> {
     // identity keys for the builder
     pub builder_keys: (
         TYPES::SignatureKey,
-        <<TYPES as BuilderType>::SignatureKey as SignatureKey>::PrivateKey,
+        <<TYPES as NodeType>::SignatureKey as SignatureKey>::PrivateKey,
     ), //TODO (pub,priv) key of the builder, may be good to keep a ref
 
     // timestamp to tx hash, used for ordering for the transactions
@@ -167,7 +167,7 @@ pub struct BuilderState<TYPES: BuilderType> {
 }
 /// Trait to hold the helper functions for the builder
 #[async_trait]
-pub trait BuilderProgress<TYPES: BuilderType> {
+pub trait BuilderProgress<TYPES: NodeType> {
     /// process the external transaction
     fn process_external_transaction(&mut self, tx: TYPES::Transaction);
 
@@ -203,7 +203,7 @@ pub trait BuilderProgress<TYPES: BuilderType> {
 
 #[async_trait]
 //#[tracing::instrument(skip_all)]
-impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
+impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     /// processing the external i.e private mempool transaction
     fn process_external_transaction(&mut self, tx: TYPES::Transaction) {
         // PRIVATE MEMPOOL TRANSACTION PROCESSING
@@ -287,7 +287,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let view_number = da_proposal_data.view_number;
         let encoded_txns = da_proposal_data.encoded_transactions;
 
-        let metadata: <<TYPES as BuilderType>::BlockPayload as BlockPayload>::Metadata =
+        let metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata =
             da_proposal_data.metadata;
 
         // generate the vid commitment; num nodes are received through hotshot api in service.rs and passed along with message onto channel
@@ -568,7 +568,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             combined_bytes.extend_from_slice(block_hash.as_ref());
             //combined_bytes.extend_from_slice(&offered_fee.to_ne_bytes());
 
-            let signature_over_block_info = <TYPES as BuilderType>::SignatureKey::sign(
+            let signature_over_block_info = <TYPES as NodeType>::SignatureKey::sign(
                 &self.builder_keys.1,
                 combined_bytes.as_ref(),
             )
@@ -739,7 +739,7 @@ impl<TYPES: BuilderType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 }
 /// Unifies the possible messages that can be received by the builder
 #[derive(Debug, Clone)]
-pub enum MessageType<TYPES: BuilderType> {
+pub enum MessageType<TYPES: NodeType> {
     TransactionMessage(TransactionMessage<TYPES>),
     DecideMessage(DecideMessage<TYPES>),
     DAProposalMessage(DAProposalMessage<TYPES>),
@@ -747,11 +747,11 @@ pub enum MessageType<TYPES: BuilderType> {
     RequestMessage(RequestMessage),
 }
 
-impl<TYPES: BuilderType> BuilderState<TYPES> {
+impl<TYPES: NodeType> BuilderState<TYPES> {
     pub fn new(
         builder_keys: (
             TYPES::SignatureKey,
-            <<TYPES as BuilderType>::SignatureKey as SignatureKey>::PrivateKey,
+            <<TYPES as NodeType>::SignatureKey as SignatureKey>::PrivateKey,
         ),
         view_vid_leaf: (TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>),
         tx_receiver: BroadcastReceiver<MessageType<TYPES>>,

@@ -17,7 +17,7 @@ pub use hotshot_types::{
     simple_certificate::{QuorumCertificate, SimpleCertificate, SuccessThreshold},
     traits::{
         block_contents::BlockPayload,
-        node_implementation::{ConsensusTime, NodeType as BuilderType, NodeType},
+        node_implementation::{ConsensusTime, NodeType},
     },
 };
 use sha2::{Digest, Sha256};
@@ -94,7 +94,7 @@ mod tests {
             Deserialize,
         )]
         struct TestTypes;
-        impl BuilderType for TestTypes {
+        impl NodeType for TestTypes {
             type Time = ViewNumber;
             type BlockHeader = TestBlockHeader;
             type BlockPayload = TestBlockPayload;
@@ -345,7 +345,7 @@ mod tests {
             sreq_msgs.push(request_message);
         }
         // form the quorum election config, required for the VID computation inside the builder_state
-        let quorum_election_config = <<TestTypes as BuilderType>::Membership as Membership<
+        let quorum_election_config = <<TestTypes as NodeType>::Membership as Membership<
             TestTypes,
         >>::default_election_config(
             TEST_NUM_NODES_IN_VID_COMPUTATION as u64
@@ -360,7 +360,7 @@ mod tests {
         }
 
         let quorum_membership =
-            <<TestTypes as BuilderType>::Membership as Membership<TestTypes>>::create_election(
+            <<TestTypes as NodeType>::Membership as Membership<TestTypes>>::create_election(
                 commitee_stake_table_entries,
                 quorum_election_config,
             );
