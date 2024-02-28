@@ -2,15 +2,6 @@
 // This file is part of the HotShot Builder Protocol.
 //
 
-// Builder Phase 1
-// It mainly provides three API services to hotshot proposers:
-// 1. Serves a proposer(leader)'s request to provide blocks information
-// 2. Serves a proposer(leader)'s request to provide the full blocks information
-// 3. Serves a proposer(leader)'s request to provide the block header information
-
-// It also provides one API services external users:
-// 1. Serves a user's request to submit a private transaction
-
 #![allow(unused_variables)]
 #![allow(clippy::redundant_field_names)]
 use hotshot::{traits::NodeImplementation, types::SystemContextHandle, HotShotConsensusApi};
