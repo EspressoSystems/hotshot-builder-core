@@ -46,12 +46,8 @@ use crate::builder_state::{
     DAProposalMessage, DecideMessage, QCMessage, TransactionMessage, TransactionSource,
 };
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
-use futures::future::BoxFuture;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, f32::consts::E, fmt, sync::Arc};
-use tagged_base64::TaggedBase64;
-use tide_disco::method::ReadState;
+use std::{collections::HashMap, sync::Arc};
 use tracing::error;
 
 use std::format;
@@ -326,9 +322,9 @@ where
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockHeader<Types>, BuildError> {
         unimplemented!("claim_block_header");
-        Err(BuildError::Error {
-            message: "Not implemented".to_string(),
-        })
+        // Err(BuildError::Error {
+        //     message: "Not implemented".to_string(),
+        // })
     }
 }
 
@@ -336,6 +332,7 @@ pub struct GlobalStateTxnSubmitter<Types: NodeType> {
     pub global_state_handle: Arc<RwLock<GlobalState<Types>>>,
 }
 
+#[async_trait]
 impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalStateTxnSubmitter<Types> {
     async fn submit_txn(
         &mut self,
@@ -346,17 +343,5 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalStateTxnSubmitter<Types
             .await
             .submit_txn(txn)
             .await
-    }
-}
-
-#[async_trait]
-impl<Types: NodeType> ReadState for GlobalState<Types> {
-    type State = Self;
-
-    async fn read<T>(
-        &self,
-        op: impl Send + for<'a> FnOnce(&'a Self::State) -> BoxFuture<'a, T> + 'async_trait,
-    ) -> T {
-        op(self).await
     }
 }
