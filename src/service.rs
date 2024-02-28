@@ -140,22 +140,124 @@ impl<Types: NodeType> GlobalState<Types> {
                 message: format!("failed to send txn"),
             })
     }
-}
+    /// Run an instance of the default Espresso builder service.
+    pub async fn run_standalone_builder_service<I: NodeImplementation<Types>>(
+        &self,
+        hotshot: SystemContextHandle<Types, I>,
+    ) -> Result<(), ()> {
+        loop {
+            tracing::debug!("Waiting for events from HotShot");
+            let mut event_stream = hotshot.get_event_stream();
+            match event_stream.next().await {
+                None => {
+                    //TODO should we panic here?
+                    //TODO or should we just continue just because we might trasaxtions from private mempool
+                    panic!("Didn't receive any event from the HotShot event stream");
+                }
+                Some(event) => {
+                    match event.event {
+                        // error event
+                        EventType::Error { error } => {
+                            error!("Error event in HotShot: {:?}", error);
+                        }
+                        // tx event
+                        EventType::Transactions { transactions } => {
+                            // iterate over the transactions and send them to the tx_sender, might get duplicate transactions but builder needs to filter them
+                            // TODO: check do we need to change the type or struct of the transaction here
+                            for tx_message in transactions {
+                                let tx_msg = TransactionMessage::<Types> {
+                                    tx: tx_message,
+                                    tx_type: TransactionSource::HotShot,
+                                };
+                                self.tx_sender
+                                    .broadcast(MessageType::TransactionMessage(tx_msg))
+                                    .await
+                                    .unwrap();
+                            }
+                        }
+                        // DA proposal event
+                        EventType::DAProposal { proposal, sender } => {
+                            // process the DA proposal
+                            // get the leader for current view
+                            let leader = hotshot.get_leader(proposal.data.view_number).await;
+                            // get the encoded transactions hash
+                            let encoded_txns_hash =
+                                Sha256::digest(&proposal.data.encoded_transactions);
+                            // check if the sender is the leader and the signature is valid; if yes, broadcast the DA proposal
+                            if leader == sender
+                                && sender.validate(&proposal.signature, &encoded_txns_hash)
+                            {
+                                // get the num of VID nodes
+                                let c_api: HotShotConsensusApi<Types, I> = HotShotConsensusApi {
+                                    inner: hotshot.hotshot.inner.clone(),
+                                };
 
-pub struct GlobalStateTxnSubmitter<Types: NodeType> {
-    pub global_state_handle: Arc<RwLock<GlobalState<Types>>>,
-}
+                                let total_nodes = c_api.total_nodes();
 
-impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalStateTxnSubmitter<Types> {
-    async fn submit_txn(
-        &mut self,
-        txn: <Types as NodeType>::Transaction,
-    ) -> Result<(), BuildError> {
-        self.global_state_handle
-            .read_arc()
-            .await
-            .submit_txn(txn)
-            .await
+                                let da_msg = DAProposalMessage::<Types> {
+                                    proposal: proposal,
+                                    sender: sender,
+                                    total_nodes: total_nodes.into(),
+                                };
+                                self.da_sender
+                                    .broadcast(MessageType::DAProposalMessage(da_msg))
+                                    .await
+                                    .unwrap();
+                            }
+                        }
+                        // QC proposal event
+                        EventType::QuorumProposal { proposal, sender } => {
+                            // process the QC proposal
+                            // get the leader for current view
+                            let leader = hotshot.get_leader(proposal.data.view_number).await;
+                            // get the payload commitment
+                            let payload_commitment =
+                                proposal.data.block_header.payload_commitment();
+                            // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
+                            if sender == leader
+                                && sender.validate(&proposal.signature, payload_commitment.as_ref())
+                            {
+                                let qc_msg = QCMessage::<Types> {
+                                    proposal: proposal,
+                                    sender: sender,
+                                };
+                                self.qc_sender
+                                    .broadcast(MessageType::QCMessage(qc_msg))
+                                    .await
+                                    .unwrap();
+                            }
+                        }
+                        // decide event
+                        EventType::Decide {
+                            leaf_chain,
+                            qc,
+                            block_size,
+                        } => {
+                            let decide_msg: DecideMessage<Types> = DecideMessage::<Types> {
+                                leaf_chain: leaf_chain,
+                                qc: qc,
+                                block_size: block_size,
+                            };
+                            self.decide_sender
+                                .broadcast(MessageType::DecideMessage(decide_msg))
+                                .await
+                                .unwrap();
+                        }
+                        // not sure whether we need it or not //TODO
+                        EventType::ViewFinished { view_number } => {
+                            tracing::info!(
+                                "View Finished Event for view number: {:?}",
+                                view_number
+                            );
+                            unimplemented!("View Finished Event");
+                        }
+                        _ => {
+                            unimplemented!();
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -230,6 +332,23 @@ where
     }
 }
 
+pub struct GlobalStateTxnSubmitter<Types: NodeType> {
+    pub global_state_handle: Arc<RwLock<GlobalState<Types>>>,
+}
+
+impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalStateTxnSubmitter<Types> {
+    async fn submit_txn(
+        &mut self,
+        txn: <Types as NodeType>::Transaction,
+    ) -> Result<(), BuildError> {
+        self.global_state_handle
+            .read_arc()
+            .await
+            .submit_txn(txn)
+            .await
+    }
+}
+
 #[async_trait]
 impl<Types: NodeType> ReadState for GlobalState<Types> {
     type State = Self;
@@ -239,126 +358,5 @@ impl<Types: NodeType> ReadState for GlobalState<Types> {
         op: impl Send + for<'a> FnOnce(&'a Self::State) -> BoxFuture<'a, T> + 'async_trait,
     ) -> T {
         op(self).await
-    }
-}
-
-// impl api // from the hs-builder-api/src/
-/// Run an instance of the default Espresso builder service.
-pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementation<Types>>(
-    //options: Options,
-    //data_source: D, // contains both the tx's and blocks local pool
-    hotshot: SystemContextHandle<Types, I>,
-) -> Result<(), ()>
-//where //TODO
-    //Payload<Types>: availability::QueryablePayload
-    // Might need to bound D with something...
-{
-    loop {
-        tracing::debug!("Waiting for events from HotShot");
-        let mut event_stream = hotshot.get_event_stream();
-        match event_stream.next().await {
-            None => {
-                //TODO should we panic here?
-                //TODO or should we just continue just because we might trasaxtions from private mempool
-                panic!("Didn't receive any event from the HotShot event stream");
-            }
-            Some(event) => {
-                match event.event {
-                    // error event
-                    EventType::Error { error } => {
-                        error!("Error event in HotShot: {:?}", error);
-                    }
-                    // tx event
-                    EventType::Transactions { transactions } => {
-                        // iterate over the transactions and send them to the tx_sender, might get duplicate transactions but builder needs to filter them
-                        // TODO: check do we need to change the type or struct of the transaction here
-                        for tx_message in transactions {
-                            let tx_msg = TransactionMessage::<Types> {
-                                tx: tx_message,
-                                tx_type: TransactionSource::HotShot,
-                            };
-                            tx_sender
-                                .broadcast(MessageType::TransactionMessage(tx_msg))
-                                .await
-                                .unwrap();
-                        }
-                    }
-                    // DA proposal event
-                    EventType::DAProposal { proposal, sender } => {
-                        // process the DA proposal
-                        // get the leader for current view
-                        let leader = hotshot.get_leader(proposal.data.view_number).await;
-                        // get the encoded transactions hash
-                        let encoded_txns_hash = Sha256::digest(&proposal.data.encoded_transactions);
-                        // check if the sender is the leader and the signature is valid; if yes, broadcast the DA proposal
-                        if leader == sender
-                            && sender.validate(&proposal.signature, &encoded_txns_hash)
-                        {
-                            // get the num of VID nodes
-                            let c_api: HotShotConsensusApi<Types, I> = HotShotConsensusApi {
-                                inner: hotshot.hotshot.inner.clone(),
-                            };
-
-                            let total_nodes = c_api.total_nodes();
-
-                            let da_msg = DAProposalMessage::<Types> {
-                                proposal: proposal,
-                                sender: sender,
-                                total_nodes: total_nodes.into(),
-                            };
-                            da_sender
-                                .broadcast(MessageType::DAProposalMessage(da_msg))
-                                .await
-                                .unwrap();
-                        }
-                    }
-                    // QC proposal event
-                    EventType::QuorumProposal { proposal, sender } => {
-                        // process the QC proposal
-                        // get the leader for current view
-                        let leader = hotshot.get_leader(proposal.data.view_number).await;
-                        // get the payload commitment
-                        let payload_commitment = proposal.data.block_header.payload_commitment();
-                        // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
-                        if sender == leader
-                            && sender.validate(&proposal.signature, payload_commitment.as_ref())
-                        {
-                            let qc_msg = QCMessage::<Types> {
-                                proposal: proposal,
-                                sender: sender,
-                            };
-                            qc_sender
-                                .broadcast(MessageType::QCMessage(qc_msg))
-                                .await
-                                .unwrap();
-                        }
-                    }
-                    // decide event
-                    EventType::Decide {
-                        leaf_chain,
-                        qc,
-                        block_size,
-                    } => {
-                        let decide_msg: DecideMessage<Types> = DecideMessage::<Types> {
-                            leaf_chain: leaf_chain,
-                            qc: qc,
-                            block_size: block_size,
-                        };
-                        decide_sender
-                            .broadcast(MessageType::DecideMessage(decide_msg))
-                            .await
-                            .unwrap();
-                    }
-                    // not sure whether we need it or not //TODO
-                    EventType::ViewFinished { view_number } => {
-                        tracing::info!("View Finished Event for view number: {:?}", view_number);
-                        unimplemented!("View Finished Event");
-                    }
-                    _ => {
-                        unimplemented!();
-                    }
-                }
-            }
-        }
     }
 }
