@@ -190,6 +190,7 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
     // Might need to bound D with something...
 {
     loop {
+        tracing::debug!("Waiting for events from HotShot");
         let mut event_stream = hotshot.get_event_stream();
         match event_stream.next().await {
             None => {

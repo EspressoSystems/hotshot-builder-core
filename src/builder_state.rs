@@ -92,8 +92,7 @@ pub struct ResponseMessage<TYPES: NodeType> {
     pub block_payload: TYPES::BlockPayload,
     pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
     pub join_handle: Arc<JoinHandle<()>>,
-    pub signature:
-        <<TYPES as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
+    pub signature: <<TYPES as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     pub sender: TYPES::SignatureKey,
 }
 /// Enum to hold the status out of the decide event
@@ -636,6 +635,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     fn event_loop(mut self) {
         let _builder_handle = async_spawn(async move {
             loop {
+                tracing::debug!("Builder event loop");
                 while let Ok(req) = self.req_receiver.try_recv() {
                     tracing::info!(
                         "Received request msg in builder {:?}: {:?}",
