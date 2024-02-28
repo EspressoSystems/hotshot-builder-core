@@ -30,13 +30,14 @@ use hotshot_types::{
     utils::BuilderCommitment,
 };
 use hs_builder_api::{
-    block_info::{AvailableBlockData, AvailableBlockInfo},
+    block_info::{AvailableBlockData, AvailableBlockHeader, AvailableBlockInfo},
     builder::BuildError,
-    data_source::BuilderDataSource,
+    data_source::{AcceptsTxnSubmits, BuilderDataSource},
 };
 
 use async_broadcast::Sender as BroadcastSender;
 use async_compatibility_layer::channel::UnboundedReceiver;
+use async_lock::RwLock;
 use async_std::task::JoinHandle;
 use async_trait::async_trait;
 use futures::stream::StreamExt;
@@ -48,10 +49,12 @@ use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, f32::consts::E, fmt, sync::Arc};
 use tagged_base64::TaggedBase64;
 use tide_disco::method::ReadState;
 use tracing::error;
+
+use std::format;
 #[derive(clap::Args, Default)]
 pub struct Options {
     #[clap(short, long, env = "ESPRESSO_BUILDER_PORT")]
@@ -61,6 +64,7 @@ pub struct Options {
 #[allow(clippy::type_complexity)]
 #[derive(Debug)]
 pub struct GlobalState<Types: NodeType> {
+    // data store for the blocks
     pub block_hash_to_block: HashMap<
         BuilderCommitment,
         (
@@ -71,8 +75,24 @@ pub struct GlobalState<Types: NodeType> {
             Types::SignatureKey,
         ),
     >,
+    // sending a request from the hotshot to the builder states
     pub request_sender: BroadcastSender<MessageType<Types>>,
+
+    // getting a response from the builder states based on the request sent by the hotshot
     pub response_receiver: UnboundedReceiver<ResponseMessage<Types>>,
+
+    // sending a transaction from the hotshot/private mempool to the builder states
+    // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
+    pub tx_sender: BroadcastSender<MessageType<Types>>,
+
+    // sending a DA proposal from the hotshot to the builder states
+    pub da_sender: BroadcastSender<MessageType<Types>>,
+
+    // sending a Decide event from the hotshot to the builder states
+    pub decide_sender: BroadcastSender<MessageType<Types>>,
+
+    // sending a QC proposal from the hotshot to the builder states
+    pub qc_sender: BroadcastSender<MessageType<Types>>,
 }
 
 impl<Types: NodeType> GlobalState<Types> {
@@ -89,12 +109,53 @@ impl<Types: NodeType> GlobalState<Types> {
     pub fn new(
         request_sender: BroadcastSender<MessageType<Types>>,
         response_receiver: UnboundedReceiver<ResponseMessage<Types>>,
+        tx_sender: BroadcastSender<MessageType<Types>>,
+        da_sender: BroadcastSender<MessageType<Types>>,
+        decide_sender: BroadcastSender<MessageType<Types>>,
+        qc_sender: BroadcastSender<MessageType<Types>>,
     ) -> Self {
         GlobalState {
             block_hash_to_block: Default::default(),
             request_sender: request_sender,
             response_receiver: response_receiver,
+            tx_sender: tx_sender,
+            da_sender: da_sender,
+            decide_sender: decide_sender,
+            qc_sender: qc_sender,
         }
+    }
+    pub async fn submit_txn(
+        &self,
+        txn: <Types as NodeType>::Transaction,
+    ) -> Result<(), BuildError> {
+        let tx_msg = TransactionMessage::<Types> {
+            tx: txn,
+            tx_type: TransactionSource::HotShot,
+        };
+        self.tx_sender
+            .broadcast(MessageType::TransactionMessage(tx_msg))
+            .await
+            .map(|a| ())
+            .map_err(|e| BuildError::Error {
+                message: format!("failed to send txn"),
+            })
+    }
+}
+
+pub struct GlobalStateTxnSubmitter<Types: NodeType> {
+    pub global_state_handle: Arc<RwLock<GlobalState<Types>>>,
+}
+
+impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalStateTxnSubmitter<Types> {
+    async fn submit_txn(
+        &mut self,
+        txn: <Types as NodeType>::Transaction,
+    ) -> Result<(), BuildError> {
+        self.global_state_handle
+            .read_arc()
+            .await
+            .submit_txn(txn)
+            .await
     }
 }
 
@@ -157,8 +218,15 @@ where
         }
         // TODO: should we remove the block from the hashmap?
     }
-    async fn submit_txn(&self, txn: <Types as NodeType>::Transaction) -> Result<(), BuildError> {
-        unimplemented!()
+    async fn claim_block_header(
+        &self,
+        block_hash: &BuilderCommitment,
+        signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
+    ) -> Result<AvailableBlockHeader<Types>, BuildError> {
+        unimplemented!("claim_block_header");
+        Err(BuildError::Error {
+            message: "Not implemented".to_string(),
+        })
     }
 }
 
@@ -180,10 +248,6 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
     //options: Options,
     //data_source: D, // contains both the tx's and blocks local pool
     hotshot: SystemContextHandle<Types, I>,
-    tx_sender: BroadcastSender<MessageType<Types>>,
-    decide_sender: BroadcastSender<MessageType<Types>>,
-    da_sender: BroadcastSender<MessageType<Types>>,
-    qc_sender: BroadcastSender<MessageType<Types>>,
 ) -> Result<(), ()>
 //where //TODO
     //Payload<Types>: availability::QueryablePayload
