@@ -2,8 +2,4 @@
 // This file is part of the HotShot Builder Protocol.
 //
 
-//! Builder Phase 1 Testing
-//!
-//!
-
 pub mod basic_test;

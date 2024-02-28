@@ -2,19 +2,15 @@
 // This file is part of the HotShot Builder Protocol.
 //
 
-//! Builder Phase 1
-//! It mainly provides two API services to external users:
-//! 1. Serves a proposer(leader)'s request to provide blocks information
-//! 2. Serves a proposer(leader)'s request to provide the full blocks information
-//! 3. Serves a request to submit a transaction externally i.e outside the HotShot network
+// Builder Phase 1
+// It mainly provides three API services to hotshot proposers:
+// 1. Serves a proposer(leader)'s request to provide blocks information
+// 2. Serves a proposer(leader)'s request to provide the full blocks information
+// 3. Serves a proposer(leader)'s request to provide the block header information
 
-//! To support the above two services, it uses the following core services:
-//! 1. To facilitate the acceptance of the transactions i.e. private and public mempool
-//! 2. Actions to be taken on hearning of:
-//!     a. DA Proposal
-//!     b. Quorum Proposal
-//!     c. Decide Event
-//!
+// It also provides one API services external users:
+// 1. Serves a user's request to submit a private transaction
+
 #![allow(unused_variables)]
 #![allow(clippy::redundant_field_names)]
 use hotshot::{traits::NodeImplementation, types::SystemContextHandle, HotShotConsensusApi};
@@ -49,8 +45,6 @@ use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, sync::Arc};
 use tracing::error;
-
-use std::format;
 #[derive(clap::Args, Default)]
 pub struct Options {
     #[clap(short, long, env = "ESPRESSO_BUILDER_PORT")]
@@ -84,11 +78,11 @@ pub struct GlobalState<Types: NodeType> {
     // sending a DA proposal from the hotshot to the builder states
     pub da_sender: BroadcastSender<MessageType<Types>>,
 
-    // sending a Decide event from the hotshot to the builder states
-    pub decide_sender: BroadcastSender<MessageType<Types>>,
-
     // sending a QC proposal from the hotshot to the builder states
     pub qc_sender: BroadcastSender<MessageType<Types>>,
+
+    // sending a Decide event from the hotshot to the builder states
+    pub decide_sender: BroadcastSender<MessageType<Types>>,
 }
 
 impl<Types: NodeType> GlobalState<Types> {
@@ -107,8 +101,8 @@ impl<Types: NodeType> GlobalState<Types> {
         response_receiver: UnboundedReceiver<ResponseMessage<Types>>,
         tx_sender: BroadcastSender<MessageType<Types>>,
         da_sender: BroadcastSender<MessageType<Types>>,
-        decide_sender: BroadcastSender<MessageType<Types>>,
         qc_sender: BroadcastSender<MessageType<Types>>,
+        decide_sender: BroadcastSender<MessageType<Types>>,
     ) -> Self {
         GlobalState {
             block_hash_to_block: Default::default(),
@@ -116,8 +110,8 @@ impl<Types: NodeType> GlobalState<Types> {
             response_receiver: response_receiver,
             tx_sender: tx_sender,
             da_sender: da_sender,
-            decide_sender: decide_sender,
             qc_sender: qc_sender,
+            decide_sender: decide_sender,
         }
     }
     pub async fn submit_txn(
@@ -133,7 +127,7 @@ impl<Types: NodeType> GlobalState<Types> {
             .await
             .map(|a| ())
             .map_err(|e| BuildError::Error {
-                message: format!("failed to send txn"),
+                message: "failed to send txn".to_string(),
             })
     }
     /// Run an instance of the default Espresso builder service.
