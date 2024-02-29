@@ -4,7 +4,7 @@
 #![allow(clippy::redundant_field_names)]
 #![allow(clippy::too_many_arguments)]
 use hotshot_types::{
-    data::{DAProposal, Leaf, QuorumProposal, VidCommitment, VidScheme, VidSchemeTrait},
+    data::{DAProposal, Leaf, QuorumProposal, VidCommitment},
     event::LeafChain,
     message::Proposal,
     simple_certificate::QuorumCertificate,
@@ -87,7 +87,7 @@ pub struct BuildBlockInfo<TYPES: NodeType> {
     pub offered_fee: u64,
     pub block_payload: TYPES::BlockPayload,
     pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
-    pub join_handle: Arc<JoinHandle<<VidScheme as VidSchemeTrait>::Commit>>,
+    pub join_handle: Arc<JoinHandle<VidCommitment>>,
 }
 
 /// Response Message to be put on the response channel
@@ -325,8 +325,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     tracing::info!("Spawning a clone");
                     self.clone()
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender);
-                    // register the clone to the global state
-                    //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
                 } else {
                     tracing::info!("Not spawning a clone despite matching DA and QC proposals, as they corresponds to bootstrapping phase");
                 }
@@ -386,8 +384,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     tracing::info!("Spawning a clone");
                     self.clone()
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender);
-                    // registed the clone to the global state
-                    //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
                 } else {
                     tracing::info!("Not spawning a clone despite matching DA and QC proposals, as they corresponds to bootstrapping phase");
                 }
@@ -447,7 +443,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     let metadata = leaf_chain[0].0.get_block_header().metadata();
                     let transactions_commitments = block_payload.transaction_commitments(metadata);
                     // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx
-                    //let transactions:Vec<TYPES::Transaction> = vec![];
                     for tx_hash in transactions_commitments.iter() {
                         // remove the transaction from the timestamp_to_tx map
                         if let Some((timestamp, _, _)) = self.tx_hash_to_available_txns.get(tx_hash)
@@ -539,9 +534,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
             let offered_fee: u64 = 0;
 
-            // get the number of quorum committee members to be used for VID calculation
-            //let quo_membership = Arc::into_inner(self.quorum_membership).unwrap();//.clone();
-
             // get the total nodes from the builder state.
             // stored while processing the DA Proposal
             let vid_num_nodes = self.total_nodes.get();
@@ -549,7 +541,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // convert vid_num_nodes to usize
             // spawn a task to calculate the VID commitment, and pass the builder handle to the global state
             // later global state can await on it before replying to the proposer
-            let join_handle: JoinHandle<<VidScheme as VidSchemeTrait>::Commit> =
+            let join_handle =
                 task::spawn(async move { vid_commitment(&encoded_txns, vid_num_nodes) });
 
             //let signature = self.builder_keys.0.sign(&block_hash);

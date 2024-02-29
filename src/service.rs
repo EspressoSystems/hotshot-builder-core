@@ -6,7 +6,7 @@
 #![allow(clippy::redundant_field_names)]
 use hotshot::{traits::NodeImplementation, types::SystemContextHandle, HotShotConsensusApi};
 use hotshot_types::{
-    data::{VidCommitment, VidScheme, VidSchemeTrait},
+    data::VidCommitment,
     event::EventType,
     traits::{
         block_contents::{BlockHeader, BlockPayload},
@@ -60,7 +60,7 @@ pub struct GlobalState<Types: NodeType> {
             Types::BlockPayload,
             <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
             //Arc<JoinHandle<()>>,
-            Arc<JoinHandle<<VidScheme as VidSchemeTrait>::Commit>>,
+            Arc<JoinHandle<VidCommitment>>,
             //JoinHandle<<VidScheme as VidSchemeTrait>::Commit>,
         ),
     >,
