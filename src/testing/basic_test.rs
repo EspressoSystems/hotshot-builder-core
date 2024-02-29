@@ -36,7 +36,7 @@ use tracing;
 #[cfg(test)]
 mod tests {
 
-    use std::{hash::Hash, marker::PhantomData};
+    use std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
 
     use async_compatibility_layer::channel::unbounded;
     use commit::Committable;
@@ -124,8 +124,14 @@ mod tests {
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
         let (res_sender, res_receiver) = unbounded();
 
+        //let global_state_clone = global_state.clone();
+        // generate the keys for the buidler
+        let seed = [201_u8; 32];
+        let (builder_pub_key, builder_private_key) =
+            BLSPubKey::generated_from_seed_indexed(seed, 2011_u64);
         // instantiate the global state also
         let global_state = GlobalState::<TestTypes>::new(
+            (builder_pub_key, builder_private_key),
             req_sender,
             res_receiver,
             tx_sender,
@@ -141,7 +147,7 @@ mod tests {
         let mut sqc_msgs: Vec<QCMessage<TestTypes>> = Vec::new();
         let mut sreq_msgs: Vec<MessageType<TestTypes>> = Vec::new();
         // storing response messages
-        let mut rres_msgs: Vec<ResponseMessage<TestTypes>> = Vec::new();
+        let mut rres_msgs: Vec<ResponseMessage> = Vec::new();
 
         // generate num_test messages for each type and send it to the respective channels;
         for i in 0..num_test_messages as u32 {
@@ -358,44 +364,12 @@ mod tests {
             sqc_msgs.push(sqc_msg);
             sreq_msgs.push(request_message);
         }
-        // form the quorum election config, required for the VID computation inside the builder_state
-        let quorum_election_config = <<TestTypes as NodeType>::Membership as Membership<
-            TestTypes,
-        >>::default_election_config(
-            TEST_NUM_NODES_IN_VID_COMPUTATION as u64
-        );
-
-        let mut commitee_stake_table_entries = vec![];
-        for i in 0..TEST_NUM_NODES_IN_VID_COMPUTATION {
-            let (pub_key, _private_key) =
-                BLSPubKey::generated_from_seed_indexed([i as u8; 32], i as u64);
-            let stake = i as u64;
-            commitee_stake_table_entries.push(pub_key.get_stake_table_entry(stake));
-        }
-
-        let quorum_membership =
-            <<TestTypes as NodeType>::Membership as Membership<TestTypes>>::create_election(
-                commitee_stake_table_entries,
-                quorum_election_config,
-            );
-
-        assert_eq!(
-            quorum_membership.total_nodes(),
-            TEST_NUM_NODES_IN_VID_COMPUTATION
-        );
-
-        //let global_state_clone = global_state.clone();
-        // generate the keys for the buidler
-        let seed = [201_u8; 32];
-        let (builder_pub_key, builder_private_key) =
-            BLSPubKey::generated_from_seed_indexed(seed, 2011_u64);
 
         //let global_state_clone = arc_rwlock_global_state.clone();
         let arc_rwlock_global_state = Arc::new(RwLock::new(global_state));
         let arc_rwlock_global_state_clone = arc_rwlock_global_state.clone();
         let handle = async_spawn(async move {
             let builder_state = BuilderState::<TestTypes>::new(
-                (builder_pub_key, builder_private_key),
                 (
                     ViewNumber::new(0),
                     genesis_vid_commitment(),
@@ -408,7 +382,7 @@ mod tests {
                 req_receiver,
                 arc_rwlock_global_state_clone,
                 res_sender,
-                Arc::new(quorum_membership),
+                NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
             );
 
             //builder_state.event_loop().await;

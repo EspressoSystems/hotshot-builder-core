@@ -4,18 +4,14 @@
 #![allow(clippy::redundant_field_names)]
 #![allow(clippy::too_many_arguments)]
 use hotshot_types::{
-    data::{test_srs, DAProposal, Leaf, QuorumProposal, VidCommitment, VidScheme, VidSchemeTrait},
+    data::{DAProposal, Leaf, QuorumProposal, VidCommitment, VidScheme, VidSchemeTrait},
     event::LeafChain,
     message::Proposal,
     simple_certificate::QuorumCertificate,
+    traits::block_contents::{BlockHeader, BlockPayload},
     traits::{
         block_contents::vid_commitment,
         node_implementation::{ConsensusTime, NodeType},
-        signature_key::SignatureKey,
-    },
-    traits::{
-        block_contents::{BlockHeader, BlockPayload},
-        election::Membership,
     },
     utils::BuilderCommitment,
     vote::Certificate,
@@ -33,12 +29,12 @@ use async_trait::async_trait;
 use futures::StreamExt; //::select_all;
 
 use core::panic;
-use std::cmp::PartialEq;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::SystemTime;
+use std::{cmp::PartialEq, num::NonZeroUsize};
 
 use crate::service::GlobalState;
 
@@ -84,16 +80,22 @@ pub struct RequestMessage {
     //pub total_nodes: usize
 }
 /// Response Message to be put on the response channel
-#[derive(Debug, Clone)]
-pub struct ResponseMessage<TYPES: NodeType> {
-    pub block_hash: BuilderCommitment, //TODO: Need to pull out from hotshot
+#[derive(Debug)]
+pub struct BuildBlockInfo<TYPES: NodeType> {
+    pub builder_hash: BuilderCommitment, //TODO: Need to pull out from hotshot
     pub block_size: u64,
     pub offered_fee: u64,
     pub block_payload: TYPES::BlockPayload,
     pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
-    pub join_handle: Arc<JoinHandle<()>>,
-    pub signature: <<TYPES as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
-    pub sender: TYPES::SignatureKey,
+    pub join_handle: Arc<JoinHandle<<VidScheme as VidSchemeTrait>::Commit>>,
+}
+
+/// Response Message to be put on the response channel
+#[derive(Debug, Clone)]
+pub struct ResponseMessage {
+    pub builder_hash: BuilderCommitment, //TODO: Need to pull out from hotshot
+    pub block_size: u64,
+    pub offered_fee: u64,
 }
 /// Enum to hold the status out of the decide event
 pub enum Status {
@@ -103,12 +105,6 @@ pub enum Status {
 
 #[derive(Debug, Clone)]
 pub struct BuilderState<TYPES: NodeType> {
-    // identity keys for the builder
-    pub builder_keys: (
-        TYPES::SignatureKey,
-        <<TYPES as NodeType>::SignatureKey as SignatureKey>::PrivateKey,
-    ), //TODO (pub,priv) key of the builder, may be good to keep a ref
-
     // timestamp to tx hash, used for ordering for the transactions
     pub timestamp_to_tx: BTreeMap<TxTimeStamp, Commitment<TYPES::Transaction>>,
 
@@ -156,10 +152,12 @@ pub struct BuilderState<TYPES: NodeType> {
     pub global_state: Arc<RwLock<GlobalState<TYPES>>>,
 
     // response sender
-    pub response_sender: UnboundedSender<ResponseMessage<TYPES>>,
+    pub response_sender: UnboundedSender<ResponseMessage>,
 
-    // quorum membership
-    pub quorum_membership: Arc<TYPES::Membership>,
+    // total nodes required for the VID computation
+    // Since a builder state exists for potential block building, therefore it gets
+    // populated based on num nodes received in DA Proposal message
+    pub total_nodes: NonZeroUsize,
 
     // builder Commitements
     pub builder_commitments: Vec<BuilderCommitment>,
@@ -191,7 +189,7 @@ pub trait BuilderProgress<TYPES: NodeType> {
     );
 
     /// build a block
-    fn build_block(&mut self, matching_vid: VidCommitment) -> Option<ResponseMessage<TYPES>>;
+    fn build_block(&mut self, matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>>;
 
     /// Event Loop
     fn event_loop(self);
@@ -296,6 +294,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             encoded_txns,
             total_nodes
         );
+
+        // set the total nodes required for the VID computation // later required in the build_block
+        self.total_nodes = NonZeroUsize::new(total_nodes).unwrap();
+
         let payload_vid_commitment = vid_commitment(&encoded_txns, total_nodes);
         tracing::debug!(
             "Generated payload commitment from the da proposal: {:?}",
@@ -517,7 +519,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                     fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(),
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
                                            builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
-    fn build_block(&mut self, _matching_vid: VidCommitment) -> Option<ResponseMessage<TYPES>> {
+    fn build_block(&mut self, _matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>> {
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
             self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
                 self.tx_hash_to_available_txns
@@ -525,10 +527,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     .map(|(_ts, tx, _source)| tx.clone())
             }),
         ) {
-            let block_hash = payload.builder_commitment(&metadata);
+            let builder_hash = payload.builder_commitment(&metadata);
 
             // add the local builder commitment list
-            self.builder_commitments.push(block_hash.clone());
+            self.builder_commitments.push(builder_hash.clone());
 
             //let num_txns = <TYPES::BlockPayload as TestBlockPayload>::txn_count(&payload);
             let encoded_txns: Vec<u8> = payload.encode().unwrap().collect();
@@ -540,48 +542,24 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // get the number of quorum committee members to be used for VID calculation
             //let quo_membership = Arc::into_inner(self.quorum_membership).unwrap();//.clone();
 
-            let num_quorum_committee = self.quorum_membership.total_nodes();
+            // get the total nodes from the builder state.
+            // stored while processing the DA Proposal
+            let vid_num_nodes = self.total_nodes.get();
 
-            // TODO <https://github.com/EspressoSystems/HotShot/issues/1686>
-            let srs = test_srs(num_quorum_committee);
+            // convert vid_num_nodes to usize
+            // spawn a task to calculate the VID commitment, and pass the builder handle to the global state
+            // later global state can await on it before replying to the proposer
+            let join_handle: JoinHandle<<VidScheme as VidSchemeTrait>::Commit> =
+                task::spawn(async move { vid_commitment(&encoded_txns, vid_num_nodes) });
 
-            // calculate the last power of two
-            // TODO change after https://github.com/EspressoSystems/jellyfish/issues/339
-            // issue: https://github.com/EspressoSystems/HotShot/issues/2152
-            let chunk_size = 1 << num_quorum_committee.ilog2();
-
-            let join_handle = task::spawn(async move {
-                // TODO: Disperse Operation: May be talk to @Gus about it // https://github.com/EspressoSystems/HotShot/blob/main/crates/task-impls/src/vid.rs#L97-L98
-                // calculate vid shares
-                let vid = VidScheme::new(chunk_size, num_quorum_committee, &srs).unwrap();
-                vid.disperse(encoded_txns).unwrap();
-            });
-            //self.global_state.write().block_hash_to_block.insert(block_hash, (payload, metadata, join_handle));
-            //let mut global_state = self.global_state.write().unwrap();
-            //self.global_state.write_arc().await.block_hash_to_block.insert(block_hash.clone(), (payload, metadata, join_handle));
-
-            // to sign combine the block_hash i.e builder commitment, block size and offered fee
-            let mut combined_bytes: Vec<u8> = Vec::new();
-            // TODO: see why it is signing is not working with 48 bytes, however it is working with 32 bytes
-            //combined_bytes.extend_from_slice(&block_size.to_ne_bytes());
-            combined_bytes.extend_from_slice(block_hash.as_ref());
-            //combined_bytes.extend_from_slice(&offered_fee.to_ne_bytes());
-
-            let signature_over_block_info = <TYPES as NodeType>::SignatureKey::sign(
-                &self.builder_keys.1,
-                combined_bytes.as_ref(),
-            )
-            .expect("Failed to sign tx hash");
             //let signature = self.builder_keys.0.sign(&block_hash);
-            return Some(ResponseMessage {
-                block_hash: block_hash,
+            return Some(BuildBlockInfo {
+                builder_hash: builder_hash,
                 block_size: block_size,
                 offered_fee: offered_fee,
                 block_payload: payload,
                 metadata: metadata,
                 join_handle: Arc::new(join_handle),
-                signature: signature_over_block_info,
-                sender: self.builder_keys.0.clone(),
             });
         };
 
@@ -602,21 +580,25 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         response,
                         req
                     );
-                    // send the response back
-                    self.response_sender.send(response.clone()).await.unwrap();
+
+                    // form the response message and send it back
+                    let response_msg = ResponseMessage {
+                        builder_hash: response.builder_hash.clone(),
+                        block_size: response.block_size,
+                        offered_fee: response.offered_fee,
+                    };
+                    self.response_sender.send(response_msg).await.unwrap();
                     // write to global state as well
                     self.global_state
                         .write_arc()
                         .await
                         .block_hash_to_block
                         .insert(
-                            response.block_hash,
+                            response.builder_hash,
                             (
                                 response.block_payload,
                                 response.metadata,
                                 response.join_handle,
-                                response.signature,
-                                response.sender,
                             ),
                         );
                 }
@@ -749,10 +731,6 @@ pub enum MessageType<TYPES: NodeType> {
 
 impl<TYPES: NodeType> BuilderState<TYPES> {
     pub fn new(
-        builder_keys: (
-            TYPES::SignatureKey,
-            <<TYPES as NodeType>::SignatureKey as SignatureKey>::PrivateKey,
-        ),
         view_vid_leaf: (TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>),
         tx_receiver: BroadcastReceiver<MessageType<TYPES>>,
         decide_receiver: BroadcastReceiver<MessageType<TYPES>>,
@@ -760,11 +738,10 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         qc_receiver: BroadcastReceiver<MessageType<TYPES>>,
         req_receiver: BroadcastReceiver<MessageType<TYPES>>,
         global_state: Arc<RwLock<GlobalState<TYPES>>>,
-        response_sender: UnboundedSender<ResponseMessage<TYPES>>,
-        quorum_membership: Arc<TYPES::Membership>,
+        response_sender: UnboundedSender<ResponseMessage>,
+        num_nodes: NonZeroUsize,
     ) -> Self {
         BuilderState {
-            builder_keys: builder_keys,
             timestamp_to_tx: BTreeMap::new(),
             tx_hash_to_available_txns: HashMap::new(),
             included_txns: HashSet::new(),
@@ -779,8 +756,8 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             quorum_proposal_payload_commit_to_quorum_proposal: HashMap::new(),
             global_state: global_state,
             response_sender: response_sender,
-            quorum_membership: quorum_membership,
             builder_commitments: vec![],
+            total_nodes: num_nodes,
         }
     }
 }

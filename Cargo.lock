@@ -2989,7 +2989,7 @@ dependencies = [
 [[package]]
 name = "hs-builder-api"
 version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/hs-builder-api?branch=nfy_adding_remaining_apis#183d58b02738a6e68b5ec8d860a4fbdf1cb87bee"
+source = "git+https://github.com/EspressoSystems/hs-builder-api?branch=hg/api_fields_change#aa48903fe5b7898db7bb49ac51c633112bd6c6d3"
 dependencies = [
  "async-trait",
  "clap",
