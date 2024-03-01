@@ -2,8 +2,9 @@
 // This file is part of the HotShot Builder Protocol.
 //
 
-//! Builder Phase 1 Testing
-//!
+// Builder Phase 1 Testing
+//
+
 #![allow(unused_imports)]
 #![allow(clippy::redundant_field_names)]
 use async_std::task;
@@ -17,7 +18,7 @@ pub use hotshot_types::{
     simple_certificate::{QuorumCertificate, SimpleCertificate, SuccessThreshold},
     traits::{
         block_contents::BlockPayload,
-        node_implementation::{ConsensusTime, NodeType as BuilderType, NodeType},
+        node_implementation::{ConsensusTime, NodeType},
     },
 };
 use sha2::{Digest, Sha256};
@@ -35,7 +36,7 @@ use tracing;
 #[cfg(test)]
 mod tests {
 
-    use std::{hash::Hash, marker::PhantomData};
+    use std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
 
     use async_compatibility_layer::channel::unbounded;
     use commit::Committable;
@@ -73,10 +74,10 @@ mod tests {
 
     use super::*;
     use serde::{Deserialize, Serialize};
-    /// This test simulates multiple builders receiving messages from the channels and processing them
+    /// This test simulates multiple builder states receiving messages from the channels and processing them
     #[async_std::test]
     //#[instrument]
-    async fn test_channel() {
+    async fn test_builder() {
         async_compatibility_layer::logging::setup_logging();
         async_compatibility_layer::logging::setup_backtrace();
         tracing::info!("Testing the builder core with multiple messages from the channels");
@@ -94,7 +95,7 @@ mod tests {
             Deserialize,
         )]
         struct TestTypes;
-        impl BuilderType for TestTypes {
+        impl NodeType for TestTypes {
             type Time = ViewNumber;
             type BlockHeader = TestBlockHeader;
             type BlockPayload = TestBlockPayload;
@@ -106,7 +107,7 @@ mod tests {
             type Membership = GeneralStaticCommittee<TestTypes, Self::SignatureKey>;
         }
         // no of test messages to send
-        let num_test_messages = 10;
+        let num_test_messages = 5;
         let multiplication_factor = 5;
         const TEST_NUM_NODES_IN_VID_COMPUTATION: usize = 4;
 
@@ -123,6 +124,19 @@ mod tests {
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
         let (res_sender, res_receiver) = unbounded();
 
+        //let global_state_clone = global_state.clone();
+        // generate the keys for the buidler
+        let seed = [201_u8; 32];
+        let (builder_pub_key, builder_private_key) =
+            BLSPubKey::generated_from_seed_indexed(seed, 2011_u64);
+        // instantiate the global state also
+        let global_state = GlobalState::<TestTypes>::new(
+            (builder_pub_key, builder_private_key),
+            req_sender,
+            res_receiver,
+            tx_sender.clone(),
+        );
+
         // to store all the sent messages
         let mut stx_msgs: Vec<TransactionMessage<TestTypes>> = Vec::new();
         let mut sdecide_msgs: Vec<DecideMessage<TestTypes>> = Vec::new();
@@ -130,7 +144,7 @@ mod tests {
         let mut sqc_msgs: Vec<QCMessage<TestTypes>> = Vec::new();
         let mut sreq_msgs: Vec<MessageType<TestTypes>> = Vec::new();
         // storing response messages
-        let mut rres_msgs: Vec<ResponseMessage<TestTypes>> = Vec::new();
+        let mut rres_msgs: Vec<ResponseMessage> = Vec::new();
 
         // generate num_test messages for each type and send it to the respective channels;
         for i in 0..num_test_messages as u32 {
@@ -272,9 +286,9 @@ mod tests {
             let payload_commitment = qc_proposal.block_header.payload_commitment();
 
             let qc_signature = <TestTypes as hotshot_types::traits::node_implementation::NodeType>::SignatureKey::sign(
-                &private_key,
-                payload_commitment.as_ref(),
-            ).expect("Failed to sign payload commitment while preparing QC proposal");
+                        &private_key,
+                        payload_commitment.as_ref(),
+                        ).expect("Failed to sign payload commitment while preparing QC proposal");
 
             let sqc_msg = QCMessage::<TestTypes> {
                 proposal: Proposal {
@@ -344,46 +358,12 @@ mod tests {
             sqc_msgs.push(sqc_msg);
             sreq_msgs.push(request_message);
         }
-        // form the quorum election config, required for the VID computation inside the builder_state
-        let quorum_election_config = <<TestTypes as BuilderType>::Membership as Membership<
-            TestTypes,
-        >>::default_election_config(
-            TEST_NUM_NODES_IN_VID_COMPUTATION as u64
-        );
 
-        let mut commitee_stake_table_entries = vec![];
-        for i in 0..TEST_NUM_NODES_IN_VID_COMPUTATION {
-            let (pub_key, _private_key) =
-                BLSPubKey::generated_from_seed_indexed([i as u8; 32], i as u64);
-            let stake = i as u64;
-            commitee_stake_table_entries.push(pub_key.get_stake_table_entry(stake));
-        }
-
-        let quorum_membership =
-            <<TestTypes as BuilderType>::Membership as Membership<TestTypes>>::create_election(
-                commitee_stake_table_entries,
-                quorum_election_config,
-            );
-
-        assert_eq!(
-            quorum_membership.total_nodes(),
-            TEST_NUM_NODES_IN_VID_COMPUTATION
-        );
-
-        // instantiate the global state also
-        let global_state = Arc::new(RwLock::new(GlobalState::<TestTypes>::new(
-            req_sender.clone(),
-            res_receiver,
-        )));
-        let global_state_clone = global_state.clone();
-        // generate the keys for the buidler
-        let seed = [201_u8; 32];
-        let (builder_pub_key, builder_private_key) =
-            BLSPubKey::generated_from_seed_indexed(seed, 2011_u64);
-
+        //let global_state_clone = arc_rwlock_global_state.clone();
+        let arc_rwlock_global_state = Arc::new(RwLock::new(global_state));
+        let arc_rwlock_global_state_clone = arc_rwlock_global_state.clone();
         let handle = async_spawn(async move {
             let builder_state = BuilderState::<TestTypes>::new(
-                (builder_pub_key, builder_private_key),
                 (
                     ViewNumber::new(0),
                     genesis_vid_commitment(),
@@ -394,9 +374,9 @@ mod tests {
                 da_receiver,
                 qc_receiver,
                 req_receiver,
-                global_state,
+                arc_rwlock_global_state_clone,
                 res_sender,
-                Arc::new(quorum_membership),
+                NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
             );
 
             //builder_state.event_loop().await;
@@ -408,7 +388,13 @@ mod tests {
         // go through the request messages in sreq_msgs and send the request message
         for req_msg in sreq_msgs.iter() {
             task::sleep(std::time::Duration::from_secs(1)).await;
-            req_sender.broadcast(req_msg.clone()).await.unwrap();
+            arc_rwlock_global_state
+                .read_arc()
+                .await
+                .request_sender
+                .broadcast(req_msg.clone())
+                .await
+                .unwrap();
         }
 
         task::sleep(std::time::Duration::from_secs(2)).await;
@@ -421,8 +407,8 @@ mod tests {
                 .unwrap();
         }
 
-        while let Ok(res_msg) = global_state_clone
-            .write_arc()
+        while let Ok(res_msg) = arc_rwlock_global_state
+            .read_arc()
             .await
             .response_receiver
             .try_recv()
