@@ -423,26 +423,13 @@
 <a href="#422" id="422">422</a>
 <a href="#423" id="423">423</a>
 <a href="#424" id="424">424</a>
-<a href="#425" id="425">425</a>
-<a href="#426" id="426">426</a>
-<a href="#427" id="427">427</a>
-<a href="#428" id="428">428</a>
-<a href="#429" id="429">429</a>
-<a href="#430" id="430">430</a>
-<a href="#431" id="431">431</a>
-<a href="#432" id="432">432</a>
-<a href="#433" id="433">433</a>
-<a href="#434" id="434">434</a>
-<a href="#435" id="435">435</a>
-<a href="#436" id="436">436</a>
-<a href="#437" id="437">437</a>
-<a href="#438" id="438">438</a>
 </pre></div><pre class="rust"><code><span class="comment">// Copyright (c) 2024 Espresso Systems (espressosys.com)
 // This file is part of the HotShot Builder Protocol.
 //
 
-</span><span class="doccomment">//! Builder Phase 1 Testing
-//!
+// Builder Phase 1 Testing
+//
+
 </span><span class="attr">#![allow(unused_imports)]
 #![allow(clippy::redundant_field_names)]
 </span><span class="kw">use </span>async_std::task;
@@ -456,7 +443,7 @@
     simple_certificate::{QuorumCertificate, SimpleCertificate, SuccessThreshold},
     traits::{
         block_contents::BlockPayload,
-        node_implementation::{ConsensusTime, NodeType <span class="kw">as </span>BuilderType, NodeType},
+        node_implementation::{ConsensusTime, NodeType},
     },
 };
 <span class="kw">use </span>sha2::{Digest, Sha256};
@@ -474,7 +461,7 @@
 </span><span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
 
-    <span class="kw">use </span>std::{hash::Hash, marker::PhantomData};
+    <span class="kw">use </span>std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
 
     <span class="kw">use </span>async_compatibility_layer::channel::unbounded;
     <span class="kw">use </span>commit::Committable;
@@ -512,10 +499,10 @@
 
     <span class="kw">use super</span>::<span class="kw-2">*</span>;
     <span class="kw">use </span>serde::{Deserialize, Serialize};
-    <span class="doccomment">/// This test simulates multiple builders receiving messages from the channels and processing them
+    <span class="doccomment">/// This test simulates multiple builder states receiving messages from the channels and processing them
     </span><span class="attr">#[async_std::test]
     </span><span class="comment">//#[instrument]
-    </span><span class="kw">async fn </span>test_channel() {
+    </span><span class="kw">async fn </span>test_builder() {
         async_compatibility_layer::logging::setup_logging();
         async_compatibility_layer::logging::setup_backtrace();
         <span class="macro">tracing::info!</span>(<span class="string">"Testing the builder core with multiple messages from the channels"</span>);
@@ -533,7 +520,7 @@
             Deserialize,
         )]
         </span><span class="kw">struct </span>TestTypes;
-        <span class="kw">impl </span>BuilderType <span class="kw">for </span>TestTypes {
+        <span class="kw">impl </span>NodeType <span class="kw">for </span>TestTypes {
             <span class="kw">type </span>Time = ViewNumber;
             <span class="kw">type </span>BlockHeader = TestBlockHeader;
             <span class="kw">type </span>BlockPayload = TestBlockPayload;
@@ -545,7 +532,7 @@
             <span class="kw">type </span>Membership = GeneralStaticCommittee&lt;TestTypes, <span class="self">Self</span>::SignatureKey&gt;;
         }
         <span class="comment">// no of test messages to send
-        </span><span class="kw">let </span>num_test_messages = <span class="number">10</span>;
+        </span><span class="kw">let </span>num_test_messages = <span class="number">5</span>;
         <span class="kw">let </span>multiplication_factor = <span class="number">5</span>;
         <span class="kw">const </span>TEST_NUM_NODES_IN_VID_COMPUTATION: usize = <span class="number">4</span>;
 
@@ -562,6 +549,19 @@
             broadcast::&lt;MessageType&lt;TestTypes&gt;&gt;(num_test_messages * multiplication_factor);
         <span class="kw">let </span>(res_sender, res_receiver) = unbounded();
 
+        <span class="comment">//let global_state_clone = global_state.clone();
+        // generate the keys for the buidler
+        </span><span class="kw">let </span>seed = [<span class="number">201_u8</span>; <span class="number">32</span>];
+        <span class="kw">let </span>(builder_pub_key, builder_private_key) =
+            BLSPubKey::generated_from_seed_indexed(seed, <span class="number">2011_u64</span>);
+        <span class="comment">// instantiate the global state also
+        </span><span class="kw">let </span>global_state = GlobalState::&lt;TestTypes&gt;::new(
+            (builder_pub_key, builder_private_key),
+            req_sender,
+            res_receiver,
+            tx_sender.clone(),
+        );
+
         <span class="comment">// to store all the sent messages
         </span><span class="kw">let </span><span class="kw-2">mut </span>stx_msgs: Vec&lt;TransactionMessage&lt;TestTypes&gt;&gt; = Vec::new();
         <span class="kw">let </span><span class="kw-2">mut </span>sdecide_msgs: Vec&lt;DecideMessage&lt;TestTypes&gt;&gt; = Vec::new();
@@ -569,7 +569,7 @@
         <span class="kw">let </span><span class="kw-2">mut </span>sqc_msgs: Vec&lt;QCMessage&lt;TestTypes&gt;&gt; = Vec::new();
         <span class="kw">let </span><span class="kw-2">mut </span>sreq_msgs: Vec&lt;MessageType&lt;TestTypes&gt;&gt; = Vec::new();
         <span class="comment">// storing response messages
-        </span><span class="kw">let </span><span class="kw-2">mut </span>rres_msgs: Vec&lt;ResponseMessage&lt;TestTypes&gt;&gt; = Vec::new();
+        </span><span class="kw">let </span><span class="kw-2">mut </span>rres_msgs: Vec&lt;ResponseMessage&gt; = Vec::new();
 
         <span class="comment">// generate num_test messages for each type and send it to the respective channels;
         </span><span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..num_test_messages <span class="kw">as </span>u32 {
@@ -711,9 +711,9 @@
             <span class="kw">let </span>payload_commitment = qc_proposal.block_header.payload_commitment();
 
             <span class="kw">let </span>qc_signature = &lt;TestTypes <span class="kw">as </span>hotshot_types::traits::node_implementation::NodeType&gt;::SignatureKey::sign(
-                <span class="kw-2">&amp;</span>private_key,
-                payload_commitment.as_ref(),
-            ).expect(<span class="string">"Failed to sign payload commitment while preparing QC proposal"</span>);
+                        <span class="kw-2">&amp;</span>private_key,
+                        payload_commitment.as_ref(),
+                        ).expect(<span class="string">"Failed to sign payload commitment while preparing QC proposal"</span>);
 
             <span class="kw">let </span>sqc_msg = QCMessage::&lt;TestTypes&gt; {
                 proposal: Proposal {
@@ -783,46 +783,12 @@
             sqc_msgs.push(sqc_msg);
             sreq_msgs.push(request_message);
         }
-        <span class="comment">// form the quorum election config, required for the VID computation inside the builder_state
-        </span><span class="kw">let </span>quorum_election_config = &lt;&lt;TestTypes <span class="kw">as </span>BuilderType&gt;::Membership <span class="kw">as </span>Membership&lt;
-            TestTypes,
-        &gt;&gt;::default_election_config(
-            TEST_NUM_NODES_IN_VID_COMPUTATION <span class="kw">as </span>u64
-        );
 
-        <span class="kw">let </span><span class="kw-2">mut </span>commitee_stake_table_entries = <span class="macro">vec!</span>[];
-        <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..TEST_NUM_NODES_IN_VID_COMPUTATION {
-            <span class="kw">let </span>(pub_key, _private_key) =
-                BLSPubKey::generated_from_seed_indexed([i <span class="kw">as </span>u8; <span class="number">32</span>], i <span class="kw">as </span>u64);
-            <span class="kw">let </span>stake = i <span class="kw">as </span>u64;
-            commitee_stake_table_entries.push(pub_key.get_stake_table_entry(stake));
-        }
-
-        <span class="kw">let </span>quorum_membership =
-            &lt;&lt;TestTypes <span class="kw">as </span>BuilderType&gt;::Membership <span class="kw">as </span>Membership&lt;TestTypes&gt;&gt;::create_election(
-                commitee_stake_table_entries,
-                quorum_election_config,
-            );
-
-        <span class="macro">assert_eq!</span>(
-            quorum_membership.total_nodes(),
-            TEST_NUM_NODES_IN_VID_COMPUTATION
-        );
-
-        <span class="comment">// instantiate the global state also
-        </span><span class="kw">let </span>global_state = Arc::new(RwLock::new(GlobalState::&lt;TestTypes&gt;::new(
-            req_sender.clone(),
-            res_receiver,
-        )));
-        <span class="kw">let </span>global_state_clone = global_state.clone();
-        <span class="comment">// generate the keys for the buidler
-        </span><span class="kw">let </span>seed = [<span class="number">201_u8</span>; <span class="number">32</span>];
-        <span class="kw">let </span>(builder_pub_key, builder_private_key) =
-            BLSPubKey::generated_from_seed_indexed(seed, <span class="number">2011_u64</span>);
-
+        <span class="comment">//let global_state_clone = arc_rwlock_global_state.clone();
+        </span><span class="kw">let </span>arc_rwlock_global_state = Arc::new(RwLock::new(global_state));
+        <span class="kw">let </span>arc_rwlock_global_state_clone = arc_rwlock_global_state.clone();
         <span class="kw">let </span>handle = async_spawn(<span class="kw">async move </span>{
             <span class="kw">let </span>builder_state = BuilderState::&lt;TestTypes&gt;::new(
-                (builder_pub_key, builder_private_key),
                 (
                     ViewNumber::new(<span class="number">0</span>),
                     genesis_vid_commitment(),
@@ -833,9 +799,9 @@
                 da_receiver,
                 qc_receiver,
                 req_receiver,
-                global_state,
+                arc_rwlock_global_state_clone,
                 res_sender,
-                Arc::new(quorum_membership),
+                NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
             );
 
             <span class="comment">//builder_state.event_loop().await;
@@ -847,7 +813,13 @@
         <span class="comment">// go through the request messages in sreq_msgs and send the request message
         </span><span class="kw">for </span>req_msg <span class="kw">in </span>sreq_msgs.iter() {
             task::sleep(std::time::Duration::from_secs(<span class="number">1</span>)).<span class="kw">await</span>;
-            req_sender.broadcast(req_msg.clone()).<span class="kw">await</span>.unwrap();
+            arc_rwlock_global_state
+                .read_arc()
+                .<span class="kw">await
+                </span>.request_sender
+                .broadcast(req_msg.clone())
+                .<span class="kw">await
+                </span>.unwrap();
         }
 
         task::sleep(std::time::Duration::from_secs(<span class="number">2</span>)).<span class="kw">await</span>;
@@ -860,8 +832,8 @@
                 </span>.unwrap();
         }
 
-        <span class="kw">while let </span><span class="prelude-val">Ok</span>(res_msg) = global_state_clone
-            .write_arc()
+        <span class="kw">while let </span><span class="prelude-val">Ok</span>(res_msg) = arc_rwlock_global_state
+            .read_arc()
             .<span class="kw">await
             </span>.response_receiver
             .try_recv()

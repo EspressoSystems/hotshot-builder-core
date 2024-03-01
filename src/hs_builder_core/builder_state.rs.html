@@ -754,55 +754,20 @@
 <a href="#753" id="753">753</a>
 <a href="#754" id="754">754</a>
 <a href="#755" id="755">755</a>
-<a href="#756" id="756">756</a>
-<a href="#757" id="757">757</a>
-<a href="#758" id="758">758</a>
-<a href="#759" id="759">759</a>
-<a href="#760" id="760">760</a>
-<a href="#761" id="761">761</a>
-<a href="#762" id="762">762</a>
-<a href="#763" id="763">763</a>
-<a href="#764" id="764">764</a>
-<a href="#765" id="765">765</a>
-<a href="#766" id="766">766</a>
-<a href="#767" id="767">767</a>
-<a href="#768" id="768">768</a>
-<a href="#769" id="769">769</a>
-<a href="#770" id="770">770</a>
-<a href="#771" id="771">771</a>
-<a href="#772" id="772">772</a>
-<a href="#773" id="773">773</a>
-<a href="#774" id="774">774</a>
-<a href="#775" id="775">775</a>
-<a href="#776" id="776">776</a>
-<a href="#777" id="777">777</a>
-<a href="#778" id="778">778</a>
-<a href="#779" id="779">779</a>
-<a href="#780" id="780">780</a>
-<a href="#781" id="781">781</a>
-<a href="#782" id="782">782</a>
-<a href="#783" id="783">783</a>
-<a href="#784" id="784">784</a>
-<a href="#785" id="785">785</a>
-<a href="#786" id="786">786</a>
 </pre></div><pre class="rust"><code><span class="comment">// Copyright (c) 2024 Espresso Systems (espressosys.com)
 // This file is part of the HotShot Builder Protocol.
 //
 </span><span class="attr">#![allow(clippy::redundant_field_names)]
 #![allow(clippy::too_many_arguments)]
 </span><span class="kw">use </span>hotshot_types::{
-    data::{test_srs, DAProposal, Leaf, QuorumProposal, VidCommitment, VidScheme, VidSchemeTrait},
+    data::{DAProposal, Leaf, QuorumProposal, VidCommitment},
     event::LeafChain,
     message::Proposal,
     simple_certificate::QuorumCertificate,
+    traits::block_contents::{BlockHeader, BlockPayload},
     traits::{
         block_contents::vid_commitment,
-        node_implementation::{ConsensusTime, NodeType <span class="kw">as </span>BuilderType},
-        signature_key::SignatureKey,
-    },
-    traits::{
-        block_contents::{BlockHeader, BlockPayload},
-        election::Membership,
+        node_implementation::{ConsensusTime, NodeType},
     },
     utils::BuilderCommitment,
     vote::Certificate,
@@ -820,12 +785,12 @@
 <span class="kw">use </span>futures::StreamExt; <span class="comment">//::select_all;
 
 </span><span class="kw">use </span>core::panic;
-<span class="kw">use </span>std::cmp::PartialEq;
 <span class="kw">use </span>std::collections::hash_map::Entry;
 <span class="kw">use </span>std::collections::{BTreeMap, HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
 <span class="kw">use </span>std::sync::Arc;
 <span class="kw">use </span>std::time::SystemTime;
+<span class="kw">use </span>std::{cmp::PartialEq, num::NonZeroUsize};
 
 <span class="kw">use </span><span class="kw">crate</span>::service::GlobalState;
 
@@ -840,27 +805,27 @@
 
 <span class="doccomment">/// Transaction Message to be put on the tx channel
 </span><span class="attr">#[derive(Clone, Debug, PartialEq)]
-</span><span class="kw">pub struct </span>TransactionMessage&lt;TYPES: BuilderType&gt; {
+</span><span class="kw">pub struct </span>TransactionMessage&lt;TYPES: NodeType&gt; {
     <span class="kw">pub </span>tx: TYPES::Transaction,
     <span class="kw">pub </span>tx_type: TransactionSource,
 }
 <span class="doccomment">/// Decide Message to be put on the decide channel
 </span><span class="attr">#[derive(Clone, Debug, PartialEq)]
-</span><span class="kw">pub struct </span>DecideMessage&lt;TYPES: BuilderType&gt; {
+</span><span class="kw">pub struct </span>DecideMessage&lt;TYPES: NodeType&gt; {
     <span class="kw">pub </span>leaf_chain: Arc&lt;LeafChain&lt;TYPES&gt;&gt;,
     <span class="kw">pub </span>qc: Arc&lt;QuorumCertificate&lt;TYPES&gt;&gt;,
     <span class="kw">pub </span>block_size: <span class="prelude-ty">Option</span>&lt;u64&gt;,
 }
 <span class="doccomment">/// DA Proposal Message to be put on the da proposal channel
 </span><span class="attr">#[derive(Clone, Debug, PartialEq)]
-</span><span class="kw">pub struct </span>DAProposalMessage&lt;TYPES: BuilderType&gt; {
+</span><span class="kw">pub struct </span>DAProposalMessage&lt;TYPES: NodeType&gt; {
     <span class="kw">pub </span>proposal: Proposal&lt;TYPES, DAProposal&lt;TYPES&gt;&gt;,
     <span class="kw">pub </span>sender: TYPES::SignatureKey,
     <span class="kw">pub </span>total_nodes: usize,
 }
 <span class="doccomment">/// QC Message to be put on the quorum proposal channel
 </span><span class="attr">#[derive(Clone, Debug, PartialEq)]
-</span><span class="kw">pub struct </span>QCMessage&lt;TYPES: BuilderType&gt; {
+</span><span class="kw">pub struct </span>QCMessage&lt;TYPES: NodeType&gt; {
     <span class="kw">pub </span>proposal: Proposal&lt;TYPES, QuorumProposal&lt;TYPES&gt;&gt;,
     <span class="kw">pub </span>sender: TYPES::SignatureKey,
 }
@@ -871,17 +836,22 @@
     <span class="comment">//pub total_nodes: usize
 </span>}
 <span class="doccomment">/// Response Message to be put on the response channel
-</span><span class="attr">#[derive(Debug, Clone)]
-</span><span class="kw">pub struct </span>ResponseMessage&lt;TYPES: BuilderType&gt; {
-    <span class="kw">pub </span>block_hash: BuilderCommitment, <span class="comment">//TODO: Need to pull out from hotshot
+</span><span class="attr">#[derive(Debug)]
+</span><span class="kw">pub struct </span>BuildBlockInfo&lt;TYPES: NodeType&gt; {
+    <span class="kw">pub </span>builder_hash: BuilderCommitment, <span class="comment">//TODO: Need to pull out from hotshot
     </span><span class="kw">pub </span>block_size: u64,
     <span class="kw">pub </span>offered_fee: u64,
     <span class="kw">pub </span>block_payload: TYPES::BlockPayload,
-    <span class="kw">pub </span>metadata: &lt;&lt;TYPES <span class="kw">as </span>BuilderType&gt;::BlockPayload <span class="kw">as </span>BlockPayload&gt;::Metadata,
-    <span class="kw">pub </span>join_handle: Arc&lt;JoinHandle&lt;()&gt;&gt;,
-    <span class="kw">pub </span>signature:
-        &lt;&lt;TYPES <span class="kw">as </span>BuilderType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
-    <span class="kw">pub </span>sender: TYPES::SignatureKey,
+    <span class="kw">pub </span>metadata: &lt;&lt;TYPES <span class="kw">as </span>NodeType&gt;::BlockPayload <span class="kw">as </span>BlockPayload&gt;::Metadata,
+    <span class="kw">pub </span>join_handle: Arc&lt;JoinHandle&lt;VidCommitment&gt;&gt;,
+}
+
+<span class="doccomment">/// Response Message to be put on the response channel
+</span><span class="attr">#[derive(Debug, Clone)]
+</span><span class="kw">pub struct </span>ResponseMessage {
+    <span class="kw">pub </span>builder_hash: BuilderCommitment, <span class="comment">//TODO: Need to pull out from hotshot
+    </span><span class="kw">pub </span>block_size: u64,
+    <span class="kw">pub </span>offered_fee: u64,
 }
 <span class="doccomment">/// Enum to hold the status out of the decide event
 </span><span class="kw">pub enum </span>Status {
@@ -890,14 +860,8 @@
 }
 
 <span class="attr">#[derive(Debug, Clone)]
-</span><span class="kw">pub struct </span>BuilderState&lt;TYPES: BuilderType&gt; {
-    <span class="comment">// identity keys for the builder
-    </span><span class="kw">pub </span>builder_keys: (
-        TYPES::SignatureKey,
-        &lt;&lt;TYPES <span class="kw">as </span>BuilderType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PrivateKey,
-    ), <span class="comment">//TODO (pub,priv) key of the builder, may be good to keep a ref
-
-    // timestamp to tx hash, used for ordering for the transactions
+</span><span class="kw">pub struct </span>BuilderState&lt;TYPES: NodeType&gt; {
+    <span class="comment">// timestamp to tx hash, used for ordering for the transactions
     </span><span class="kw">pub </span>timestamp_to_tx: BTreeMap&lt;TxTimeStamp, Commitment&lt;TYPES::Transaction&gt;&gt;,
 
     <span class="comment">// transaction hash to available transaction data
@@ -944,17 +908,19 @@
     </span><span class="kw">pub </span>global_state: Arc&lt;RwLock&lt;GlobalState&lt;TYPES&gt;&gt;&gt;,
 
     <span class="comment">// response sender
-    </span><span class="kw">pub </span>response_sender: UnboundedSender&lt;ResponseMessage&lt;TYPES&gt;&gt;,
+    </span><span class="kw">pub </span>response_sender: UnboundedSender&lt;ResponseMessage&gt;,
 
-    <span class="comment">// quorum membership
-    </span><span class="kw">pub </span>quorum_membership: Arc&lt;TYPES::Membership&gt;,
+    <span class="comment">// total nodes required for the VID computation
+    // Since a builder state exists for potential block building, therefore it gets
+    // populated based on num nodes received in DA Proposal message
+    </span><span class="kw">pub </span>total_nodes: NonZeroUsize,
 
     <span class="comment">// builder Commitements
     </span><span class="kw">pub </span>builder_commitments: Vec&lt;BuilderCommitment&gt;,
 }
 <span class="doccomment">/// Trait to hold the helper functions for the builder
 </span><span class="attr">#[async_trait]
-</span><span class="kw">pub trait </span>BuilderProgress&lt;TYPES: BuilderType&gt; {
+</span><span class="kw">pub trait </span>BuilderProgress&lt;TYPES: NodeType&gt; {
     <span class="doccomment">/// process the external transaction
     </span><span class="kw">fn </span>process_external_transaction(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tx: TYPES::Transaction);
 
@@ -979,7 +945,7 @@
     );
 
     <span class="doccomment">/// build a block
-    </span><span class="kw">fn </span>build_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, matching_vid: VidCommitment) -&gt; <span class="prelude-ty">Option</span>&lt;ResponseMessage&lt;TYPES&gt;&gt;;
+    </span><span class="kw">fn </span>build_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, matching_vid: VidCommitment) -&gt; <span class="prelude-ty">Option</span>&lt;BuildBlockInfo&lt;TYPES&gt;&gt;;
 
     <span class="doccomment">/// Event Loop
     </span><span class="kw">fn </span>event_loop(<span class="self">self</span>);
@@ -990,7 +956,7 @@
 
 <span class="attr">#[async_trait]
 </span><span class="comment">//#[tracing::instrument(skip_all)]
-</span><span class="kw">impl</span>&lt;TYPES: BuilderType&gt; BuilderProgress&lt;TYPES&gt; <span class="kw">for </span>BuilderState&lt;TYPES&gt; {
+</span><span class="kw">impl</span>&lt;TYPES: NodeType&gt; BuilderProgress&lt;TYPES&gt; <span class="kw">for </span>BuilderState&lt;TYPES&gt; {
     <span class="doccomment">/// processing the external i.e private mempool transaction
     </span><span class="kw">fn </span>process_external_transaction(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tx: TYPES::Transaction) {
         <span class="comment">// PRIVATE MEMPOOL TRANSACTION PROCESSING
@@ -1074,7 +1040,7 @@
         </span><span class="kw">let </span>view_number = da_proposal_data.view_number;
         <span class="kw">let </span>encoded_txns = da_proposal_data.encoded_transactions;
 
-        <span class="kw">let </span>metadata: &lt;&lt;TYPES <span class="kw">as </span>BuilderType&gt;::BlockPayload <span class="kw">as </span>BlockPayload&gt;::Metadata =
+        <span class="kw">let </span>metadata: &lt;&lt;TYPES <span class="kw">as </span>NodeType&gt;::BlockPayload <span class="kw">as </span>BlockPayload&gt;::Metadata =
             da_proposal_data.metadata;
 
         <span class="comment">// generate the vid commitment; num nodes are received through hotshot api in service.rs and passed along with message onto channel
@@ -1084,6 +1050,10 @@
             encoded_txns,
             total_nodes
         );
+
+        <span class="comment">// set the total nodes required for the VID computation // later required in the build_block
+        </span><span class="self">self</span>.total_nodes = NonZeroUsize::new(total_nodes).unwrap();
+
         <span class="kw">let </span>payload_vid_commitment = vid_commitment(<span class="kw-2">&amp;</span>encoded_txns, total_nodes);
         <span class="macro">tracing::debug!</span>(
             <span class="string">"Generated payload commitment from the da proposal: {:?}"</span>,
@@ -1111,9 +1081,7 @@
                     <span class="macro">tracing::info!</span>(<span class="string">"Spawning a clone"</span>);
                     <span class="self">self</span>.clone()
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender);
-                    <span class="comment">// register the clone to the global state
-                    //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
-                </span>} <span class="kw">else </span>{
+                } <span class="kw">else </span>{
                     <span class="macro">tracing::info!</span>(<span class="string">"Not spawning a clone despite matching DA and QC proposals, as they corresponds to bootstrapping phase"</span>);
                 }
             } <span class="kw">else </span>{
@@ -1172,9 +1140,7 @@
                     <span class="macro">tracing::info!</span>(<span class="string">"Spawning a clone"</span>);
                     <span class="self">self</span>.clone()
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender);
-                    <span class="comment">// registed the clone to the global state
-                    //self.global_state.get_mut().vid_to_potential_builder_state.insert(payload_vid_commitment, self_clone);
-                </span>} <span class="kw">else </span>{
+                } <span class="kw">else </span>{
                     <span class="macro">tracing::info!</span>(<span class="string">"Not spawning a clone despite matching DA and QC proposals, as they corresponds to bootstrapping phase"</span>);
                 }
             } <span class="kw">else </span>{
@@ -1233,7 +1199,6 @@
                     <span class="kw">let </span>metadata = leaf_chain[<span class="number">0</span>].<span class="number">0</span>.get_block_header().metadata();
                     <span class="kw">let </span>transactions_commitments = block_payload.transaction_commitments(metadata);
                     <span class="comment">// iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx
-                    //let transactions:Vec&lt;TYPES::Transaction&gt; = vec![];
                     </span><span class="kw">for </span>tx_hash <span class="kw">in </span>transactions_commitments.iter() {
                         <span class="comment">// remove the transaction from the timestamp_to_tx map
                         </span><span class="kw">if let </span><span class="prelude-val">Some</span>((timestamp, <span class="kw">_</span>, <span class="kw">_</span>)) = <span class="self">self</span>.tx_hash_to_available_txns.get(tx_hash)
@@ -1305,7 +1270,7 @@
                                     fields(builder_view=%<span class="self">self</span>.built_from_view_vid_leaf.<span class="number">0</span>.get_u64(),
                                            builder_vid=%<span class="self">self</span>.built_from_view_vid_leaf.<span class="number">1</span>.clone(),
                                            builder_leaf=%<span class="self">self</span>.built_from_view_vid_leaf.<span class="number">2</span>.clone()))]
-    </span><span class="kw">fn </span>build_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _matching_vid: VidCommitment) -&gt; <span class="prelude-ty">Option</span>&lt;ResponseMessage&lt;TYPES&gt;&gt; {
+    </span><span class="kw">fn </span>build_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _matching_vid: VidCommitment) -&gt; <span class="prelude-ty">Option</span>&lt;BuildBlockInfo&lt;TYPES&gt;&gt; {
         <span class="kw">if let </span><span class="prelude-val">Ok</span>((payload, metadata)) = &lt;TYPES::BlockPayload <span class="kw">as </span>BlockPayload&gt;::from_transactions(
             <span class="self">self</span>.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
                 <span class="self">self</span>.tx_hash_to_available_txns
@@ -1313,10 +1278,10 @@
                     .map(|(_ts, tx, _source)| tx.clone())
             }),
         ) {
-            <span class="kw">let </span>block_hash = payload.builder_commitment(<span class="kw-2">&amp;</span>metadata);
+            <span class="kw">let </span>builder_hash = payload.builder_commitment(<span class="kw-2">&amp;</span>metadata);
 
             <span class="comment">// add the local builder commitment list
-            </span><span class="self">self</span>.builder_commitments.push(block_hash.clone());
+            </span><span class="self">self</span>.builder_commitments.push(builder_hash.clone());
 
             <span class="comment">//let num_txns = &lt;TYPES::BlockPayload as TestBlockPayload&gt;::txn_count(&amp;payload);
             </span><span class="kw">let </span>encoded_txns: Vec&lt;u8&gt; = payload.encode().unwrap().collect();
@@ -1325,51 +1290,24 @@
 
             <span class="kw">let </span>offered_fee: u64 = <span class="number">0</span>;
 
-            <span class="comment">// get the number of quorum committee members to be used for VID calculation
-            //let quo_membership = Arc::into_inner(self.quorum_membership).unwrap();//.clone();
+            <span class="comment">// get the total nodes from the builder state.
+            // stored while processing the DA Proposal
+            </span><span class="kw">let </span>vid_num_nodes = <span class="self">self</span>.total_nodes.get();
 
-            </span><span class="kw">let </span>num_quorum_committee = <span class="self">self</span>.quorum_membership.total_nodes();
+            <span class="comment">// convert vid_num_nodes to usize
+            // spawn a task to calculate the VID commitment, and pass the builder handle to the global state
+            // later global state can await on it before replying to the proposer
+            </span><span class="kw">let </span>join_handle =
+                task::spawn(<span class="kw">async move </span>{ vid_commitment(<span class="kw-2">&amp;</span>encoded_txns, vid_num_nodes) });
 
-            <span class="comment">// TODO &lt;https://github.com/EspressoSystems/HotShot/issues/1686&gt;
-            </span><span class="kw">let </span>srs = test_srs(num_quorum_committee);
-
-            <span class="comment">// calculate the last power of two
-            // TODO change after https://github.com/EspressoSystems/jellyfish/issues/339
-            // issue: https://github.com/EspressoSystems/HotShot/issues/2152
-            </span><span class="kw">let </span>chunk_size = <span class="number">1 </span>&lt;&lt; num_quorum_committee.ilog2();
-
-            <span class="kw">let </span>join_handle = task::spawn(<span class="kw">async move </span>{
-                <span class="comment">// TODO: Disperse Operation: May be talk to @Gus about it // https://github.com/EspressoSystems/HotShot/blob/main/crates/task-impls/src/vid.rs#L97-L98
-                // calculate vid shares
-                </span><span class="kw">let </span>vid = VidScheme::new(chunk_size, num_quorum_committee, <span class="kw-2">&amp;</span>srs).unwrap();
-                vid.disperse(encoded_txns).unwrap();
-            });
-            <span class="comment">//self.global_state.write().block_hash_to_block.insert(block_hash, (payload, metadata, join_handle));
-            //let mut global_state = self.global_state.write().unwrap();
-            //self.global_state.write_arc().await.block_hash_to_block.insert(block_hash.clone(), (payload, metadata, join_handle));
-
-            // to sign combine the block_hash i.e builder commitment, block size and offered fee
-            </span><span class="kw">let </span><span class="kw-2">mut </span>combined_bytes: Vec&lt;u8&gt; = Vec::new();
-            <span class="comment">// TODO: see why it is signing is not working with 48 bytes, however it is working with 32 bytes
-            //combined_bytes.extend_from_slice(&amp;block_size.to_ne_bytes());
-            </span>combined_bytes.extend_from_slice(block_hash.as_ref());
-            <span class="comment">//combined_bytes.extend_from_slice(&amp;offered_fee.to_ne_bytes());
-
-            </span><span class="kw">let </span>signature_over_block_info = &lt;TYPES <span class="kw">as </span>BuilderType&gt;::SignatureKey::sign(
-                <span class="kw-2">&amp;</span><span class="self">self</span>.builder_keys.<span class="number">1</span>,
-                combined_bytes.as_ref(),
-            )
-            .expect(<span class="string">"Failed to sign tx hash"</span>);
             <span class="comment">//let signature = self.builder_keys.0.sign(&amp;block_hash);
-            </span><span class="kw">return </span><span class="prelude-val">Some</span>(ResponseMessage {
-                block_hash: block_hash,
+            </span><span class="kw">return </span><span class="prelude-val">Some</span>(BuildBlockInfo {
+                builder_hash: builder_hash,
                 block_size: block_size,
                 offered_fee: offered_fee,
                 block_payload: payload,
                 metadata: metadata,
                 join_handle: Arc::new(join_handle),
-                signature: signature_over_block_info,
-                sender: <span class="self">self</span>.builder_keys.<span class="number">0</span>.clone(),
             });
         };
 
@@ -1390,21 +1328,25 @@
                         response,
                         req
                     );
-                    <span class="comment">// send the response back
-                    </span><span class="self">self</span>.response_sender.send(response.clone()).<span class="kw">await</span>.unwrap();
+
+                    <span class="comment">// form the response message and send it back
+                    </span><span class="kw">let </span>response_msg = ResponseMessage {
+                        builder_hash: response.builder_hash.clone(),
+                        block_size: response.block_size,
+                        offered_fee: response.offered_fee,
+                    };
+                    <span class="self">self</span>.response_sender.send(response_msg).<span class="kw">await</span>.unwrap();
                     <span class="comment">// write to global state as well
                     </span><span class="self">self</span>.global_state
                         .write_arc()
                         .<span class="kw">await
                         </span>.block_hash_to_block
                         .insert(
-                            response.block_hash,
+                            response.builder_hash,
                             (
                                 response.block_payload,
                                 response.metadata,
                                 response.join_handle,
-                                response.signature,
-                                response.sender,
                             ),
                         );
                 }
@@ -1423,6 +1365,7 @@
     </span><span class="kw">fn </span>event_loop(<span class="kw-2">mut </span><span class="self">self</span>) {
         <span class="kw">let </span>_builder_handle = async_spawn(<span class="kw">async move </span>{
             <span class="kw">loop </span>{
+                <span class="macro">tracing::debug!</span>(<span class="string">"Builder event loop"</span>);
                 <span class="kw">while let </span><span class="prelude-val">Ok</span>(req) = <span class="self">self</span>.req_receiver.try_recv() {
                     <span class="macro">tracing::info!</span>(
                         <span class="string">"Received request msg in builder {:?}: {:?}"</span>,
@@ -1526,7 +1469,7 @@
 }
 <span class="doccomment">/// Unifies the possible messages that can be received by the builder
 </span><span class="attr">#[derive(Debug, Clone)]
-</span><span class="kw">pub enum </span>MessageType&lt;TYPES: BuilderType&gt; {
+</span><span class="kw">pub enum </span>MessageType&lt;TYPES: NodeType&gt; {
     TransactionMessage(TransactionMessage&lt;TYPES&gt;),
     DecideMessage(DecideMessage&lt;TYPES&gt;),
     DAProposalMessage(DAProposalMessage&lt;TYPES&gt;),
@@ -1534,12 +1477,8 @@
     RequestMessage(RequestMessage),
 }
 
-<span class="kw">impl</span>&lt;TYPES: BuilderType&gt; BuilderState&lt;TYPES&gt; {
+<span class="kw">impl</span>&lt;TYPES: NodeType&gt; BuilderState&lt;TYPES&gt; {
     <span class="kw">pub fn </span>new(
-        builder_keys: (
-            TYPES::SignatureKey,
-            &lt;&lt;TYPES <span class="kw">as </span>BuilderType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PrivateKey,
-        ),
         view_vid_leaf: (TYPES::Time, VidCommitment, Commitment&lt;Leaf&lt;TYPES&gt;&gt;),
         tx_receiver: BroadcastReceiver&lt;MessageType&lt;TYPES&gt;&gt;,
         decide_receiver: BroadcastReceiver&lt;MessageType&lt;TYPES&gt;&gt;,
@@ -1547,11 +1486,10 @@
         qc_receiver: BroadcastReceiver&lt;MessageType&lt;TYPES&gt;&gt;,
         req_receiver: BroadcastReceiver&lt;MessageType&lt;TYPES&gt;&gt;,
         global_state: Arc&lt;RwLock&lt;GlobalState&lt;TYPES&gt;&gt;&gt;,
-        response_sender: UnboundedSender&lt;ResponseMessage&lt;TYPES&gt;&gt;,
-        quorum_membership: Arc&lt;TYPES::Membership&gt;,
+        response_sender: UnboundedSender&lt;ResponseMessage&gt;,
+        num_nodes: NonZeroUsize,
     ) -&gt; <span class="self">Self </span>{
         BuilderState {
-            builder_keys: builder_keys,
             timestamp_to_tx: BTreeMap::new(),
             tx_hash_to_available_txns: HashMap::new(),
             included_txns: HashSet::new(),
@@ -1566,8 +1504,8 @@
             quorum_proposal_payload_commit_to_quorum_proposal: HashMap::new(),
             global_state: global_state,
             response_sender: response_sender,
-            quorum_membership: quorum_membership,
             builder_commitments: <span class="macro">vec!</span>[],
+            total_nodes: num_nodes,
         }
     }
 }

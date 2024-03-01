@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["run_standalone_builder_service"],"struct":["GlobalState","Options"]};
+window.SIDEBAR_ITEMS = {"struct":["GlobalState","GlobalStateTxnSubmitter","Options"]};
