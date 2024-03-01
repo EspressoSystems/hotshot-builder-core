@@ -59,9 +59,7 @@ pub struct GlobalState<Types: NodeType> {
         (
             Types::BlockPayload,
             <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
-            //Arc<JoinHandle<()>>,
             Arc<JoinHandle<VidCommitment>>,
-            //JoinHandle<<VidScheme as VidSchemeTrait>::Commit>,
         ),
     >,
     // sending a request from the hotshot to the builder states
