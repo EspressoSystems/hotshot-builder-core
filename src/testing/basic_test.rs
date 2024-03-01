@@ -134,10 +134,7 @@ mod tests {
             (builder_pub_key, builder_private_key),
             req_sender,
             res_receiver,
-            tx_sender,
-            da_sender,
-            qc_sender,
-            decide_sender,
+            tx_sender.clone(),
         );
 
         // to store all the sent messages
@@ -336,18 +333,15 @@ mod tests {
             // validate the signature before pushing the message to the builder_state channels
             // currently this step happens in the service.rs, wheneve we receiver an hotshot event
             tracing::debug!("Sending transaction message: {:?}", stx_msg);
-            global_state
-                .tx_sender
+            tx_sender
                 .broadcast(MessageType::TransactionMessage(stx_msg.clone()))
                 .await
                 .unwrap();
-            global_state
-                .da_sender
+            da_sender
                 .broadcast(MessageType::DAProposalMessage(sda_msg.clone()))
                 .await
                 .unwrap();
-            global_state
-                .qc_sender
+            qc_sender
                 .broadcast(MessageType::QCMessage(sqc_msg.clone()))
                 .await
                 .unwrap();
@@ -407,10 +401,7 @@ mod tests {
         // go through the decide messages in s_decide_msgs and send the request message
         for decide_msg in sdecide_msgs.iter() {
             task::sleep(std::time::Duration::from_secs(1)).await;
-            arc_rwlock_global_state
-                .read_arc()
-                .await
-                .decide_sender
+            decide_sender
                 .broadcast(MessageType::DecideMessage(decide_msg.clone()))
                 .await
                 .unwrap();

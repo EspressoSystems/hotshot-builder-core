@@ -73,15 +73,6 @@ pub struct GlobalState<Types: NodeType> {
     // sending a transaction from the hotshot/private mempool to the builder states
     // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
     pub tx_sender: BroadcastSender<MessageType<Types>>,
-
-    // sending a DA proposal from the hotshot to the builder states
-    pub da_sender: BroadcastSender<MessageType<Types>>,
-
-    // sending a QC proposal from the hotshot to the builder states
-    pub qc_sender: BroadcastSender<MessageType<Types>>,
-
-    // sending a Decide event from the hotshot to the builder states
-    pub decide_sender: BroadcastSender<MessageType<Types>>,
 }
 
 impl<Types: NodeType> GlobalState<Types> {
@@ -93,9 +84,6 @@ impl<Types: NodeType> GlobalState<Types> {
         request_sender: BroadcastSender<MessageType<Types>>,
         response_receiver: UnboundedReceiver<ResponseMessage>,
         tx_sender: BroadcastSender<MessageType<Types>>,
-        da_sender: BroadcastSender<MessageType<Types>>,
-        qc_sender: BroadcastSender<MessageType<Types>>,
-        decide_sender: BroadcastSender<MessageType<Types>>,
     ) -> Self {
         GlobalState {
             builder_keys: builder_keys,
@@ -103,9 +91,6 @@ impl<Types: NodeType> GlobalState<Types> {
             request_sender: request_sender,
             response_receiver: response_receiver,
             tx_sender: tx_sender,
-            da_sender: da_sender,
-            qc_sender: qc_sender,
-            decide_sender: decide_sender,
         }
     }
 
@@ -141,6 +126,16 @@ impl<Types: NodeType> GlobalState<Types> {
     /// Listen to the events from the HotShot and pass onto to the builder states
     pub async fn run_standalone_builder_service<I: NodeImplementation<Types>>(
         &self,
+        // sending a DA proposal from the hotshot to the builder states
+        da_sender: BroadcastSender<MessageType<Types>>,
+
+        // sending a QC proposal from the hotshot to the builder states
+        qc_sender: BroadcastSender<MessageType<Types>>,
+
+        // sending a Decide event from the hotshot to the builder states
+        decide_sender: BroadcastSender<MessageType<Types>>,
+
+        // hotshot context handle
         hotshot: SystemContextHandle<Types, I>,
     ) -> Result<(), ()> {
         loop {
@@ -197,7 +192,7 @@ impl<Types: NodeType> GlobalState<Types> {
                                     sender: sender,
                                     total_nodes: total_nodes.into(),
                                 };
-                                self.da_sender
+                                da_sender
                                     .broadcast(MessageType::DAProposalMessage(da_msg))
                                     .await
                                     .unwrap();
@@ -219,7 +214,7 @@ impl<Types: NodeType> GlobalState<Types> {
                                     proposal: proposal,
                                     sender: sender,
                                 };
-                                self.qc_sender
+                                qc_sender
                                     .broadcast(MessageType::QCMessage(qc_msg))
                                     .await
                                     .unwrap();
@@ -236,7 +231,7 @@ impl<Types: NodeType> GlobalState<Types> {
                                 qc: qc,
                                 block_size: block_size,
                             };
-                            self.decide_sender
+                            decide_sender
                                 .broadcast(MessageType::DecideMessage(decide_msg))
                                 .await
                                 .unwrap();
