@@ -55,7 +55,7 @@ mod tests {
     };
 
     use hotshot_example_types::{
-        block_types::{genesis_vid_commitment, TestBlockHeader, TestBlockPayload, TestTransaction},
+        block_types::{TestBlockHeader, TestBlockPayload, TestTransaction},
         state_types::{TestInstanceState, TestValidatedState},
     };
 
@@ -220,11 +220,9 @@ mod tests {
                     let previous_justify_qc =
                         sqc_msgs[(i - 1) as usize].proposal.data.justify_qc.clone();
                     // metadata
-                    let _metadata = sqc_msgs[(i - 1) as usize]
-                        .proposal
-                        .data
-                        .block_header
-                        .metadata();
+                    let _metadata = <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
+                        &sqc_msgs[(i - 1) as usize].proposal.data.block_header,
+                    );
                     // Construct a leaf
                     let leaf: Leaf<_> = Leaf {
                         view_number: sqc_msgs[(i - 1) as usize].proposal.data.view_number,
@@ -283,7 +281,10 @@ mod tests {
                 upgrade_certificate: None,
             };
 
-            let payload_commitment = qc_proposal.block_header.payload_commitment();
+            let payload_commitment =
+                <TestBlockHeader as BlockHeader<TestTypes>>::payload_commitment(
+                    &qc_proposal.block_header,
+                );
 
             let qc_signature = <TestTypes as hotshot_types::traits::node_implementation::NodeType>::SignatureKey::sign(
                         &private_key,
@@ -316,7 +317,9 @@ mod tests {
                         block_header: qc_proposal.block_header.clone(),
                         block_payload: Some(BlockPayload::from_bytes(
                             encoded_transactions.clone().into_iter(),
-                            qc_proposal.block_header.metadata(),
+                            <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
+                                &qc_proposal.block_header,
+                            ),
                         )),
                         proposer_id: qc_proposal.proposer_id,
                     };
@@ -366,7 +369,7 @@ mod tests {
             let builder_state = BuilderState::<TestTypes>::new(
                 (
                     ViewNumber::new(0),
-                    genesis_vid_commitment(),
+                    vid_commitment(&vec![], 8),
                     Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage(),
                 ),
                 tx_receiver,
