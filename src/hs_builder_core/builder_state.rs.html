@@ -754,13 +754,14 @@
 <a href="#753" id="753">753</a>
 <a href="#754" id="754">754</a>
 <a href="#755" id="755">755</a>
+<a href="#756" id="756">756</a>
 </pre></div><pre class="rust"><code><span class="comment">// Copyright (c) 2024 Espresso Systems (espressosys.com)
 // This file is part of the HotShot Builder Protocol.
 //
 </span><span class="attr">#![allow(clippy::redundant_field_names)]
 #![allow(clippy::too_many_arguments)]
 </span><span class="kw">use </span>hotshot_types::{
-    data::{DAProposal, Leaf, QuorumProposal, VidCommitment},
+    data::{DAProposal, Leaf, QuorumProposal},
     event::LeafChain,
     message::Proposal,
     simple_certificate::QuorumCertificate,
@@ -770,6 +771,7 @@
         node_implementation::{ConsensusTime, NodeType},
     },
     utils::BuilderCommitment,
+    vid::VidCommitment,
     vote::Certificate,
 };
 

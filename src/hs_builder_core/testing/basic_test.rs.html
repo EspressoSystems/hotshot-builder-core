@@ -423,6 +423,9 @@
 <a href="#422" id="422">422</a>
 <a href="#423" id="423">423</a>
 <a href="#424" id="424">424</a>
+<a href="#425" id="425">425</a>
+<a href="#426" id="426">426</a>
+<a href="#427" id="427">427</a>
 </pre></div><pre class="rust"><code><span class="comment">// Copyright (c) 2024 Espresso Systems (espressosys.com)
 // This file is part of the HotShot Builder Protocol.
 //
@@ -480,7 +483,7 @@
     };
 
     <span class="kw">use </span>hotshot_example_types::{
-        block_types::{genesis_vid_commitment, TestBlockHeader, TestBlockPayload, TestTransaction},
+        block_types::{TestBlockHeader, TestBlockPayload, TestTransaction},
         state_types::{TestInstanceState, TestValidatedState},
     };
 
@@ -645,11 +648,9 @@
                     <span class="kw">let </span>previous_justify_qc =
                         sqc_msgs[(i - <span class="number">1</span>) <span class="kw">as </span>usize].proposal.data.justify_qc.clone();
                     <span class="comment">// metadata
-                    </span><span class="kw">let </span>_metadata = sqc_msgs[(i - <span class="number">1</span>) <span class="kw">as </span>usize]
-                        .proposal
-                        .data
-                        .block_header
-                        .metadata();
+                    </span><span class="kw">let </span>_metadata = &lt;TestBlockHeader <span class="kw">as </span>BlockHeader&lt;TestTypes&gt;&gt;::metadata(
+                        <span class="kw-2">&amp;</span>sqc_msgs[(i - <span class="number">1</span>) <span class="kw">as </span>usize].proposal.data.block_header,
+                    );
                     <span class="comment">// Construct a leaf
                     </span><span class="kw">let </span>leaf: Leaf&lt;<span class="kw">_</span>&gt; = Leaf {
                         view_number: sqc_msgs[(i - <span class="number">1</span>) <span class="kw">as </span>usize].proposal.data.view_number,
@@ -708,7 +709,10 @@
                 upgrade_certificate: <span class="prelude-val">None</span>,
             };
 
-            <span class="kw">let </span>payload_commitment = qc_proposal.block_header.payload_commitment();
+            <span class="kw">let </span>payload_commitment =
+                &lt;TestBlockHeader <span class="kw">as </span>BlockHeader&lt;TestTypes&gt;&gt;::payload_commitment(
+                    <span class="kw-2">&amp;</span>qc_proposal.block_header,
+                );
 
             <span class="kw">let </span>qc_signature = &lt;TestTypes <span class="kw">as </span>hotshot_types::traits::node_implementation::NodeType&gt;::SignatureKey::sign(
                         <span class="kw-2">&amp;</span>private_key,
@@ -741,7 +745,9 @@
                         block_header: qc_proposal.block_header.clone(),
                         block_payload: <span class="prelude-val">Some</span>(BlockPayload::from_bytes(
                             encoded_transactions.clone().into_iter(),
-                            qc_proposal.block_header.metadata(),
+                            &lt;TestBlockHeader <span class="kw">as </span>BlockHeader&lt;TestTypes&gt;&gt;::metadata(
+                                <span class="kw-2">&amp;</span>qc_proposal.block_header,
+                            ),
                         )),
                         proposer_id: qc_proposal.proposer_id,
                     };
@@ -791,7 +797,7 @@
             <span class="kw">let </span>builder_state = BuilderState::&lt;TestTypes&gt;::new(
                 (
                     ViewNumber::new(<span class="number">0</span>),
-                    genesis_vid_commitment(),
+                    vid_commitment(<span class="kw-2">&amp;</span><span class="macro">vec!</span>[], <span class="number">8</span>),
                     Commitment::&lt;Leaf&lt;TestTypes&gt;&gt;::default_commitment_no_preimage(),
                 ),
                 tx_receiver,

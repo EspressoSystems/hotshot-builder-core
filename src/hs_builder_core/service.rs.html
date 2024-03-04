@@ -376,18 +376,13 @@
 <a href="#375" id="375">375</a>
 <a href="#376" id="376">376</a>
 <a href="#377" id="377">377</a>
-<a href="#378" id="378">378</a>
-<a href="#379" id="379">379</a>
-<a href="#380" id="380">380</a>
 </pre></div><pre class="rust"><code><span class="comment">// Copyright (c) 2024 Espresso Systems (espressosys.com)
 // This file is part of the HotShot Builder Protocol.
 //
 
-</span><span class="attr">#![allow(unused_variables)]
-#![allow(clippy::redundant_field_names)]
-</span><span class="kw">use </span>hotshot::{traits::NodeImplementation, types::SystemContextHandle, HotShotConsensusApi};
+</span><span class="attr">#![allow(clippy::redundant_field_names)]
+</span><span class="kw">use </span>hotshot::{traits::NodeImplementation, types::SystemContextHandle};
 <span class="kw">use </span>hotshot_types::{
-    data::VidCommitment,
     event::EventType,
     traits::{
         block_contents::{BlockHeader, BlockPayload},
@@ -396,6 +391,7 @@
         signature_key::SignatureKey,
     },
     utils::BuilderCommitment,
+    vid::VidCommitment,
 };
 <span class="kw">use </span>hs_builder_api::{
     block_info::{AvailableBlockData, AvailableBlockHeaderInput, AvailableBlockInfo},
@@ -497,139 +493,10 @@
         <span class="self">self</span>.tx_sender
             .broadcast(MessageType::TransactionMessage(tx_msg))
             .<span class="kw">await
-            </span>.map(|a| ())
-            .map_err(|e| BuildError::Error {
+            </span>.map(|_a| ())
+            .map_err(|_e| BuildError::Error {
                 message: <span class="string">"failed to send txn"</span>.to_string(),
             })
-    }
-    <span class="doccomment">/// Listen to the events from the HotShot and pass onto to the builder states
-    </span><span class="kw">pub async fn </span>run_standalone_builder_service&lt;I: NodeImplementation&lt;Types&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="comment">// sending a DA proposal from the hotshot to the builder states
-        </span>da_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
-
-        <span class="comment">// sending a QC proposal from the hotshot to the builder states
-        </span>qc_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
-
-        <span class="comment">// sending a Decide event from the hotshot to the builder states
-        </span>decide_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
-
-        <span class="comment">// hotshot context handle
-        </span>hotshot: SystemContextHandle&lt;Types, I&gt;,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), ()&gt; {
-        <span class="kw">loop </span>{
-            <span class="macro">tracing::debug!</span>(<span class="string">"Waiting for events from HotShot"</span>);
-            <span class="kw">let </span><span class="kw-2">mut </span>event_stream = hotshot.get_event_stream();
-            <span class="kw">match </span>event_stream.next().<span class="kw">await </span>{
-                <span class="prelude-val">None </span>=&gt; {
-                    <span class="comment">//TODO should we panic here?
-                    //TODO or should we just continue just because we might trasaxtions from private mempool
-                    </span><span class="macro">panic!</span>(<span class="string">"Didn't receive any event from the HotShot event stream"</span>);
-                }
-                <span class="prelude-val">Some</span>(event) =&gt; {
-                    <span class="kw">match </span>event.event {
-                        <span class="comment">// error event
-                        </span>EventType::Error { error } =&gt; {
-                            <span class="macro">error!</span>(<span class="string">"Error event in HotShot: {:?}"</span>, error);
-                        }
-                        <span class="comment">// tx event
-                        </span>EventType::Transactions { transactions } =&gt; {
-                            <span class="comment">// iterate over the transactions and send them to the tx_sender, might get duplicate transactions but builder needs to filter them
-                            // TODO: check do we need to change the type or struct of the transaction here
-                            </span><span class="kw">for </span>tx_message <span class="kw">in </span>transactions {
-                                <span class="kw">let </span>tx_msg = TransactionMessage::&lt;Types&gt; {
-                                    tx: tx_message,
-                                    tx_type: TransactionSource::HotShot,
-                                };
-                                <span class="self">self</span>.tx_sender
-                                    .broadcast(MessageType::TransactionMessage(tx_msg))
-                                    .<span class="kw">await
-                                    </span>.unwrap();
-                            }
-                        }
-                        <span class="comment">// DA proposal event
-                        </span>EventType::DAProposal { proposal, sender } =&gt; {
-                            <span class="comment">// process the DA proposal
-                            // get the leader for current view
-                            </span><span class="kw">let </span>leader = hotshot.get_leader(proposal.data.view_number).<span class="kw">await</span>;
-                            <span class="comment">// get the encoded transactions hash
-                            </span><span class="kw">let </span>encoded_txns_hash =
-                                Sha256::digest(<span class="kw-2">&amp;</span>proposal.data.encoded_transactions);
-                            <span class="comment">// check if the sender is the leader and the signature is valid; if yes, broadcast the DA proposal
-                            </span><span class="kw">if </span>leader == sender
-                                &amp;&amp; sender.validate(<span class="kw-2">&amp;</span>proposal.signature, <span class="kw-2">&amp;</span>encoded_txns_hash)
-                            {
-                                <span class="comment">// get the num of VID nodes
-                                </span><span class="kw">let </span>c_api: HotShotConsensusApi&lt;Types, I&gt; = HotShotConsensusApi {
-                                    inner: hotshot.hotshot.inner.clone(),
-                                };
-
-                                <span class="kw">let </span>total_nodes = c_api.total_nodes();
-
-                                <span class="kw">let </span>da_msg = DAProposalMessage::&lt;Types&gt; {
-                                    proposal: proposal,
-                                    sender: sender,
-                                    total_nodes: total_nodes.into(),
-                                };
-                                da_sender
-                                    .broadcast(MessageType::DAProposalMessage(da_msg))
-                                    .<span class="kw">await
-                                    </span>.unwrap();
-                            }
-                        }
-                        <span class="comment">// QC proposal event
-                        </span>EventType::QuorumProposal { proposal, sender } =&gt; {
-                            <span class="comment">// process the QC proposal
-                            // get the leader for current view
-                            </span><span class="kw">let </span>leader = hotshot.get_leader(proposal.data.view_number).<span class="kw">await</span>;
-                            <span class="comment">// get the payload commitment
-                            </span><span class="kw">let </span>payload_commitment =
-                                proposal.data.block_header.payload_commitment();
-                            <span class="comment">// check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
-                            </span><span class="kw">if </span>sender == leader
-                                &amp;&amp; sender.validate(<span class="kw-2">&amp;</span>proposal.signature, payload_commitment.as_ref())
-                            {
-                                <span class="kw">let </span>qc_msg = QCMessage::&lt;Types&gt; {
-                                    proposal: proposal,
-                                    sender: sender,
-                                };
-                                qc_sender
-                                    .broadcast(MessageType::QCMessage(qc_msg))
-                                    .<span class="kw">await
-                                    </span>.unwrap();
-                            }
-                        }
-                        <span class="comment">// decide event
-                        </span>EventType::Decide {
-                            leaf_chain,
-                            qc,
-                            block_size,
-                        } =&gt; {
-                            <span class="kw">let </span>decide_msg: DecideMessage&lt;Types&gt; = DecideMessage::&lt;Types&gt; {
-                                leaf_chain: leaf_chain,
-                                qc: qc,
-                                block_size: block_size,
-                            };
-                            decide_sender
-                                .broadcast(MessageType::DecideMessage(decide_msg))
-                                .<span class="kw">await
-                                </span>.unwrap();
-                        }
-                        <span class="comment">// not sure whether we need it or not //TODO
-                        </span>EventType::ViewFinished { view_number } =&gt; {
-                            <span class="macro">tracing::info!</span>(
-                                <span class="string">"View Finished Event for view number: {:?}"</span>,
-                                view_number
-                            );
-                            <span class="macro">unimplemented!</span>(<span class="string">"View Finished Event"</span>);
-                        }
-                        <span class="kw">_ </span>=&gt; {
-                            <span class="macro">unimplemented!</span>();
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -686,7 +553,7 @@
     <span class="kw">async fn </span>claim_block(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         block_hash: <span class="kw-2">&amp;</span>BuilderCommitment,
-        signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
+        _signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;AvailableBlockData&lt;Types&gt;, BuildError&gt; {
         <span class="comment">// TODO, Verify the signature over the proposer request
         </span><span class="kw">if let </span><span class="prelude-val">Some</span>(block) = <span class="self">self</span>.block_hash_to_block.get(block_hash) {
@@ -713,7 +580,7 @@
     <span class="kw">async fn </span>claim_block_header_input(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         block_hash: <span class="kw-2">&amp;</span>BuilderCommitment,
-        signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
+        _signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;AvailableBlockHeaderInput&lt;Types&gt;, BuildError&gt; {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(block) = <span class="self">self</span>.block_hash_to_block.get(block_hash) {
             <span class="comment">// wait on the handle for the vid computation before returning the response
@@ -758,5 +625,132 @@
             </span>.submit_txn(txn)
             .<span class="kw">await
     </span>}
+}
+
+<span class="doccomment">/// Listen to the events from the HotShot and pass onto to the builder states
+</span><span class="kw">pub async fn </span>run_standalone_builder_service&lt;Types: NodeType, I: NodeImplementation&lt;Types&gt;&gt;(
+    <span class="comment">// sending a transaction from the hotshot mempool to the builder states
+    </span>tx_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
+
+    <span class="comment">// sending a DA proposal from the hotshot to the builder states
+    </span>da_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
+
+    <span class="comment">// sending a QC proposal from the hotshot to the builder states
+    </span>qc_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
+
+    <span class="comment">// sending a Decide event from the hotshot to the builder states
+    </span>decide_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
+
+    <span class="comment">// hotshot context handle
+    </span>hotshot_handle: SystemContextHandle&lt;Types, I&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;(), ()&gt; {
+    <span class="kw">loop </span>{
+        <span class="macro">tracing::debug!</span>(<span class="string">"Waiting for events from HotShot"</span>);
+        <span class="kw">let </span><span class="kw-2">mut </span>event_stream = hotshot_handle.get_event_stream();
+        <span class="kw">match </span>event_stream.next().<span class="kw">await </span>{
+            <span class="prelude-val">None </span>=&gt; {
+                <span class="comment">//TODO should we panic here?
+                //TODO or should we just continue just because we might trasaxtions from private mempool
+                </span><span class="macro">panic!</span>(<span class="string">"Didn't receive any event from the HotShot event stream"</span>);
+            }
+            <span class="prelude-val">Some</span>(event) =&gt; {
+                <span class="kw">match </span>event.event {
+                    <span class="comment">// error event
+                    </span>EventType::Error { error } =&gt; {
+                        <span class="macro">error!</span>(<span class="string">"Error event in HotShot: {:?}"</span>, error);
+                    }
+                    <span class="comment">// tx event
+                    </span>EventType::Transactions { transactions } =&gt; {
+                        <span class="comment">// iterate over the transactions and send them to the tx_sender, might get duplicate transactions but builder needs to filter them
+                        // TODO: check do we need to change the type or struct of the transaction here
+                        </span><span class="kw">for </span>tx_message <span class="kw">in </span>transactions {
+                            <span class="kw">let </span>tx_msg = TransactionMessage::&lt;Types&gt; {
+                                tx: tx_message,
+                                tx_type: TransactionSource::HotShot,
+                            };
+                            tx_sender
+                                .broadcast(MessageType::TransactionMessage(tx_msg))
+                                .<span class="kw">await
+                                </span>.unwrap();
+                        }
+                    }
+                    <span class="comment">// DA proposal event
+                    </span>EventType::DAProposal { proposal, sender } =&gt; {
+                        <span class="comment">// process the DA proposal
+                        // get the leader for current view
+                        </span><span class="kw">let </span>leader = hotshot_handle.get_leader(proposal.data.view_number).<span class="kw">await</span>;
+                        <span class="comment">// get the encoded transactions hash
+                        </span><span class="kw">let </span>encoded_txns_hash = Sha256::digest(<span class="kw-2">&amp;</span>proposal.data.encoded_transactions);
+                        <span class="comment">// check if the sender is the leader and the signature is valid; if yes, broadcast the DA proposal
+                        </span><span class="kw">if </span>leader == sender
+                            &amp;&amp; sender.validate(<span class="kw-2">&amp;</span>proposal.signature, <span class="kw-2">&amp;</span>encoded_txns_hash)
+                        {
+                            <span class="comment">// // get the num of VID nodes
+                            // let c_api: HotShotConsensusApi&lt;Types, I&gt; = HotShotConsensusApi {
+                            //     inner: hotshot_handle.hotshot.clone(),
+                            // };
+
+                            </span><span class="kw">let </span>total_nodes = hotshot_handle.total_nodes();
+
+                            <span class="kw">let </span>da_msg = DAProposalMessage::&lt;Types&gt; {
+                                proposal: proposal,
+                                sender: sender,
+                                total_nodes: total_nodes.into(),
+                            };
+                            da_sender
+                                .broadcast(MessageType::DAProposalMessage(da_msg))
+                                .<span class="kw">await
+                                </span>.unwrap();
+                        }
+                    }
+                    <span class="comment">// QC proposal event
+                    </span>EventType::QuorumProposal { proposal, sender } =&gt; {
+                        <span class="comment">// process the QC proposal
+                        // get the leader for current view
+                        </span><span class="kw">let </span>leader = hotshot_handle.get_leader(proposal.data.view_number).<span class="kw">await</span>;
+                        <span class="comment">// get the payload commitment
+                        </span><span class="kw">let </span>payload_commitment = proposal.data.block_header.payload_commitment();
+                        <span class="comment">// check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
+                        </span><span class="kw">if </span>sender == leader
+                            &amp;&amp; sender.validate(<span class="kw-2">&amp;</span>proposal.signature, payload_commitment.as_ref())
+                        {
+                            <span class="kw">let </span>qc_msg = QCMessage::&lt;Types&gt; {
+                                proposal: proposal,
+                                sender: sender,
+                            };
+                            qc_sender
+                                .broadcast(MessageType::QCMessage(qc_msg))
+                                .<span class="kw">await
+                                </span>.unwrap();
+                        }
+                    }
+                    <span class="comment">// decide event
+                    </span>EventType::Decide {
+                        leaf_chain,
+                        qc,
+                        block_size,
+                    } =&gt; {
+                        <span class="kw">let </span>decide_msg: DecideMessage&lt;Types&gt; = DecideMessage::&lt;Types&gt; {
+                            leaf_chain: leaf_chain,
+                            qc: qc,
+                            block_size: block_size,
+                        };
+                        decide_sender
+                            .broadcast(MessageType::DecideMessage(decide_msg))
+                            .<span class="kw">await
+                            </span>.unwrap();
+                    }
+                    <span class="comment">// not sure whether we need it or not //TODO
+                    </span>EventType::ViewFinished { view_number } =&gt; {
+                        <span class="macro">tracing::info!</span>(<span class="string">"View Finished Event for view number: {:?}"</span>, view_number);
+                        <span class="macro">unimplemented!</span>(<span class="string">"View Finished Event"</span>);
+                    }
+                    <span class="kw">_ </span>=&gt; {
+                        <span class="macro">unimplemented!</span>();
+                    }
+                }
+            }
+        }
+    }
 }
 </code></pre></div></section></main></body></html>
