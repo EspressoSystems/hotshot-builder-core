@@ -4,7 +4,7 @@
 #![allow(clippy::redundant_field_names)]
 #![allow(clippy::too_many_arguments)]
 use hotshot_types::{
-    data::{DAProposal, Leaf, QuorumProposal, VidCommitment},
+    data::{DAProposal, Leaf, QuorumProposal},
     event::LeafChain,
     message::Proposal,
     simple_certificate::QuorumCertificate,
@@ -14,6 +14,7 @@ use hotshot_types::{
         node_implementation::{ConsensusTime, NodeType},
     },
     utils::BuilderCommitment,
+    vid::VidCommitment,
     vote::Certificate,
 };
 
