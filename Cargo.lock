@@ -867,19 +867,6 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07b30ef0ea5c20caaa54baea49514a206308989c68be7ecd86c7f956e4da6378"
 dependencies = [
- "futures-io",
- "futures-util",
- "log",
- "pin-project-lite 0.2.13",
- "tungstenite 0.13.0",
-]
-
-[[package]]
-name = "async-tungstenite"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "742cc7dcb20b2f84a42f4691aa999070ec7e78f8e7e7438bf14be7017b44907e"
-dependencies = [
  "async-native-tls",
  "async-std",
  "async-tls",
@@ -887,7 +874,7 @@ dependencies = [
  "futures-util",
  "log",
  "pin-project-lite 0.2.13",
- "tungstenite 0.15.0",
+ "tungstenite",
 ]
 
 [[package]]
@@ -1590,6 +1577,27 @@ dependencies = [
  "curve25519-dalek",
  "rand_core 0.6.4",
  "serdect",
+]
+
+[[package]]
+name = "csv"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac574ff4d437a7b5ad237ef331c17ccca63c46479e5b5453eb8e10bb99a759fe"
+dependencies = [
+ "csv-core",
+ "itoa",
+ "ryu",
+ "serde",
+]
+
+[[package]]
+name = "csv-core"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5efa2b3d7902f4b634a20cae3c9c4e6209dc4779feb6863329607560143efa70"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -2744,8 +2752,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot"
-version = "0.3.3"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.21#eba2d0ec9dd27e555febbb42acad3fe24b9b5f3c"
+version = "0.5.22"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=adding_vbs_support#5946d588df51bb81dc21534ea93fb2e29da9c5b5"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
@@ -2753,7 +2761,6 @@ dependencies = [
  "async-std",
  "async-trait",
  "bimap",
- "bincode",
  "commit",
  "custom_debug",
  "dashmap",
@@ -2779,26 +2786,27 @@ dependencies = [
  "time 0.3.34",
  "tokio",
  "tracing",
+ "versioned-binary-serialization",
 ]
 
 [[package]]
 name = "hotshot-constants"
-version = "0.3.3"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.21#eba2d0ec9dd27e555febbb42acad3fe24b9b5f3c"
+version = "0.5.22"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=adding_vbs_support#5946d588df51bb81dc21534ea93fb2e29da9c5b5"
 dependencies = [
  "serde",
+ "versioned-binary-serialization",
 ]
 
 [[package]]
 name = "hotshot-example-types"
-version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.21#eba2d0ec9dd27e555febbb42acad3fe24b9b5f3c"
+version = "0.5.22"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=adding_vbs_support#5946d588df51bb81dc21534ea93fb2e29da9c5b5"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
  "async-lock 2.8.0",
  "async-std",
- "bincode",
  "bitvec",
  "commit",
  "either",
@@ -2816,22 +2824,25 @@ dependencies = [
  "sha2 0.10.8",
  "sha3",
  "snafu",
+ "time 0.3.34",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "hotshot-orchestrator"
-version = "0.1.1"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.21#eba2d0ec9dd27e555febbb42acad3fe24b9b5f3c"
+version = "0.5.22"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=adding_vbs_support#5946d588df51bb81dc21534ea93fb2e29da9c5b5"
 dependencies = [
  "async-compatibility-layer",
  "async-lock 2.8.0",
  "async-std",
  "blake3",
  "clap",
+ "csv",
  "futures",
  "hotshot-types",
+ "hotshot-utils",
  "libp2p",
  "serde",
  "serde-inline-default",
@@ -2846,8 +2857,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot-task"
-version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.21#eba2d0ec9dd27e555febbb42acad3fe24b9b5f3c"
+version = "0.5.22"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=adding_vbs_support#5946d588df51bb81dc21534ea93fb2e29da9c5b5"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
@@ -2859,8 +2870,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot-task-impls"
-version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.21#eba2d0ec9dd27e555febbb42acad3fe24b9b5f3c"
+version = "0.5.22"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=adding_vbs_support#5946d588df51bb81dc21534ea93fb2e29da9c5b5"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
@@ -2883,13 +2894,15 @@ dependencies = [
  "time 0.3.34",
  "tokio",
  "tracing",
+ "versioned-binary-serialization",
 ]
 
 [[package]]
 name = "hotshot-types"
-version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.21#eba2d0ec9dd27e555febbb42acad3fe24b9b5f3c"
+version = "0.5.22"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=adding_vbs_support#5946d588df51bb81dc21534ea93fb2e29da9c5b5"
 dependencies = [
+ "anyhow",
  "ark-bls12-381",
  "ark-ec",
  "ark-ed-on-bn254",
@@ -2930,12 +2943,13 @@ dependencies = [
  "tokio",
  "tracing",
  "typenum",
+ "versioned-binary-serialization",
 ]
 
 [[package]]
 name = "hotshot-utils"
-version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.21#eba2d0ec9dd27e555febbb42acad3fe24b9b5f3c"
+version = "0.5.22"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=adding_vbs_support#5946d588df51bb81dc21534ea93fb2e29da9c5b5"
 dependencies = [
  "bincode",
  "hotshot-constants",
@@ -2943,8 +2957,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot-web-server"
-version = "0.1.1"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.21#eba2d0ec9dd27e555febbb42acad3fe24b9b5f3c"
+version = "0.5.22"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=adding_vbs_support#5946d588df51bb81dc21534ea93fb2e29da9c5b5"
 dependencies = [
  "async-compatibility-layer",
  "async-lock 2.8.0",
@@ -2962,7 +2976,7 @@ dependencies = [
 [[package]]
 name = "hs-builder-api"
 version = "0.1.1"
-source = "git+https://github.com/EspressoSystems/hs-builder-api?branch=main#2ae2fc6ba9cebd9dfee94521ce9a9e7ed73de7fa"
+source = "git+https://github.com/EspressoSystems/hs-builder-api?branch=adding_vbs_support#2000ea1647a9bed6d18454ae156ef9dd75397923"
 dependencies = [
  "async-trait",
  "clap",
@@ -3426,7 +3440,7 @@ checksum = "b1a46d1a171d865aa5f83f92695765caa047a9b4cbae2cbf37dbd613a793fd4c"
 [[package]]
 name = "jf-plonk"
 version = "0.4.0-pre.0"
-source = "git+https://github.com/EspressoSystems/jellyfish?tag=0.4.0#214227e0608c231cb55234809727723c2a6740c2"
+source = "git+https://github.com/EspressoSystems/jellyfish?tag=0.4.1#e96464c4bd8beb608a6a4afc8b8a2441c981f21a"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -3455,7 +3469,7 @@ dependencies = [
 [[package]]
 name = "jf-primitives"
 version = "0.4.0-pre.0"
-source = "git+https://github.com/EspressoSystems/jellyfish?tag=0.4.0#214227e0608c231cb55234809727723c2a6740c2"
+source = "git+https://github.com/EspressoSystems/jellyfish?tag=0.4.1#e96464c4bd8beb608a6a4afc8b8a2441c981f21a"
 dependencies = [
  "anyhow",
  "ark-bls12-377",
@@ -3500,7 +3514,7 @@ dependencies = [
 [[package]]
 name = "jf-relation"
 version = "0.4.0-pre.0"
-source = "git+https://github.com/EspressoSystems/jellyfish?tag=0.4.0#214227e0608c231cb55234809727723c2a6740c2"
+source = "git+https://github.com/EspressoSystems/jellyfish?tag=0.4.1#e96464c4bd8beb608a6a4afc8b8a2441c981f21a"
 dependencies = [
  "ark-bls12-377",
  "ark-bls12-381",
@@ -3526,7 +3540,7 @@ dependencies = [
 [[package]]
 name = "jf-utils"
 version = "0.4.0-pre.0"
-source = "git+https://github.com/EspressoSystems/jellyfish?tag=0.4.0#214227e0608c231cb55234809727723c2a6740c2"
+source = "git+https://github.com/EspressoSystems/jellyfish?tag=0.4.1#e96464c4bd8beb608a6a4afc8b8a2441c981f21a"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -3907,14 +3921,14 @@ dependencies = [
 
 [[package]]
 name = "libp2p-networking"
-version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.21#eba2d0ec9dd27e555febbb42acad3fe24b9b5f3c"
+version = "0.5.22"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=adding_vbs_support#5946d588df51bb81dc21534ea93fb2e29da9c5b5"
 dependencies = [
+ "anyhow",
  "async-compatibility-layer",
  "async-lock 2.8.0",
  "async-std",
  "async-trait",
- "bincode",
  "blake3",
  "custom_debug",
  "dashmap",
@@ -3934,6 +3948,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "versioned-binary-serialization",
  "void",
 ]
 
@@ -6389,12 +6404,11 @@ dependencies = [
 
 [[package]]
 name = "surf-disco"
-version = "0.4.6"
-source = "git+https://github.com/EspressoSystems/surf-disco.git?tag=v0.4.6#95181bced2719214fc88e8adcac739d86cb1387e"
+version = "0.4.7"
+source = "git+https://github.com/EspressoSystems/surf-disco.git?tag=v0.4.7#070e18d1daf0c9783e009a1a3b7f8b28b4546e24"
 dependencies = [
  "async-std",
- "async-tungstenite 0.15.0",
- "bincode",
+ "async-tungstenite",
  "derivative",
  "futures",
  "hex",
@@ -6402,6 +6416,7 @@ dependencies = [
  "serde_json",
  "surf",
  "tide-disco",
+ "versioned-binary-serialization",
 ]
 
 [[package]]
@@ -6647,12 +6662,12 @@ dependencies = [
 
 [[package]]
 name = "tide-disco"
-version = "0.4.6"
-source = "git+https://github.com/EspressoSystems/tide-disco?tag=v0.4.6#4ced31cef8aae769994098d245e026c127801b74"
+version = "0.4.7"
+source = "git+https://github.com/EspressoSystems/tide-disco?tag=v0.4.7#1f8515bde918b9e2c50875a68dfa0e23b8167579"
 dependencies = [
+ "anyhow",
  "async-std",
  "async-trait",
- "bincode",
  "clap",
  "config",
  "derivative",
@@ -6693,6 +6708,7 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber",
  "url",
+ "versioned-binary-serialization",
 ]
 
 [[package]]
@@ -6703,7 +6719,7 @@ checksum = "3592c5cb5cb1b7a2ff3a0e5353170c1bb5b104b2f66dd06f73304169b52cc725"
 dependencies = [
  "async-dup",
  "async-std",
- "async-tungstenite 0.13.1",
+ "async-tungstenite",
  "base64 0.13.1",
  "futures-util",
  "pin-project",
@@ -7112,25 +7128,6 @@ dependencies = [
  "httparse",
  "input_buffer",
  "log",
- "rand 0.8.5",
- "sha-1",
- "thiserror",
- "url",
- "utf-8",
-]
-
-[[package]]
-name = "tungstenite"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "983d40747bce878d2fb67d910dcb8bd3eca2b2358540c3cc1b98c027407a3ae3"
-dependencies = [
- "base64 0.13.1",
- "byteorder",
- "bytes 1.5.0",
- "http 0.2.11",
- "httparse",
- "log",
  "native-tls",
  "rand 0.8.5",
  "sha-1",
@@ -7324,6 +7321,18 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "versioned-binary-serialization"
+version = "0.1.0"
+source = "git+https://github.com/EspressoSystems/versioned-binary-serialization.git?tag=0.1.0#6b5bf0c0b74f8384c940880d5a988d5ec757de3e"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "displaydoc",
+ "serde",
+ "serde_with",
+]
 
 [[package]]
 name = "void"
