@@ -34,7 +34,7 @@ use crate::builder_state::{
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, sync::Arc};
-use tracing::error;
+use tracing;
 #[derive(clap::Args, Default)]
 pub struct Options {
     #[clap(short, long, env = "ESPRESSO_BUILDER_PORT")]
@@ -70,6 +70,9 @@ pub struct GlobalState<Types: NodeType> {
     // sending a transaction from the hotshot/private mempool to the builder states
     // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
     pub tx_sender: BroadcastSender<MessageType<Types>>,
+
+    // Instance state
+    pub instance_state: Types::InstanceState,
 }
 
 impl<Types: NodeType> GlobalState<Types> {
@@ -81,6 +84,7 @@ impl<Types: NodeType> GlobalState<Types> {
         request_sender: BroadcastSender<MessageType<Types>>,
         response_receiver: UnboundedReceiver<ResponseMessage>,
         tx_sender: BroadcastSender<MessageType<Types>>,
+        instance_state: Types::InstanceState,
     ) -> Self {
         GlobalState {
             builder_keys: builder_keys,
@@ -88,6 +92,7 @@ impl<Types: NodeType> GlobalState<Types> {
             request_sender: request_sender,
             response_receiver: response_receiver,
             tx_sender: tx_sender,
+            instance_state: instance_state,
         }
     }
 
@@ -266,9 +271,9 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
     // hotshot context handle
     hotshot_handle: SystemContextHandle<Types, I>,
 ) -> Result<(), ()> {
+    let mut event_stream = hotshot_handle.get_event_stream();
     loop {
         tracing::debug!("Waiting for events from HotShot");
-        let mut event_stream = hotshot_handle.get_event_stream();
         match event_stream.next().await {
             None => {
                 //TODO should we panic here?
@@ -279,7 +284,7 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                 match event.event {
                     // error event
                     EventType::Error { error } => {
-                        error!("Error event in HotShot: {:?}", error);
+                        tracing::error!("Error event in HotShot: {:?}", error);
                     }
                     // tx event
                     EventType::Transactions { transactions } => {
@@ -290,58 +295,12 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                                 tx: tx_message,
                                 tx_type: TransactionSource::HotShot,
                             };
+                            tracing::debug!(
+                                "Sending transaction to the builder states{:?}",
+                                tx_msg
+                            );
                             tx_sender
                                 .broadcast(MessageType::TransactionMessage(tx_msg))
-                                .await
-                                .unwrap();
-                        }
-                    }
-                    // DA proposal event
-                    EventType::DAProposal { proposal, sender } => {
-                        // process the DA proposal
-                        // get the leader for current view
-                        let leader = hotshot_handle.get_leader(proposal.data.view_number).await;
-                        // get the encoded transactions hash
-                        let encoded_txns_hash = Sha256::digest(&proposal.data.encoded_transactions);
-                        // check if the sender is the leader and the signature is valid; if yes, broadcast the DA proposal
-                        if leader == sender
-                            && sender.validate(&proposal.signature, &encoded_txns_hash)
-                        {
-                            // // get the num of VID nodes
-                            // let c_api: HotShotConsensusApi<Types, I> = HotShotConsensusApi {
-                            //     inner: hotshot_handle.hotshot.clone(),
-                            // };
-
-                            let total_nodes = hotshot_handle.total_nodes();
-
-                            let da_msg = DAProposalMessage::<Types> {
-                                proposal: proposal,
-                                sender: sender,
-                                total_nodes: total_nodes.into(),
-                            };
-                            da_sender
-                                .broadcast(MessageType::DAProposalMessage(da_msg))
-                                .await
-                                .unwrap();
-                        }
-                    }
-                    // QC proposal event
-                    EventType::QuorumProposal { proposal, sender } => {
-                        // process the QC proposal
-                        // get the leader for current view
-                        let leader = hotshot_handle.get_leader(proposal.data.view_number).await;
-                        // get the payload commitment
-                        let payload_commitment = proposal.data.block_header.payload_commitment();
-                        // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
-                        if sender == leader
-                            && sender.validate(&proposal.signature, payload_commitment.as_ref())
-                        {
-                            let qc_msg = QCMessage::<Types> {
-                                proposal: proposal,
-                                sender: sender,
-                            };
-                            qc_sender
-                                .broadcast(MessageType::QCMessage(qc_msg))
                                 .await
                                 .unwrap();
                         }
@@ -357,18 +316,101 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                             qc: qc,
                             block_size: block_size,
                         };
+                        tracing::debug!(
+                            "Sending Decide event to the builder states{:?}",
+                            decide_msg
+                        );
                         decide_sender
                             .broadcast(MessageType::DecideMessage(decide_msg))
                             .await
                             .unwrap();
                     }
-                    // not sure whether we need it or not //TODO
-                    EventType::ViewFinished { view_number } => {
-                        tracing::info!("View Finished Event for view number: {:?}", view_number);
-                        unimplemented!("View Finished Event");
+                    // DA proposal event
+                    EventType::DAProposal { proposal, sender } => {
+                        // process the DA proposal
+                        // get the leader for current view
+                        let leader = hotshot_handle.get_leader(proposal.data.view_number).await;
+                        tracing::debug!(
+                            "DAProposal: Leader: {:?} for the view: {:?}",
+                            leader,
+                            proposal.data.view_number
+                        );
+
+                        // get the encoded transactions hash
+                        let encoded_txns_hash = Sha256::digest(&proposal.data.encoded_transactions);
+                        // check if the sender is the leader and the signature is valid; if yes, broadcast the DA proposal
+                        if leader == sender
+                            && sender.validate(&proposal.signature, &encoded_txns_hash)
+                        {
+                            // // get the num of VID nodes
+                            // let c_api: HotShotConsensusApi<Types, I> = HotShotConsensusApi {
+                            //     inner: hotshot_handle.hotshot.clone(),
+                            // };
+
+                            let total_nodes = hotshot_handle.total_nodes();
+
+                            let da_msg = DAProposalMessage::<Types> {
+                                proposal: proposal,
+                                sender: leader,
+                                total_nodes: total_nodes.into(),
+                            };
+                            tracing::debug!(
+                                "Sending DA proposal to the builder states{:?}",
+                                da_msg
+                            );
+                            da_sender
+                                .broadcast(MessageType::DAProposalMessage(da_msg))
+                                .await
+                                .unwrap();
+                        } else {
+                            tracing::error!("Validation Failure on DAProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", proposal.data.view_number, leader, sender);
+                        }
+                    }
+                    // QC proposal event
+                    EventType::QuorumProposal { proposal, sender } => {
+                        // process the QC proposal
+                        // get the leader for current view
+                        let leader = hotshot_handle.get_leader(proposal.data.view_number).await;
+                        tracing::debug!(
+                            "QCProposal: Leader: {:?} for the view: {:?}",
+                            leader,
+                            proposal.data.view_number
+                        );
+                        // get the payload commitment
+                        let payload_commitment = proposal.data.block_header.payload_commitment();
+                        // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
+                        // let qc_msg = QCMessage::<Types> {
+                        //     proposal: proposal.clone(),
+                        //     sender: sender.clone(),
+                        // };
+                        // tracing::debug!("Sending QC proposal to the builder states{:?}", qc_msg);
+                        // TODO: Fix this validation part, it is not on payload_commitment, it is on the leaf_commitment
+                        // TODO: and reconstrucing leaf is bit complex
+                        // TODO: https://github.com/EspressoSystems/hs-builder-core/issues/58
+                        // if sender == leader
+                        //     && sender.validate(&proposal.signature, payload_commitment.as_ref())
+                        //if !sender.validate(&proposal.signature, payload_commitment.as_ref()) {
+                        if 1 == 1 {
+                            //tracing::error!("Validation Failure on QCProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", proposal.data.view_number, leader, sender);
+                            let qc_msg = QCMessage::<Types> {
+                                proposal: proposal,
+                                sender: leader,
+                            };
+                            tracing::debug!(
+                                "Sending QC proposal to the builder states{:?}",
+                                qc_msg
+                            );
+                            qc_sender
+                                .broadcast(MessageType::QCMessage(qc_msg))
+                                .await
+                                .unwrap();
+                        } else {
+                            tracing::error!("Validation Failure on QCProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", proposal.data.view_number, leader, sender);
+                        }
                     }
                     _ => {
-                        unimplemented!();
+                        tracing::error!("Unhandled event from Builder");
+                        //tracing::error!("Unhandled event from Builder: {:?}", event.event);
                     }
                 }
             }

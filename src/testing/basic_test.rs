@@ -43,6 +43,7 @@ mod tests {
     use hotshot::types::SignatureKey;
     use hotshot_types::{
         data::QuorumProposal,
+        event::LeafInfo,
         message::Message,
         simple_certificate::Threshold,
         simple_vote::QuorumData,
@@ -212,6 +213,7 @@ mod tests {
             let block_header = TestBlockHeader {
                 block_number: i as u64,
                 payload_commitment: encoded_txns_vid_commitment,
+                timestamp: i as u64,
             };
 
             let justify_qc = match i {
@@ -326,9 +328,20 @@ mod tests {
                     current_leaf
                 }
             };
-
+            // let x =
+            //     hotshot_types::traits::states::ValidatedState::<TestTypes>::ValidatedState::genesis(
+            //         &TestInstanceState {},
+            //     );
+            //hotshot_types::traits::states::ValidatedState;
+            //use hotshot::traits:
+            let leaf_info = LeafInfo {
+                leaf: leaf.clone(),
+                state: Arc::new(TestValidatedState::default()),
+                delta: None,
+                vid: None,
+            };
             let sdecide_msg = DecideMessage::<TestTypes> {
-                leaf_chain: Arc::new(vec![(leaf.clone(), None)]),
+                leaf_chain: Arc::new(vec![leaf_info.clone()]),
                 qc: Arc::new(justify_qc),
                 block_size: Some(encoded_transactions.len() as u64),
             };
@@ -380,6 +393,7 @@ mod tests {
                 arc_rwlock_global_state_clone,
                 res_sender,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
+                ViewNumber::new(0),
             );
 
             //builder_state.event_loop().await;

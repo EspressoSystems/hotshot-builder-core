@@ -3,9 +3,10 @@
 //
 #![allow(clippy::redundant_field_names)]
 #![allow(clippy::too_many_arguments)]
+use hotshot::traits::ValidatedState;
 use hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
-    event::LeafChain,
+    event::{LeafChain, LeafInfo},
     message::Proposal,
     simple_certificate::QuorumCertificate,
     traits::block_contents::{BlockHeader, BlockPayload},
@@ -55,7 +56,7 @@ pub struct TransactionMessage<TYPES: NodeType> {
     pub tx_type: TransactionSource,
 }
 /// Decide Message to be put on the decide channel
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct DecideMessage<TYPES: NodeType> {
     pub leaf_chain: Arc<LeafChain<TYPES>>,
     pub qc: Arc<QuorumCertificate<TYPES>>,
@@ -162,6 +163,12 @@ pub struct BuilderState<TYPES: NodeType> {
 
     // builder Commitements
     pub builder_commitments: Vec<BuilderCommitment>,
+
+    // bootstrapped view number
+    pub bootstrap_view_number: TYPES::Time,
+
+    // list of views for which we have builder spwaned clones
+    pub spawned_clones_views_list: Arc<RwLock<HashSet<u64>>>,
 }
 /// Trait to hold the helper functions for the builder
 #[async_trait]
@@ -173,16 +180,16 @@ pub trait BuilderProgress<TYPES: NodeType> {
     fn process_hotshot_transaction(&mut self, tx: TYPES::Transaction);
 
     /// process the DA proposal
-    fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>);
+    async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>);
 
     /// process the quorum proposal
-    fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>);
+    async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>);
 
     /// process the decide event
     async fn process_decide_event(&mut self, decide_msg: DecideMessage<TYPES>) -> Option<Status>;
 
     /// spawn a clone of builder
-    fn spawn_clone(
+    async fn spawn_clone(
         self,
         da_proposal: DAProposal<TYPES>,
         quorum_proposal: QuorumProposal<TYPES>,
@@ -263,18 +270,36 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                     fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(),
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
                                            builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
-    fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>) {
+    async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>) {
         // Validation
         // check for view number
         // check for signature validation and correct leader (both of these are done in the service.rs i.e. before putting hotshot events onto the da channel)
 
         // bootstrapping part
         // if the view number is 0 and no more clone is active then keep going, and don't return from it
-        if self.built_from_view_vid_leaf.0.get_u64() == 0 && self.tx_receiver.receiver_count() <= 1
+        let to_debug = da_msg.clone();
+        tracing::debug!("Builder Received FDA Proposal from {:?}", to_debug);
+
+        let view_number = da_msg.proposal.data.view_number.get_u64();
+
+        // Two cases to handle:
+        // Case 1: Bootstrapping phase
+        // Case 2: No intended builder state exists
+
+        // To handle both cases, we can have the bootstrap builder running,
+        // and only doing the insertion if and only if intended builder state for a particulat view is not present
+        // check the presense of da_msg.proposal.data.view_number-1 in the spawned_clones_views_list
+
+        if self.built_from_view_vid_leaf.0.get_u64() == self.bootstrap_view_number.get_u64()
+            && !self
+                .spawned_clones_views_list
+                .read()
+                .await
+                .contains(&(view_number - 1))
         {
-            tracing::info!("In bootstrapping phase");
-        } else if da_msg.proposal.data.view_number <= self.built_from_view_vid_leaf.0 {
-            tracing::info!("View number is lesser or equal from the built_from_view, so returning");
+            tracing::info!("DA Proposal handled by bootstrapped builder state");
+        } else if view_number != self.built_from_view_vid_leaf.0.get_u64() + 1 {
+            tracing::info!("View number is not equal to built_from_view + 1, so returning");
             return;
         }
 
@@ -322,17 +347,32 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 let qc_proposal_data = qc_proposal_data.remove();
 
                 // make sure we don't clone for the bootstrapping da and qc proposals
-                if qc_proposal_data.view_number.get_u64() != 0 {
+                // also make sure we clone for the same view number( check incase payload commitments are same)
+                // this will handle the case when the intended builder state can spwan
+                if qc_proposal_data.view_number.get_u64() == view_number.get_u64() {
                     tracing::info!("Spawning a clone");
+                    // remove this entry from the qc_proposal_payload_commit_to_quorum_proposal hashmap
+                    self.quorum_proposal_payload_commit_to_quorum_proposal
+                        .remove(&payload_vid_commitment);
+
+                    // Before spawning a clone add the view number to the spawned_clones_views_list
+                    self.spawned_clones_views_list
+                        .write()
+                        .await
+                        .insert(view_number.get_u64());
                     self.clone()
-                        .spawn_clone(da_proposal_data, qc_proposal_data, sender);
+                        .spawn_clone(da_proposal_data, qc_proposal_data, sender)
+                        .await;
                 } else {
-                    tracing::info!("Not spawning a clone despite matching DA and QC proposals, as they corresponds to bootstrapping phase");
+                    tracing::info!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to bootstrapping phase/different view numbers");
                 }
             } else {
                 e.insert(da_proposal_data);
             }
+        } else {
+            tracing::info!("Payload commitment already exists in the da_proposal_payload_commit_to_da_proposal hashmap, so ignoring it");
         }
+        tracing::debug!("Builder Received SDA Proposal from {:?}", to_debug);
     }
 
     /// processing the quorum proposal
@@ -341,7 +381,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                     fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(),
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
                                            builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
-    fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>) {
+    async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>) {
         // Validation
         // check for view number
         // check for the leaf commitment
@@ -350,14 +390,24 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
         // bootstrapping part
         // if the view number is 0 and no more clone is active then keep going, and don't return from it
-        if self.built_from_view_vid_leaf.0.get_u64() == 0 && self.tx_receiver.receiver_count() <= 1
+        let to_debug = qc_msg.clone();
+        tracing::debug!("Builder Received FQC Proposal from {:?}", to_debug);
+
+        let view_number = qc_msg.proposal.data.view_number.get_u64();
+        if self.built_from_view_vid_leaf.0.get_u64() == self.bootstrap_view_number.get_u64()
+            && !self
+                .spawned_clones_views_list
+                .read()
+                .await
+                .contains(&(view_number - 1))
         {
-            tracing::info!("In bootstrapping phase");
+            tracing::info!("QC Proposal handled by bootstrapped builder state");
         } else if qc_msg.proposal.data.justify_qc.view_number != self.built_from_view_vid_leaf.0
             || qc_msg.proposal.data.justify_qc.get_data().leaf_commit
                 != self.built_from_view_vid_leaf.2
         {
-            tracing::info!("Either View number or leaf commit from justify qc does not match the built-in info, so returning");
+            tracing::info!("Either View number {:?} or leaf commit{:?} from justify qc does not match the built-in info {:?}{:?}{:?}, so returning",
+            qc_msg.proposal.data.justify_qc.view_number, qc_msg.proposal.data.justify_qc.get_data().leaf_commit, self.built_from_view_vid_leaf.0, self.built_from_view_vid_leaf.1, self.built_from_view_vid_leaf.2);
             return;
         }
         let qc_proposal_data = qc_msg.proposal.data;
@@ -380,18 +430,30 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             {
                 let da_proposal_data = da_proposal_data.remove();
 
-                // make sure we don't clone for the bootstrapping da and qc proposals
-                if da_proposal_data.view_number.get_u64() != 0 {
+                // remove the entry from the da_proposal_payload_commit_to_da_proposal hashmap
+                self.da_proposal_payload_commit_to_da_proposal
+                    .remove(&payload_vid_commitment);
+
+                // also make sure we clone for the same view number( check incase payload commitments are same)
+                if da_proposal_data.view_number.get_u64() == view_number {
                     tracing::info!("Spawning a clone");
+                    self.spawned_clones_views_list
+                        .write()
+                        .await
+                        .insert(view_number);
                     self.clone()
-                        .spawn_clone(da_proposal_data, qc_proposal_data, sender);
+                        .spawn_clone(da_proposal_data, qc_proposal_data, sender)
+                        .await;
                 } else {
-                    tracing::info!("Not spawning a clone despite matching DA and QC proposals, as they corresponds to bootstrapping phase");
+                    tracing::info!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to bootstrapping phase/different view numbers");
                 }
             } else {
                 e.insert(qc_proposal_data.clone());
             }
+        } else {
+            tracing::info!("Payload commitment already exists in the quorum_proposal_payload_commit_to_quorum_proposal hashmap, so ignoring it");
         }
+        tracing::debug!("Builder Received SQC Proposal from {:?}", to_debug);
     }
 
     /// processing the decide event
@@ -407,22 +469,21 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let _qc = decide_msg.qc;
         let _block_size = decide_msg.block_size;
 
-        let _latest_decide_parent_commitment = leaf_chain[0].0.parent_commitment;
+        let _latest_decide_parent_commitment = leaf_chain[0].leaf.parent_commitment;
 
-        let _latest_decide_commitment = leaf_chain[0].0.commit();
+        let _latest_decide_commitment = leaf_chain[0].leaf.commit();
 
-        let leaf_view_number = leaf_chain[0].0.view_number;
+        let leaf_view_number = leaf_chain[0].leaf.view_number;
 
         // bootstrapping case
         // handle the case when we hear a decide event before we have atleast one clone, in that case, we might exit the builder
         // and not make any progress; so we need to handle that case
         // Adhoc logic: if the number of subscrived receivers are more than 1, it means that there exists a clone and we can safely exit
-        if self.built_from_view_vid_leaf.0.get_u64() == 0 && self.tx_receiver.receiver_count() <= 1
-        {
-            tracing::info!("In bootstrapping phase");
+        if self.built_from_view_vid_leaf.0.get_u64() == self.bootstrap_view_number.get_u64() {
+            tracing::info!("Bootstrapped builder state, should continue");
             //return Some(Status::ShouldContinue);
         } else if self.built_from_view_vid_leaf.0 <= leaf_view_number {
-            tracing::info!("The decide event is not for the next view, so ignoring it");
+            tracing::info!("Built-in view is less than equal to the currently decided leaf so exiting the builder state");
             // convert leaf commitments into buildercommiments
             //let leaf_commitments:Vec<BuilderCommitment> = leaf_chain.iter().map(|leaf| leaf.get_block_payload().unwrap().builder_commitment(&leaf.get_block_header().metadata())).collect();
 
@@ -436,12 +497,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         }
 
         // go through all the leafs
-        for leaf in leaf_chain.iter() {
-            let block_payload = leaf.0.get_block_payload();
+        for LeafInfo { leaf, .. } in leaf_chain.iter() {
+            let block_payload = leaf.get_block_payload();
             match block_payload {
                 Some(block_payload) => {
                     tracing::debug!("Block payload in decide event {:?}", block_payload);
-                    let metadata = leaf_chain[0].0.get_block_header().metadata();
+                    let metadata = leaf_chain[0].leaf.get_block_header().metadata();
                     let transactions_commitments = block_payload.transaction_commitments(metadata);
                     // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx
                     for tx_hash in transactions_commitments.iter() {
@@ -472,7 +533,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                     fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(),
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
                                            builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
-    fn spawn_clone(
+    async fn spawn_clone(
         mut self,
         da_proposal: DAProposal<TYPES>,
         quorum_proposal: QuorumProposal<TYPES>,
@@ -480,22 +541,29 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     ) {
         self.built_from_view_vid_leaf.0 = quorum_proposal.view_number;
         self.built_from_view_vid_leaf.1 = quorum_proposal.block_header.payload_commitment();
+        let parent_commitment = if quorum_proposal.justify_qc.is_genesis {
+            // get the instance state from the global state
+            let instance_state = &self.global_state.read_arc().await.instance_state;
+            Leaf::genesis(instance_state).commit()
+        } else {
+            quorum_proposal.justify_qc.get_data().leaf_commit
+        };
 
         let leaf: Leaf<_> = Leaf {
             view_number: quorum_proposal.view_number,
             justify_qc: quorum_proposal.justify_qc.clone(),
-            parent_commitment: quorum_proposal.justify_qc.get_data().leaf_commit,
+            parent_commitment: parent_commitment,
             block_header: quorum_proposal.block_header.clone(),
             block_payload: None,
             proposer_id: leader,
         };
+
         self.built_from_view_vid_leaf.2 = leaf.commit();
 
         let payload = <TYPES::BlockPayload as BlockPayload>::from_bytes(
             da_proposal.encoded_transactions.clone().into_iter(),
             quorum_proposal.block_header.metadata(),
         );
-
         payload
             .transaction_commitments(quorum_proposal.block_header.metadata())
             .iter()
@@ -659,7 +727,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                             Some(da) => {
                                 if let MessageType::DAProposalMessage(rda_msg) = da {
                                     tracing::debug!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_view_vid_leaf, rda_msg);
-                                    self.process_da_proposal(rda_msg);
+                                    self.process_da_proposal(rda_msg).await;
                                 }
                             }
                             None => {
@@ -672,7 +740,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                             Some(qc) => {
                                 if let MessageType::QCMessage(rqc_msg) = qc {
                                     tracing::debug!("Received qc msg in builder {:?}:\n {:?} from index", self.built_from_view_vid_leaf, rqc_msg);
-                                    self.process_quorum_proposal(rqc_msg);
+                                    self.process_quorum_proposal(rqc_msg).await;
                                 }
                             }
                             None => {
@@ -733,6 +801,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         global_state: Arc<RwLock<GlobalState<TYPES>>>,
         response_sender: UnboundedSender<ResponseMessage>,
         num_nodes: NonZeroUsize,
+        bootstrap_view_number: TYPES::Time,
     ) -> Self {
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
@@ -751,6 +820,8 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             response_sender: response_sender,
             builder_commitments: vec![],
             total_nodes: num_nodes,
+            bootstrap_view_number: bootstrap_view_number,
+            spawned_clones_views_list: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 }
