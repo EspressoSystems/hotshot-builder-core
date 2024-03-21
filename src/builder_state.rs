@@ -23,7 +23,9 @@ use commit::{Commitment, Committable};
 
 use async_broadcast::Receiver as BroadcastReceiver;
 use async_compatibility_layer::art::async_spawn;
-use async_compatibility_layer::channel::UnboundedSender;
+use async_compatibility_layer::channel::{
+    oneshot, OneShotReceiver, OneShotSender, UnboundedSender,
+};
 use async_lock::RwLock;
 use async_std::task::JoinHandle;
 use async_trait::async_trait;
@@ -87,7 +89,8 @@ pub struct BuildBlockInfo<TYPES: NodeType> {
     pub offered_fee: u64,
     pub block_payload: TYPES::BlockPayload,
     pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
-    pub join_handle: Arc<JoinHandle<VidCommitment>>,
+    //pub join_handle: Arc<JJoinHandle<VidCommitment>>,
+    pub vid_handle_receiver: OneShotReceiver<JoinHandle<VidCommitment>>,
 }
 
 /// Response Message to be put on the response channel
@@ -504,11 +507,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // Adhoc logic: if the number of subscrived receivers are more than 1, it means that there exists a clone and we can safely exit
         if self.built_from_view_vid_leaf.0.get_u64() == self.bootstrap_view_number.get_u64() {
             tracing::info!("Bootstrapped builder state, should continue");
-
-            tracing::info!(
-                "Before spliiting off: {:?}",
-                self.spawned_clones_views_list.read().await
-            );
             // split_off returns greater than equal to set, so we want everything after the latest decide event
             let splitted_list = self
                 .spawned_clones_views_list
@@ -518,11 +516,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
             // update the spawned_clones_views_list with the splitted list now
             *self.spawned_clones_views_list.write().await = splitted_list;
-            tracing::info!(
-                "After spliiting off: {:?}",
-                self.spawned_clones_views_list.read().await
-            );
-
             //return Some(Status::ShouldContinue);
         } else if self.built_from_view_vid_leaf.0 <= latest_leaf_view_number {
             tracing::info!("Built-in view is less than equal to the currently decided leaf so exiting the builder state");
@@ -644,8 +637,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // convert vid_num_nodes to usize
             // spawn a task to calculate the VID commitment, and pass the builder handle to the global state
             // later global state can await on it before replying to the proposer
+
+            let (vid_handle_sender, vid_handle_receiver) = oneshot::<JoinHandle<VidCommitment>>();
+
             let join_handle =
                 async_spawn(async move { vid_commitment(&encoded_txns, vid_num_nodes) });
+
+            vid_handle_sender.send(join_handle);
 
             //let signature = self.builder_keys.0.sign(&block_hash);
             return Some(BuildBlockInfo {
@@ -654,7 +652,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 offered_fee: offered_fee,
                 block_payload: payload,
                 metadata: metadata,
-                join_handle: Arc::new(join_handle),
+                vid_handle_receiver: vid_handle_receiver,
             });
         };
 
@@ -682,6 +680,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         block_size: response.block_size,
                         offered_fee: response.offered_fee,
                     };
+
                     self.response_sender.send(response_msg).await.unwrap();
                     // write to global state as well
                     self.global_state
@@ -693,9 +692,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                             (
                                 response.block_payload,
                                 response.metadata,
-                                response.join_handle,
+                                response.vid_handle_receiver,
                             ),
                         );
+
+                    //self.response_sender.send(response).await.unwrap();
                 }
                 None => {
                     tracing::warn!("No response to send");

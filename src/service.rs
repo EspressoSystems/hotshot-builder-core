@@ -24,9 +24,9 @@ use hs_builder_api::{
 use crate::builder_state::{
     get_leaf, DAProposalMessage, DecideMessage, QCMessage, TransactionMessage, TransactionSource,
 };
-use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
+use crate::builder_state::{BuildBlockInfo, MessageType, RequestMessage, ResponseMessage};
 use async_broadcast::Sender as BroadcastSender;
-use async_compatibility_layer::channel::UnboundedReceiver;
+use async_compatibility_layer::channel::{OneShotReceiver, UnboundedReceiver};
 use async_lock::RwLock;
 use async_std::task::JoinHandle;
 use async_trait::async_trait;
@@ -62,7 +62,7 @@ pub struct GlobalState<Types: NodeType> {
         (
             Types::BlockPayload,
             <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
-            Arc<JoinHandle<VidCommitment>>,
+            OneShotReceiver<JoinHandle<VidCommitment>>,
         ),
     >,
     // sending a request from the hotshot to the builder states
@@ -169,6 +169,7 @@ where
                 )
                 .expect("Available block info signing failed");
 
+                // insert the block info into local hashmap
                 let initial_block_info = AvailableBlockInfo::<Types> {
                     block_hash: response.builder_hash,
                     block_size: response.block_size,
@@ -221,7 +222,7 @@ where
             // wait on the handle for the vid computation before returning the response
             // clone the arc handle
             //let vid_handle = Arc::try_unwrap(*block.2).unwrap();
-            let vid_handle = Arc::into_inner(block.2.clone()).unwrap();
+            let vid_handle = block.2.recv().await.unwrap();
             let vid_commitement = vid_handle.await;
             let signature_over_vid_commitment = <Types as NodeType>::SignatureKey::sign(
                 &self.builder_keys.1,
