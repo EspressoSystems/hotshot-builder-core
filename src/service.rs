@@ -21,20 +21,24 @@ use hs_builder_api::{
     data_source::{AcceptsTxnSubmits, BuilderDataSource},
 };
 
+use crate::builder_state::{
+    get_leaf, DAProposalMessage, DecideMessage, QCMessage, TransactionMessage, TransactionSource,
+};
+use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use async_broadcast::Sender as BroadcastSender;
 use async_compatibility_layer::channel::UnboundedReceiver;
 use async_lock::RwLock;
 use async_std::task::JoinHandle;
 use async_trait::async_trait;
+use commit::Committable;
+use futures::future::BoxFuture;
 use futures::stream::StreamExt;
-
-use crate::builder_state::{
-    DAProposalMessage, DecideMessage, QCMessage, TransactionMessage, TransactionSource,
-};
-use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use sha2::{Digest, Sha256};
+use std::collections::hash_map::Entry;
 use std::{collections::HashMap, sync::Arc};
+use tide_disco::method::ReadState;
 use tracing;
+
 #[derive(clap::Args, Default)]
 pub struct Options {
     #[clap(short, long, env = "ESPRESSO_BUILDER_PORT")]
@@ -126,7 +130,6 @@ impl<Types: NodeType> GlobalState<Types> {
             })
     }
 }
-
 #[async_trait]
 impl<Types: NodeType> BuilderDataSource<Types> for GlobalState<Types>
 where
@@ -141,12 +144,16 @@ where
             requested_vid_commitment: *for_parent,
         };
         self.request_sender
-            .broadcast(MessageType::RequestMessage(req_msg))
+            .broadcast(MessageType::RequestMessage(req_msg.clone()))
             .await
             .unwrap();
 
         let response_received = self.response_receiver.recv().await;
-
+        tracing::debug!(
+            "Response received for request{:?} {:?}",
+            req_msg,
+            response_received
+        );
         match response_received {
             Ok(response) => {
                 // to sign combine the block_hash i.e builder commitment, block size and offered fee
@@ -170,6 +177,7 @@ where
                     sender: self.builder_keys.0.clone(),
                     _phantom: Default::default(),
                 };
+                tracing::debug!("Initial block info: {:?}", initial_block_info);
                 Ok(vec![initial_block_info])
             }
             _ => Err(BuildError::Error {
@@ -211,11 +219,10 @@ where
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
         if let Some(block) = self.block_hash_to_block.get(block_hash) {
             // wait on the handle for the vid computation before returning the response
-
             // clone the arc handle
+            //let vid_handle = Arc::try_unwrap(*block.2).unwrap();
             let vid_handle = Arc::into_inner(block.2.clone()).unwrap();
             let vid_commitement = vid_handle.await;
-
             let signature_over_vid_commitment = <Types as NodeType>::SignatureKey::sign(
                 &self.builder_keys.1,
                 vid_commitement.as_ref(),
@@ -254,6 +261,18 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalStateTxnSubmitter<Types
     }
 }
 
+#[async_trait]
+impl<Types: NodeType> ReadState for GlobalState<Types> {
+    type State = Self;
+
+    async fn read<T>(
+        &self,
+        op: impl Send + for<'a> FnOnce(&'a Self::State) -> BoxFuture<'a, T> + 'async_trait,
+    ) -> T {
+        op(self).await
+    }
+}
+
 /// Listen to the events from the HotShot and pass onto to the builder states
 pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementation<Types>>(
     // sending a transaction from the hotshot mempool to the builder states
@@ -270,6 +289,9 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
 
     // hotshot context handle
     hotshot_handle: SystemContextHandle<Types, I>,
+
+    // pass the instance state
+    instance_state: Types::InstanceState,
 ) -> Result<(), ()> {
     let mut event_stream = hotshot_handle.get_event_stream();
     loop {
@@ -342,11 +364,6 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                         if leader == sender
                             && sender.validate(&proposal.signature, &encoded_txns_hash)
                         {
-                            // // get the num of VID nodes
-                            // let c_api: HotShotConsensusApi<Types, I> = HotShotConsensusApi {
-                            //     inner: hotshot_handle.hotshot.clone(),
-                            // };
-
                             let total_nodes = hotshot_handle.total_nodes();
 
                             let da_msg = DAProposalMessage::<Types> {
@@ -387,10 +404,10 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                         // TODO: Fix this validation part, it is not on payload_commitment, it is on the leaf_commitment
                         // TODO: and reconstrucing leaf is bit complex
                         // TODO: https://github.com/EspressoSystems/hs-builder-core/issues/58
-                        // if sender == leader
-                        //     && sender.validate(&proposal.signature, payload_commitment.as_ref())
-                        //if !sender.validate(&proposal.signature, payload_commitment.as_ref()) {
-                        if 1 == 1 {
+                        let leaf = get_leaf(&proposal.data, &instance_state, sender.clone()).await;
+                        if sender == leader
+                            && sender.validate(&proposal.signature, leaf.commit().as_ref())
+                        {
                             //tracing::error!("Validation Failure on QCProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", proposal.data.view_number, leader, sender);
                             let qc_msg = QCMessage::<Types> {
                                 proposal: proposal,

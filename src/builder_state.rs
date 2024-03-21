@@ -25,11 +25,11 @@ use async_broadcast::Receiver as BroadcastReceiver;
 use async_compatibility_layer::art::async_spawn;
 use async_compatibility_layer::channel::UnboundedSender;
 use async_lock::RwLock;
-use async_std::task;
 use async_std::task::JoinHandle;
 use async_trait::async_trait;
 use futures::StreamExt; //::select_all;
 
+use crate::service::GlobalState;
 use core::panic;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -37,8 +37,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::SystemTime;
 use std::{cmp::PartialEq, num::NonZeroUsize};
-
-use crate::service::GlobalState;
 
 pub type TxTimeStamp = u128;
 
@@ -170,6 +168,31 @@ pub struct BuilderState<TYPES: NodeType> {
     // list of views for which we have builder spwaned clones
     pub spawned_clones_views_list: Arc<RwLock<HashSet<u64>>>,
 }
+
+/// Helper function to get the leaf from the quorum proposal
+pub async fn get_leaf<TYPES: NodeType>(
+    quorum_proposal: &QuorumProposal<TYPES>,
+    instance_state: &TYPES::InstanceState,
+    leader: TYPES::SignatureKey,
+) -> Leaf<TYPES> {
+    let parent_commitment = if quorum_proposal.justify_qc.is_genesis {
+        // get the instance state from the global state
+        Leaf::genesis(instance_state).commit()
+    } else {
+        quorum_proposal.justify_qc.get_data().leaf_commit
+    };
+
+    let leaf: Leaf<_> = Leaf {
+        view_number: quorum_proposal.view_number,
+        justify_qc: quorum_proposal.justify_qc.clone(),
+        parent_commitment: parent_commitment,
+        block_header: quorum_proposal.block_header.clone(),
+        block_payload: None,
+        proposer_id: leader,
+    };
+    leaf
+}
+
 /// Trait to hold the helper functions for the builder
 #[async_trait]
 pub trait BuilderProgress<TYPES: NodeType> {
@@ -406,8 +429,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             || qc_msg.proposal.data.justify_qc.get_data().leaf_commit
                 != self.built_from_view_vid_leaf.2
         {
-            tracing::info!("Either View number {:?} or leaf commit{:?} from justify qc does not match the built-in info {:?}{:?}{:?}, so returning",
-            qc_msg.proposal.data.justify_qc.view_number, qc_msg.proposal.data.justify_qc.get_data().leaf_commit, self.built_from_view_vid_leaf.0, self.built_from_view_vid_leaf.1, self.built_from_view_vid_leaf.2);
+            tracing::info!("Either View number {:?} or leaf commit{:?} from justify qc does not match the built-in info {:?}, so returning",
+            qc_msg.proposal.data.justify_qc.view_number, qc_msg.proposal.data.justify_qc.get_data().leaf_commit, self.built_from_view_vid_leaf);
             return;
         }
         let qc_proposal_data = qc_msg.proposal.data;
@@ -541,22 +564,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     ) {
         self.built_from_view_vid_leaf.0 = quorum_proposal.view_number;
         self.built_from_view_vid_leaf.1 = quorum_proposal.block_header.payload_commitment();
-        let parent_commitment = if quorum_proposal.justify_qc.is_genesis {
-            // get the instance state from the global state
-            let instance_state = &self.global_state.read_arc().await.instance_state;
-            Leaf::genesis(instance_state).commit()
-        } else {
-            quorum_proposal.justify_qc.get_data().leaf_commit
-        };
 
-        let leaf: Leaf<_> = Leaf {
-            view_number: quorum_proposal.view_number,
-            justify_qc: quorum_proposal.justify_qc.clone(),
-            parent_commitment: parent_commitment,
-            block_header: quorum_proposal.block_header.clone(),
-            block_payload: None,
-            proposer_id: leader,
-        };
+        let leaf = get_leaf(
+            &quorum_proposal,
+            &self.global_state.read_arc().await.instance_state,
+            leader,
+        )
+        .await;
 
         self.built_from_view_vid_leaf.2 = leaf.commit();
 
@@ -611,7 +625,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // spawn a task to calculate the VID commitment, and pass the builder handle to the global state
             // later global state can await on it before replying to the proposer
             let join_handle =
-                task::spawn(async move { vid_commitment(&encoded_txns, vid_num_nodes) });
+                async_spawn(async move { vid_commitment(&encoded_txns, vid_num_nodes) });
 
             //let signature = self.builder_keys.0.sign(&block_hash);
             return Some(BuildBlockInfo {
