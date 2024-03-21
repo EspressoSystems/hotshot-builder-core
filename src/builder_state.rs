@@ -31,7 +31,7 @@ use futures::StreamExt; //::select_all;
 
 use crate::service::GlobalState;
 use core::panic;
-use std::collections::hash_map::Entry;
+use std::collections::{hash_map::Entry, BTreeSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -166,7 +166,7 @@ pub struct BuilderState<TYPES: NodeType> {
     pub bootstrap_view_number: TYPES::Time,
 
     // list of views for which we have builder spwaned clones
-    pub spawned_clones_views_list: Arc<RwLock<HashSet<u64>>>,
+    pub spawned_clones_views_list: Arc<RwLock<BTreeSet<TYPES::Time>>>,
 }
 
 /// Helper function to get the leaf from the quorum proposal
@@ -318,7 +318,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 .spawned_clones_views_list
                 .read()
                 .await
-                .contains(&(view_number - 1))
+                .contains(&(da_msg.proposal.data.view_number - 1))
         {
             tracing::info!("DA Proposal handled by bootstrapped builder state");
         } else if view_number != self.built_from_view_vid_leaf.0.get_u64() + 1 {
@@ -382,12 +382,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     self.spawned_clones_views_list
                         .write()
                         .await
-                        .insert(view_number.get_u64());
+                        .insert(qc_proposal_data.view_number);
                     self.clone()
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender)
                         .await;
                 } else {
-                    tracing::info!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to bootstrapping phase/different view numbers");
+                    tracing::info!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers");
                 }
             } else {
                 e.insert(da_proposal_data);
@@ -422,7 +422,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 .spawned_clones_views_list
                 .read()
                 .await
-                .contains(&(view_number - 1))
+                .contains(&(qc_msg.proposal.data.view_number - 1))
         {
             tracing::info!("QC Proposal handled by bootstrapped builder state");
         } else if qc_msg.proposal.data.justify_qc.view_number != self.built_from_view_vid_leaf.0
@@ -463,12 +463,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     self.spawned_clones_views_list
                         .write()
                         .await
-                        .insert(view_number);
+                        .insert(da_proposal_data.view_number);
                     self.clone()
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender)
                         .await;
                 } else {
-                    tracing::info!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to bootstrapping phase/different view numbers");
+                    tracing::info!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers");
                 }
             } else {
                 e.insert(qc_proposal_data.clone());
@@ -496,7 +496,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
         let _latest_decide_commitment = leaf_chain[0].leaf.commit();
 
-        let leaf_view_number = leaf_chain[0].leaf.view_number;
+        let latest_leaf_view_number = leaf_chain[0].leaf.view_number;
 
         // bootstrapping case
         // handle the case when we hear a decide event before we have atleast one clone, in that case, we might exit the builder
@@ -504,13 +504,33 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // Adhoc logic: if the number of subscrived receivers are more than 1, it means that there exists a clone and we can safely exit
         if self.built_from_view_vid_leaf.0.get_u64() == self.bootstrap_view_number.get_u64() {
             tracing::info!("Bootstrapped builder state, should continue");
+
+            tracing::info!(
+                "Before spliiting off: {:?}",
+                self.spawned_clones_views_list.read().await
+            );
+            // split_off returns greater than equal to set, so we want everything after the latest decide event
+            let splitted_list = self
+                .spawned_clones_views_list
+                .write()
+                .await
+                .split_off(&(latest_leaf_view_number + 1));
+
+            // update the spawned_clones_views_list with the splitted list now
+            *self.spawned_clones_views_list.write().await = splitted_list;
+            tracing::info!(
+                "After spliiting off: {:?}",
+                self.spawned_clones_views_list.read().await
+            );
+
             //return Some(Status::ShouldContinue);
-        } else if self.built_from_view_vid_leaf.0 <= leaf_view_number {
+        } else if self.built_from_view_vid_leaf.0 <= latest_leaf_view_number {
             tracing::info!("Built-in view is less than equal to the currently decided leaf so exiting the builder state");
             // convert leaf commitments into buildercommiments
             //let leaf_commitments:Vec<BuilderCommitment> = leaf_chain.iter().map(|leaf| leaf.get_block_payload().unwrap().builder_commitment(&leaf.get_block_header().metadata())).collect();
 
             // remove the handles from the global state
+            // TODO: Does it make sense to remove it here or should we remove in api responses?
             self.global_state.write_arc().await.remove_handles(
                 self.built_from_view_vid_leaf.1,
                 self.builder_commitments.clone(),
@@ -835,7 +855,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             builder_commitments: vec![],
             total_nodes: num_nodes,
             bootstrap_view_number: bootstrap_view_number,
-            spawned_clones_views_list: Arc::new(RwLock::new(HashSet::new())),
+            spawned_clones_views_list: Arc::new(RwLock::new(BTreeSet::new())),
         }
     }
 }

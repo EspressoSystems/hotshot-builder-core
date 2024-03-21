@@ -9,7 +9,7 @@ use hotshot_types::{
     traits::{
         block_contents::{BlockHeader, BlockPayload},
         consensus_api::ConsensusApi,
-        node_implementation::NodeType,
+        node_implementation::{ConsensusTime, NodeType},
         signature_key::SignatureKey,
     },
     utils::BuilderCommitment,
