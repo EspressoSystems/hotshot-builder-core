@@ -44,12 +44,13 @@ jobs:
       - name: Install Cap'n Proto
         run: |
           curl https://capnproto.org/capnproto-c++-win32-1.0.2.zip -o capnproto.zip
-          7z.exe e capnproto.zip -r *.exe -o${{github.workspace}}\\capnproto
-          Write-Output "Unpacking capnp.exe to ${{github.workspace}}\\capnproto\\"
+          7z.exe e capnproto.zip -r *.exe -o${{github.workspace}}\capnproto
+          Write-Output "Unpacking capnp.exe to ${{github.workspace}}\capnproto\"
           Get-ChildItem -Path ${{github.workspace}}\\capnproto\\
-          echo "${{github.workspace}}\\capnproto" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
-          $env:Path += ';${{github.workspace}}\\capnproto'
+          echo "${{github.workspace}}\capnproto" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+          $env:Path += ';${{github.workspace}}\capnproto'
           Get-Command capnp -All
+          capnp --version
 
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -59,6 +60,8 @@ jobs:
 
       - name: Build
         run: |
+          $env:Path += ';${{github.workspace}}\capnproto'
+          capnp --version
           cargo build --workspace --release
 
       - name: Test
