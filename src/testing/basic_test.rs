@@ -43,6 +43,7 @@ mod tests {
     use hotshot::types::SignatureKey;
     use hotshot_types::{
         data::QuorumProposal,
+        event::LeafInfo,
         message::Message,
         simple_certificate::Threshold,
         simple_vote::QuorumData,
@@ -145,6 +146,7 @@ mod tests {
         let mut sreq_msgs: Vec<MessageType<TestTypes>> = Vec::new();
         // storing response messages
         let mut rres_msgs: Vec<ResponseMessage> = Vec::new();
+        let validated_state = Arc::new(TestValidatedState::default());
 
         // generate num_test messages for each type and send it to the respective channels;
         for i in 0..num_test_messages as u32 {
@@ -212,7 +214,7 @@ mod tests {
             let block_header = TestBlockHeader {
                 block_number: i as u64,
                 payload_commitment: encoded_txns_vid_commitment,
-                timestamp: i as u64,
+                timestamp: i as u64 + 1u64,
             };
 
             let justify_qc = match i {
@@ -330,7 +332,12 @@ mod tests {
             };
 
             let sdecide_msg = DecideMessage::<TestTypes> {
-                leaf_chain: Arc::new(vec![(leaf.clone(), None)]),
+                leaf_chain: Arc::new(vec![LeafInfo::new(
+                    leaf.clone(),
+                    validated_state.clone(),
+                    None,
+                    None,
+                )]),
                 qc: Arc::new(justify_qc),
                 block_size: Some(encoded_transactions.len() as u64),
             };
