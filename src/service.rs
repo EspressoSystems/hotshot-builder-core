@@ -4,6 +4,11 @@
 
 #![allow(clippy::redundant_field_names)]
 use hotshot::{traits::NodeImplementation, types::SystemContextHandle};
+use hotshot_builder_api::{
+    block_info::{AvailableBlockData, AvailableBlockHeaderInput, AvailableBlockInfo},
+    builder::BuildError,
+    data_source::{AcceptsTxnSubmits, BuilderDataSource},
+};
 use hotshot_types::{
     event::EventType,
     traits::{
@@ -14,11 +19,6 @@ use hotshot_types::{
     },
     utils::BuilderCommitment,
     vid::VidCommitment,
-};
-use hs_builder_api::{
-    block_info::{AvailableBlockData, AvailableBlockHeaderInput, AvailableBlockInfo},
-    builder::BuildError,
-    data_source::{AcceptsTxnSubmits, BuilderDataSource},
 };
 
 use async_broadcast::Sender as BroadcastSender;
@@ -332,6 +332,7 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                         let leader = hotshot_handle.get_leader(proposal.data.view_number).await;
                         // get the payload commitment
                         let payload_commitment = proposal.data.block_header.payload_commitment();
+
                         // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
                         if sender == leader
                             && sender.validate(&proposal.signature, payload_commitment.as_ref())

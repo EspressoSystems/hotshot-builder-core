@@ -27,7 +27,7 @@ jobs:
   windows:
     runs-on: windows-latest
     env:
-        RUSTFLAGS: "--cfg async_executor_impl=\"async-std\" --cfg async_channel_impl=\"async-std\" --cfg hotshot_example"
+        RUSTFLAGS: "--cfg async_executor_impl=\"async-std\" --cfg async_channel_impl=\"async-std\""
         RUST_LOG: info
     steps:
       - name: Configure Git
@@ -40,6 +40,18 @@ jobs:
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
 
+      # Will this work?
+      - name: Install Cap'n Proto
+        run: |
+          curl https://capnproto.org/capnproto-c++-win32-1.0.2.zip -o capnproto.zip
+          7z.exe e capnproto.zip -r *.exe -o${{github.workspace}}\capnproto
+          Write-Output "Unpacking capnp.exe to ${{github.workspace}}\capnproto\"
+          Get-ChildItem -Path ${{github.workspace}}\capnproto\
+          echo "${{github.workspace}}\capnproto" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+          $env:Path += ';${{github.workspace}}\capnproto'
+          Get-Command capnp -All
+          capnp --version
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -48,6 +60,9 @@ jobs:
 
       - name: Build
         run: |
+          Get-ChildItem -Path ${{github.workspace}}\capnproto\
+          $env:Path += ';${{github.workspace}}\capnproto'
+          capnp --version
           cargo build --workspace --release
 
       - name: Test
