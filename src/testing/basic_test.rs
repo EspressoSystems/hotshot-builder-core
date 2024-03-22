@@ -212,6 +212,7 @@ mod tests {
             let block_header = TestBlockHeader {
                 block_number: i as u64,
                 payload_commitment: encoded_txns_vid_commitment,
+                timestamp: i as u64,
             };
 
             let justify_qc = match i {
@@ -277,8 +278,9 @@ mod tests {
                 view_number: ViewNumber::new(i as u64),
                 justify_qc: justify_qc.clone(),
                 timeout_certificate: None,
-                proposer_id: pub_key,
                 upgrade_certificate: None,
+                proposer_id: pub_key,
+                view_sync_certificate: None,
             };
 
             let payload_commitment =
