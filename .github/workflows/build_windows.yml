@@ -48,6 +48,8 @@ jobs:
           Write-Output "Unpacking capnp.exe to ${{github.workspace}}\\capnproto\\"
           Get-ChildItem -Path ${{github.workspace}}\\capnproto\\
           echo "${{github.workspace}}\\capnproto" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+          $env:Path += ';${{github.workspace}}\\capnproto'
+          Get-Command capnp -All
 
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -57,8 +59,6 @@ jobs:
 
       - name: Build
         run: |
-          Get-Command capnp -All
-          capnp --version
           cargo build --workspace --release
 
       - name: Test
