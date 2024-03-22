@@ -44,7 +44,8 @@ jobs:
       - name: Install Cap'n Proto
         run: |
           curl https://capnproto.org/capnproto-c++-win32-1.0.2.zip -o capnproto.zip
-          7z.exe e capnproto.zip *.exe
+          7z.exe e capnproto.zip -r *.exe
+          echo "Unpacking capnp.exe to {path}"
           echo "{path}" >> $GITHUB_PATH
 
       - name: Checkout Repository
@@ -55,6 +56,7 @@ jobs:
 
       - name: Build
         run: |
+          echo "building with PATH=$PATH"
           cargo build --workspace --release
 
       - name: Test
