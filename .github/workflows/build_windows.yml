@@ -27,7 +27,7 @@ jobs:
   windows:
     runs-on: windows-latest
     env:
-        RUSTFLAGS: "--cfg async_executor_impl=\"async-std\" --cfg async_channel_impl=\"async-std\" --cfg hotshot_example"
+        RUSTFLAGS: "--cfg async_executor_impl=\"async-std\" --cfg async_channel_impl=\"async-std\""
         RUST_LOG: info
     steps:
       - name: Configure Git
@@ -39,6 +39,12 @@ jobs:
 
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
+
+      # Will this work?
+      # - name: Install Cap'n Proto
+      #   run: |
+      #     curl https://capnproto.org/capnproto-c++-win32-1.0.2.zip -o capnproto.zip
+      #     7z.exe e capnproto.zip *.exe
 
       - name: Checkout Repository
         uses: actions/checkout@v4
