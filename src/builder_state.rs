@@ -26,12 +26,12 @@ use async_compatibility_layer::art::async_spawn;
 use async_compatibility_layer::channel::{
     oneshot, OneShotReceiver, OneShotSender, UnboundedSender,
 };
-use async_lock::RwLock;
+use async_lock::{Mutex, RwLock};
 use async_std::task::JoinHandle;
 use async_trait::async_trait;
 use futures::StreamExt; //::select_all;
 
-use crate::service::GlobalState;
+use crate::{fetch::Fetch, service::GlobalState};
 use core::panic;
 use std::collections::{hash_map::Entry, BTreeSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -82,7 +82,7 @@ pub struct RequestMessage {
     //pub total_nodes: usize
 }
 /// Response Message to be put on the response channel
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct BuildBlockInfo<TYPES: NodeType> {
     pub builder_hash: BuilderCommitment, //TODO: Need to pull out from hotshot
     pub block_size: u64,
@@ -90,8 +90,9 @@ pub struct BuildBlockInfo<TYPES: NodeType> {
     pub block_payload: TYPES::BlockPayload,
     pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
     //pub join_handle: Arc<JJoinHandle<VidCommitment>>,
-    pub vid_handle_receiver: OneShotReceiver<JoinHandle<VidCommitment>>,
+    pub vid_handle_receiver: Fetch<VidCommitment>,
 }
+// TODO: impl debug for buildblockinfo
 
 /// Response Message to be put on the response channel
 #[derive(Debug, Clone)]
@@ -638,21 +639,26 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // spawn a task to calculate the VID commitment, and pass the builder handle to the global state
             // later global state can await on it before replying to the proposer
 
-            let (vid_handle_sender, vid_handle_receiver) = oneshot::<JoinHandle<VidCommitment>>();
+            // let (vid_handle_sender, vid_handle_receiver) = oneshot::<JoinHandle<VidCommitment>>();
 
-            let join_handle =
+            // use async_broadcast::broadcast;
+            // // let (vid_handle_sender, vid_handle_receiver) =
+            // //     broadcast::<JoinHandle<VidCommitment>>(1);
+
+            let vid_handle =
                 async_spawn(async move { vid_commitment(&encoded_txns, vid_num_nodes) });
 
-            vid_handle_sender.send(join_handle);
+            use std::future::IntoFuture;
+            let mut temp = vid_handle.into_future();
 
-            //let signature = self.builder_keys.0.sign(&block_hash);
+            let fetch_response = Fetch::Pending(temp.boxed());
             return Some(BuildBlockInfo {
                 builder_hash: builder_hash,
                 block_size: block_size,
                 offered_fee: offered_fee,
                 block_payload: payload,
                 metadata: metadata,
-                vid_handle_receiver: vid_handle_receiver,
+                vid_handle_receiver: fetch_response,
             });
         };
 

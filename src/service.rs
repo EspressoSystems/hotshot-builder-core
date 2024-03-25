@@ -26,8 +26,11 @@ use crate::builder_state::{
 };
 use crate::builder_state::{BuildBlockInfo, MessageType, RequestMessage, ResponseMessage};
 use async_broadcast::Sender as BroadcastSender;
-use async_compatibility_layer::channel::{OneShotReceiver, UnboundedReceiver};
-use async_lock::RwLock;
+use async_compatibility_layer::{
+    async_primitives::broadcast::BroadcastReceiver,
+    channel::{OneShotReceiver, UnboundedReceiver},
+};
+use async_lock::{Mutex, RwLock};
 use async_std::task::JoinHandle;
 use async_trait::async_trait;
 use commit::Committable;
@@ -62,7 +65,7 @@ pub struct GlobalState<Types: NodeType> {
         (
             Types::BlockPayload,
             <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
-            OneShotReceiver<JoinHandle<VidCommitment>>,
+            Option<JoinHandle<VidCommitment>>,
         ),
     >,
     // sending a request from the hotshot to the builder states
@@ -222,8 +225,15 @@ where
             // wait on the handle for the vid computation before returning the response
             // clone the arc handle
             //let vid_handle = Arc::try_unwrap(*block.2).unwrap();
-            let vid_handle = block.2.recv().await.unwrap();
-            let vid_commitement = vid_handle.await;
+            //let vid_handle = block.2.recv().await.unwrap();
+            //let handle = block.2.into_inner().await;
+            //{
+            //Ok(handle) => {
+            //assert!(handle.await.unwrap_err().is_cancelled());
+            let handle = block.2.take().unwrap();
+
+            let vid_commitement = handle.await;
+
             let signature_over_vid_commitment = <Types as NodeType>::SignatureKey::sign(
                 &self.builder_keys.1,
                 vid_commitement.as_ref(),
@@ -236,6 +246,11 @@ where
                 _phantom: Default::default(),
             };
             Ok(reponse)
+            //}
+            // Err(e) => Err(BuildError::Error {
+            //     message: "Block not found erroe while await on join handle".to_string(),
+            // }),
+            //}
         } else {
             Err(BuildError::Error {
                 message: "Block not found".to_string(),

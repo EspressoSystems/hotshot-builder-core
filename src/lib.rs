@@ -19,3 +19,5 @@ pub mod service;
 
 // tracking the testing
 pub mod testing;
+
+pub mod fetch;
