@@ -182,12 +182,7 @@ pub trait BuilderProgress<TYPES: NodeType> {
     async fn process_decide_event(&mut self, decide_msg: DecideMessage<TYPES>) -> Option<Status>;
 
     /// spawn a clone of builder
-    fn spawn_clone(
-        self,
-        da_proposal: DAProposal<TYPES>,
-        quorum_proposal: QuorumProposal<TYPES>,
-        leader: TYPES::SignatureKey,
-    );
+    fn spawn_clone(self, da_proposal: DAProposal<TYPES>, quorum_proposal: QuorumProposal<TYPES>);
 
     /// build a block
     fn build_block(&mut self, matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>>;
@@ -279,7 +274,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         }
 
         let da_proposal_data = da_msg.proposal.data.clone();
-        let sender = da_msg.sender;
+        // TODO: confirm signature with this...
+        // let sender = da_msg.sender;
 
         // get the view number and encoded txns from the da_proposal_data
         let view_number = da_proposal_data.view_number;
@@ -324,8 +320,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 // make sure we don't clone for the bootstrapping da and qc proposals
                 if qc_proposal_data.view_number.get_u64() != 0 {
                     tracing::info!("Spawning a clone");
-                    self.clone()
-                        .spawn_clone(da_proposal_data, qc_proposal_data, sender);
+                    self.clone().spawn_clone(da_proposal_data, qc_proposal_data);
                 } else {
                     tracing::info!("Not spawning a clone despite matching DA and QC proposals, as they corresponds to bootstrapping phase");
                 }
@@ -361,7 +356,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             return;
         }
         let qc_proposal_data = qc_msg.proposal.data;
-        let sender = qc_msg.sender;
+        // TODO: confirm signature with this...
+        // let sender = qc_msg.sender;
 
         let payload_vid_commitment = qc_proposal_data.block_header.payload_commitment();
         tracing::debug!(
@@ -383,8 +379,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 // make sure we don't clone for the bootstrapping da and qc proposals
                 if da_proposal_data.view_number.get_u64() != 0 {
                     tracing::info!("Spawning a clone");
-                    self.clone()
-                        .spawn_clone(da_proposal_data, qc_proposal_data, sender);
+                    self.clone().spawn_clone(da_proposal_data, qc_proposal_data);
                 } else {
                     tracing::info!("Not spawning a clone despite matching DA and QC proposals, as they corresponds to bootstrapping phase");
                 }
@@ -476,7 +471,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         mut self,
         da_proposal: DAProposal<TYPES>,
         quorum_proposal: QuorumProposal<TYPES>,
-        leader: TYPES::SignatureKey,
     ) {
         self.built_from_view_vid_leaf.0 = quorum_proposal.view_number;
         self.built_from_view_vid_leaf.1 = quorum_proposal.block_header.payload_commitment();
@@ -487,7 +481,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             parent_commitment: quorum_proposal.justify_qc.get_data().leaf_commit,
             block_header: quorum_proposal.block_header.clone(),
             block_payload: None,
-            proposer_id: leader,
         };
         self.built_from_view_vid_leaf.2 = leaf.commit();
 

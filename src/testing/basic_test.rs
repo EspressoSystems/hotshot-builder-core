@@ -242,7 +242,6 @@ mod tests {
                             .block_header
                             .clone(),
                         block_payload: None,
-                        proposer_id: sqc_msgs[(i - 1) as usize].proposal.data.proposer_id,
                     };
 
                     let q_data = QuorumData::<TestTypes> {
@@ -275,14 +274,11 @@ mod tests {
             tracing::debug!("Iteration: {} justify_qc: {:?}", i, justify_qc);
 
             let qc_proposal = QuorumProposal::<TestTypes> {
-                //block_header: TestBlockHeader::genesis(&TestInstanceState {}).0,
                 block_header: block_header,
                 view_number: ViewNumber::new(i as u64),
                 justify_qc: justify_qc.clone(),
-                timeout_certificate: None,
                 upgrade_certificate: None,
-                proposer_id: pub_key,
-                view_sync_certificate: None,
+                proposal_certificate: None,
             };
 
             let payload_commitment =
@@ -325,7 +321,6 @@ mod tests {
                                 &qc_proposal.block_header,
                             ),
                         )),
-                        proposer_id: qc_proposal.proposer_id,
                     };
                     current_leaf
                 }
