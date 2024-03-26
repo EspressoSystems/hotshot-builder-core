@@ -136,6 +136,7 @@ mod tests {
             req_sender,
             res_receiver,
             tx_sender.clone(),
+            TestInstanceState {},
         );
 
         // to store all the sent messages
@@ -162,7 +163,7 @@ mod tests {
             let da_proposal = DAProposal {
                 encoded_transactions: encoded_transactions.clone(),
                 metadata: (),
-                view_number: ViewNumber::new((i + 1) as u64),
+                view_number: ViewNumber::new(i as u64),
             };
             let encoded_transactions_hash = Sha256::digest(&encoded_transactions);
             let seed = [i as u8; 32];
@@ -241,7 +242,6 @@ mod tests {
                             .block_header
                             .clone(),
                         block_payload: None,
-                        proposer_id: sqc_msgs[(i - 1) as usize].proposal.data.proposer_id,
                     };
 
                     let q_data = QuorumData::<TestTypes> {
@@ -278,9 +278,8 @@ mod tests {
                 block_header: block_header,
                 view_number: ViewNumber::new(i as u64),
                 justify_qc: justify_qc.clone(),
-                timeout_certificate: None,
-                proposer_id: pub_key,
                 upgrade_certificate: None,
+                proposal_certificate: None,
             };
 
             let payload_commitment =
@@ -323,7 +322,6 @@ mod tests {
                                 &qc_proposal.block_header,
                             ),
                         )),
-                        proposer_id: qc_proposal.proposer_id,
                     };
                     current_leaf
                 }
@@ -431,9 +429,9 @@ mod tests {
             .try_recv()
         {
             rres_msgs.push(res_msg);
-            // if rres_msgs.len() == (num_test_messages-1) as usize{
-            //     break;
-            // }
+            if rres_msgs.len() == (num_test_messages - 1) as usize {
+                break;
+            }
         }
         assert_eq!(rres_msgs.len(), (num_test_messages - 1));
         //task::sleep(std::time::Duration::from_secs(60)).await;

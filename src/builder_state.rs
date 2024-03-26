@@ -1,9 +1,7 @@
 // Copyright (c) 2024 Espresso Systems (espressosys.com)
 // This file is part of the HotShot Builder Protocol.
 //
-#![allow(clippy::redundant_field_names)]
-#![allow(clippy::too_many_arguments)]
-use hotshot::traits::ValidatedState;
+
 use hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
     event::{LeafChain, LeafInfo},
@@ -22,16 +20,13 @@ use hotshot_types::{
 use commit::{Commitment, Committable};
 
 use async_broadcast::Receiver as BroadcastReceiver;
-use async_compatibility_layer::art::async_spawn;
-use async_compatibility_layer::channel::{
-    oneshot, OneShotReceiver, OneShotSender, UnboundedSender,
-};
-use async_lock::{Mutex, RwLock};
-use async_std::task::JoinHandle;
+use async_compatibility_layer::channel::{unbounded, UnboundedSender};
+use async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
+use async_lock::RwLock;
 use async_trait::async_trait;
-use futures::StreamExt; //::select_all;
+use futures::StreamExt;
 
-use crate::{fetch::Fetch, service::GlobalState};
+use crate::service::GlobalState;
 use core::panic;
 use std::collections::{hash_map::Entry, BTreeSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -82,22 +77,36 @@ pub struct RequestMessage {
     //pub total_nodes: usize
 }
 /// Response Message to be put on the response channel
-// #[derive(Debug)]
+// #[derive(Derivative)]
+// #[derivative(Debug)]
+#[derive(Debug)]
 pub struct BuildBlockInfo<TYPES: NodeType> {
-    pub builder_hash: BuilderCommitment, //TODO: Need to pull out from hotshot
+    pub builder_hash: BuilderCommitment,
     pub block_size: u64,
     pub offered_fee: u64,
     pub block_payload: TYPES::BlockPayload,
     pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
-    //pub join_handle: Arc<JJoinHandle<VidCommitment>>,
-    pub vid_handle_receiver: Fetch<VidCommitment>,
+    pub vid_receiver: UnboundedReceiver<VidCommitment>,
+    // pub encoded_txns: Vec<u8>,
+    // pub vid_num_nodes: usize,
 }
-// TODO: impl debug for buildblockinfo
+// // impl debug for BuildBlockInfo
+// impl<TYPES: NodeType> Debug for BuildBlockInfo<TYPES> {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_struct("BuildBlockInfo")
+//             .field("builder_hash", &self.builder_hash)
+//             .field("block_size", &self.block_size)
+//             .field("offered_fee", &self.offered_fee)
+//             .field("block_payload", &self.block_payload)
+//             .field("metadata", &self.metadata)
+//             .finish()
+//     }
+// }
 
 /// Response Message to be put on the response channel
 #[derive(Debug, Clone)]
 pub struct ResponseMessage {
-    pub builder_hash: BuilderCommitment, //TODO: Need to pull out from hotshot
+    pub builder_hash: BuilderCommitment,
     pub block_size: u64,
     pub offered_fee: u64,
 }
@@ -106,7 +115,9 @@ pub enum Status {
     ShouldExit,
     ShouldContinue,
 }
-
+// use derivative::Derivative;
+// #[derive(Derivative)]
+// #[derivative(Debug)]
 #[derive(Debug, Clone)]
 pub struct BuilderState<TYPES: NodeType> {
     // timestamp to tx hash, used for ordering for the transactions
@@ -177,7 +188,6 @@ pub struct BuilderState<TYPES: NodeType> {
 pub async fn get_leaf<TYPES: NodeType>(
     quorum_proposal: &QuorumProposal<TYPES>,
     instance_state: &TYPES::InstanceState,
-    leader: TYPES::SignatureKey,
 ) -> Leaf<TYPES> {
     let parent_commitment = if quorum_proposal.justify_qc.is_genesis {
         // get the instance state from the global state
@@ -192,7 +202,6 @@ pub async fn get_leaf<TYPES: NodeType>(
         parent_commitment: parent_commitment,
         block_header: quorum_proposal.block_header.clone(),
         block_payload: None,
-        proposer_id: leader,
     };
     leaf
 }
@@ -293,7 +302,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     }
 
     /// processing the DA proposal
-    #[tracing::instrument(skip_all, name = "process da proposal", 
+    #[tracing::instrument(skip_all, name = "process da proposal",
                                     fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(),
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
                                            builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
@@ -318,11 +327,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // check the presense of da_msg.proposal.data.view_number-1 in the spawned_clones_views_list
 
         if self.built_from_view_vid_leaf.0.get_u64() == self.bootstrap_view_number.get_u64()
-            && !self
-                .spawned_clones_views_list
-                .read()
-                .await
-                .contains(&(da_msg.proposal.data.view_number - 1))
+            && (da_msg.proposal.data.view_number.get_u64() == 0
+                || !self
+                    .spawned_clones_views_list
+                    .read()
+                    .await
+                    .contains(&(da_msg.proposal.data.view_number - 1)))
         {
             tracing::info!("DA Proposal handled by bootstrapped builder state");
         } else if view_number != self.built_from_view_vid_leaf.0.get_u64() + 1 {
@@ -422,11 +432,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
         let view_number = qc_msg.proposal.data.view_number.get_u64();
         if self.built_from_view_vid_leaf.0.get_u64() == self.bootstrap_view_number.get_u64()
-            && !self
-                .spawned_clones_views_list
-                .read()
-                .await
-                .contains(&(qc_msg.proposal.data.view_number - 1))
+            && (qc_msg.proposal.data.view_number.get_u64() == 0
+                || !self
+                    .spawned_clones_views_list
+                    .read()
+                    .await
+                    .contains(&(qc_msg.proposal.data.view_number - 1)))
         {
             tracing::info!("QC Proposal handled by bootstrapped builder state");
         } else if qc_msg.proposal.data.justify_qc.view_number != self.built_from_view_vid_leaf.0
@@ -574,7 +585,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         mut self,
         da_proposal: DAProposal<TYPES>,
         quorum_proposal: QuorumProposal<TYPES>,
-        leader: TYPES::SignatureKey,
+        _leader: TYPES::SignatureKey,
     ) {
         self.built_from_view_vid_leaf.0 = quorum_proposal.view_number;
         self.built_from_view_vid_leaf.1 = quorum_proposal.block_header.payload_commitment();
@@ -582,7 +593,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let leaf = get_leaf(
             &quorum_proposal,
             &self.global_state.read_arc().await.instance_state,
-            leader,
         )
         .await;
 
@@ -644,21 +654,21 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // use async_broadcast::broadcast;
             // // let (vid_handle_sender, vid_handle_receiver) =
             // //     broadcast::<JoinHandle<VidCommitment>>(1);
+            //let (oneshot_sender, oneshot_reciever) = oneshot();
+            let (unbounded_sender, unbounded_reciever) = unbounded();
+            #[allow(unused_must_use)]
+            async_spawn(async move {
+                let vidc = vid_commitment(&encoded_txns, vid_num_nodes);
+                unbounded_sender.send(vidc);
+            });
 
-            let vid_handle =
-                async_spawn(async move { vid_commitment(&encoded_txns, vid_num_nodes) });
-
-            use std::future::IntoFuture;
-            let mut temp = vid_handle.into_future();
-
-            let fetch_response = Fetch::Pending(temp.boxed());
             return Some(BuildBlockInfo {
-                builder_hash: builder_hash,
-                block_size: block_size,
-                offered_fee: offered_fee,
+                builder_hash,
+                block_size,
+                offered_fee,
                 block_payload: payload,
-                metadata: metadata,
-                vid_handle_receiver: fetch_response,
+                metadata,
+                vid_receiver: unbounded_reciever,
             });
         };
 
@@ -671,12 +681,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         //let vid_nodes = req.total_nodes;
         if requested_vid_commitment == self.built_from_view_vid_leaf.1 {
             let response = self.build_block(requested_vid_commitment);
+
             match response {
                 Some(response) => {
                     tracing::info!(
                         "Builder {:?} Sending response {:?} to the request{:?}",
                         self.built_from_view_vid_leaf,
-                        response,
+                        response.builder_hash,
                         req
                     );
 
@@ -688,6 +699,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     };
 
                     self.response_sender.send(response_msg).await.unwrap();
+
                     // write to global state as well
                     self.global_state
                         .write_arc()
@@ -698,7 +710,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                             (
                                 response.block_payload,
                                 response.metadata,
-                                response.vid_handle_receiver,
+                                response.vid_receiver,
                             ),
                         );
 
@@ -830,7 +842,7 @@ pub enum MessageType<TYPES: NodeType> {
     QCMessage(QCMessage<TYPES>),
     RequestMessage(RequestMessage),
 }
-
+#[allow(clippy::too_many_arguments)]
 impl<TYPES: NodeType> BuilderState<TYPES> {
     pub fn new(
         view_vid_leaf: (TYPES::Time, VidCommitment, Commitment<Leaf<TYPES>>),
@@ -850,18 +862,18 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             included_txns: HashSet::new(),
             block_hash_to_block: HashMap::new(),
             built_from_view_vid_leaf: view_vid_leaf,
-            tx_receiver: tx_receiver,
-            decide_receiver: decide_receiver,
-            da_proposal_receiver: da_proposal_receiver,
-            qc_receiver: qc_receiver,
-            req_receiver: req_receiver,
+            tx_receiver,
+            decide_receiver,
+            da_proposal_receiver,
+            qc_receiver,
+            req_receiver,
             da_proposal_payload_commit_to_da_proposal: HashMap::new(),
             quorum_proposal_payload_commit_to_quorum_proposal: HashMap::new(),
-            global_state: global_state,
-            response_sender: response_sender,
+            global_state,
+            response_sender,
             builder_commitments: vec![],
             total_nodes: num_nodes,
-            bootstrap_view_number: bootstrap_view_number,
+            bootstrap_view_number,
             spawned_clones_views_list: Arc::new(RwLock::new(BTreeSet::new())),
         }
     }

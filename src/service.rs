@@ -4,44 +4,40 @@
 
 #![allow(clippy::redundant_field_names)]
 use hotshot::{traits::NodeImplementation, types::SystemContextHandle};
+use hotshot_builder_api::{
+    block_info::{AvailableBlockData, AvailableBlockHeaderInput, AvailableBlockInfo},
+    builder::BuildError,
+    data_source::{AcceptsTxnSubmits, BuilderDataSource},
+};
 use hotshot_types::{
     event::EventType,
     traits::{
         block_contents::{BlockHeader, BlockPayload},
         consensus_api::ConsensusApi,
-        node_implementation::{ConsensusTime, NodeType},
+        node_implementation::NodeType,
         signature_key::SignatureKey,
     },
     utils::BuilderCommitment,
     vid::VidCommitment,
 };
-use hs_builder_api::{
-    block_info::{AvailableBlockData, AvailableBlockHeaderInput, AvailableBlockInfo},
-    builder::BuildError,
-    data_source::{AcceptsTxnSubmits, BuilderDataSource},
-};
 
 use crate::builder_state::{
     get_leaf, DAProposalMessage, DecideMessage, QCMessage, TransactionMessage, TransactionSource,
 };
-use crate::builder_state::{BuildBlockInfo, MessageType, RequestMessage, ResponseMessage};
+use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use async_broadcast::Sender as BroadcastSender;
-use async_compatibility_layer::{
-    async_primitives::broadcast::BroadcastReceiver,
-    channel::{OneShotReceiver, UnboundedReceiver},
-};
-use async_lock::{Mutex, RwLock};
-use async_std::task::JoinHandle;
+pub use async_broadcast::{broadcast, RecvError, TryRecvError};
+use async_compatibility_layer::channel::UnboundedReceiver;
+use async_lock::RwLock;
 use async_trait::async_trait;
 use commit::Committable;
+use derivative::Derivative;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use sha2::{Digest, Sha256};
-use std::collections::hash_map::Entry;
 use std::{collections::HashMap, sync::Arc};
 use tide_disco::method::ReadState;
 use tracing;
-
 #[derive(clap::Args, Default)]
 pub struct Options {
     #[clap(short, long, env = "ESPRESSO_BUILDER_PORT")]
@@ -49,7 +45,9 @@ pub struct Options {
 }
 //
 #[allow(clippy::type_complexity)]
-#[derive(Debug)]
+// #[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct GlobalState<Types: NodeType> {
     // identity keys for the builder
     // May be ideal place as GlobalState interacts with hotshot apis
@@ -58,14 +56,15 @@ pub struct GlobalState<Types: NodeType> {
         Types::SignatureKey,                                             // pub key
         <<Types as NodeType>::SignatureKey as SignatureKey>::PrivateKey, // private key
     ),
-
+    #[derivative(Debug = "ignore")]
     // data store for the blocks
     pub block_hash_to_block: HashMap<
         BuilderCommitment,
         (
             Types::BlockPayload,
             <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
-            Option<JoinHandle<VidCommitment>>,
+            //Option<Arc<JoinHandle<VidCommitment>>>,
+            UnboundedReceiver<VidCommitment>,
         ),
     >,
     // sending a request from the hotshot to the builder states
@@ -81,6 +80,19 @@ pub struct GlobalState<Types: NodeType> {
     // Instance state
     pub instance_state: Types::InstanceState,
 }
+// // impl debug for GlobalState, and exclude the fetch handle from the debug
+// impl<Types: NodeType> std::fmt::Debug for GlobalState<Types> {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_struct("GlobalState")
+//             .field("builder_keys", &self.builder_keys)
+//             .field("block_hash_to_block", &self.block_hash_to_block.keys())
+//             .field("request_sender", &self.request_sender)
+//             .field("response_receiver", &self.response_receiver)
+//             .field("tx_sender", &self.tx_sender)
+//             .field("instance_state", &self.instance_state)
+//             .finish()
+//     }
+// }
 
 impl<Types: NodeType> GlobalState<Types> {
     pub fn new(
@@ -230,9 +242,16 @@ where
             //{
             //Ok(handle) => {
             //assert!(handle.await.unwrap_err().is_cancelled());
-            let handle = block.2.take().unwrap();
+            // let handle = block.2.take().unwrap();
 
-            let vid_commitement = handle.await;
+            // fetch_handle: &Fetch<VidCommitment>
+            //                                 // with_timeout is not working with fetch handle
+            // let value = fetch_handle.resolve().timeout(Duration::from_secs(5)).await;
+
+            // let vid_commitement = handle.await;
+            //let handle = block.2;
+
+            let vid_commitement = block.2.recv().await.unwrap();
 
             let signature_over_vid_commitment = <Types as NodeType>::SignatureKey::sign(
                 &self.builder_keys.1,
@@ -260,7 +279,7 @@ where
 }
 
 pub struct GlobalStateTxnSubmitter<Types: NodeType> {
-    pub global_state_handle: Arc<RwLock<GlobalState<Types>>>,
+    pub global_state: Arc<RwLock<GlobalState<Types>>>,
 }
 
 #[async_trait]
@@ -269,11 +288,7 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalStateTxnSubmitter<Types
         &mut self,
         txn: <Types as NodeType>::Transaction,
     ) -> Result<(), BuildError> {
-        self.global_state_handle
-            .read_arc()
-            .await
-            .submit_txn(txn)
-            .await
+        self.global_state.read_arc().await.submit_txn(txn).await
     }
 }
 
@@ -410,7 +425,7 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                             proposal.data.view_number
                         );
                         // get the payload commitment
-                        let payload_commitment = proposal.data.block_header.payload_commitment();
+                        let _payload_commitment = proposal.data.block_header.payload_commitment();
                         // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
                         // let qc_msg = QCMessage::<Types> {
                         //     proposal: proposal.clone(),
@@ -420,7 +435,7 @@ pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementati
                         // TODO: Fix this validation part, it is not on payload_commitment, it is on the leaf_commitment
                         // TODO: and reconstrucing leaf is bit complex
                         // TODO: https://github.com/EspressoSystems/hs-builder-core/issues/58
-                        let leaf = get_leaf(&proposal.data, &instance_state, sender.clone()).await;
+                        let leaf = get_leaf(&proposal.data, &instance_state).await;
                         if sender == leader
                             && sender.validate(&proposal.signature, leaf.commit().as_ref())
                         {
