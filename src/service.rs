@@ -350,7 +350,7 @@ pub async fn run_non_permissioned_standalone_builder_service<
     
     instance_state: Types::InstanceState,
 ) {
-    let event = events_client_connection.next().await.unwrap();
+    let event = subscribed_events.next().await.unwrap();
 
     match event {
         Ok(event) => {
