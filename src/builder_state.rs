@@ -23,6 +23,7 @@ use async_broadcast::Receiver as BroadcastReceiver;
 use async_compatibility_layer::channel::{unbounded, UnboundedSender};
 use async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
 use async_lock::RwLock;
+use async_std::task::JoinHandle;
 use async_trait::async_trait;
 use futures::StreamExt;
 
@@ -86,7 +87,8 @@ pub struct BuildBlockInfo<TYPES: NodeType> {
     pub offered_fee: u64,
     pub block_payload: TYPES::BlockPayload,
     pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
-    pub vid_receiver: UnboundedReceiver<VidCommitment>,
+    //pub vid_receiver: UnboundedReceiver<VidCommitment>,
+    pub vid_receiver: UnboundedReceiver<JoinHandle<VidCommitment>>,
     // pub encoded_txns: Vec<u8>,
     // pub vid_num_nodes: usize,
 }
@@ -233,7 +235,7 @@ pub trait BuilderProgress<TYPES: NodeType> {
     );
 
     /// build a block
-    fn build_block(&mut self, matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>>;
+    async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>>;
 
     /// Event Loop
     fn event_loop(self);
@@ -621,7 +623,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                     fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(),
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
                                            builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
-    fn build_block(&mut self, _matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>> {
+    async fn build_block(&mut self, _matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>> {
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
             self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
                 self.tx_hash_to_available_txns
@@ -657,10 +659,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             //let (oneshot_sender, oneshot_reciever) = oneshot();
             let (unbounded_sender, unbounded_reciever) = unbounded();
             #[allow(unused_must_use)]
-            async_spawn(async move {
+            let handle = async_spawn(async move {
                 let vidc = vid_commitment(&encoded_txns, vid_num_nodes);
-                unbounded_sender.send(vidc);
+                vidc
             });
+            unbounded_sender.send(handle).await.unwrap();
 
             return Some(BuildBlockInfo {
                 builder_hash,
@@ -680,7 +683,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let requested_vid_commitment = req.requested_vid_commitment;
         //let vid_nodes = req.total_nodes;
         if requested_vid_commitment == self.built_from_view_vid_leaf.1 {
-            let response = self.build_block(requested_vid_commitment);
+            let response = self.build_block(requested_vid_commitment).await;
 
             match response {
                 Some(response) => {

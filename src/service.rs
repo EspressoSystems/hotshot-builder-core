@@ -29,14 +29,15 @@ use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
 use async_compatibility_layer::channel::UnboundedReceiver;
 use async_lock::RwLock;
+use async_std::task::JoinHandle;
 use async_trait::async_trait;
 use commit::Committable;
 use derivative::Derivative;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
-use sha2::{Digest, Sha256};
+use sha2::{digest::crypto_common::rand_core::block, Digest, Sha256};
 use std::{collections::HashMap, sync::Arc};
-use tide_disco::method::ReadState;
+use tide_disco::method::{ReadState, WriteState};
 use tracing;
 #[derive(clap::Args, Default)]
 pub struct Options {
@@ -64,7 +65,7 @@ pub struct GlobalState<Types: NodeType> {
             Types::BlockPayload,
             <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
             //Option<Arc<JoinHandle<VidCommitment>>>,
-            UnboundedReceiver<VidCommitment>,
+            UnboundedReceiver<JoinHandle<VidCommitment>>,
         ),
     >,
     // sending a request from the hotshot to the builder states
@@ -128,7 +129,7 @@ impl<Types: NodeType> GlobalState<Types> {
     }
     // private mempool submit txn
     // Currenlty, we don't differentiate between the transactions from the hotshot and the private mempool
-    pub async fn submit_txn(
+    pub async fn submit_client_txn(
         &self,
         txn: <Types as NodeType>::Transaction,
     ) -> Result<(), BuildError> {
@@ -235,23 +236,9 @@ where
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
         if let Some(block) = self.block_hash_to_block.get(block_hash) {
             // wait on the handle for the vid computation before returning the response
-            // clone the arc handle
-            //let vid_handle = Arc::try_unwrap(*block.2).unwrap();
-            //let vid_handle = block.2.recv().await.unwrap();
-            //let handle = block.2.into_inner().await;
-            //{
-            //Ok(handle) => {
-            //assert!(handle.await.unwrap_err().is_cancelled());
-            // let handle = block.2.take().unwrap();
-
-            // fetch_handle: &Fetch<VidCommitment>
-            //                                 // with_timeout is not working with fetch handle
-            // let value = fetch_handle.resolve().timeout(Duration::from_secs(5)).await;
-
-            // let vid_commitement = handle.await;
-            //let handle = block.2;
-
-            let vid_commitement = block.2.recv().await.unwrap();
+            tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
+            let join_handle = block.2.recv().await.unwrap();
+            let vid_commitement = join_handle.await;
 
             let signature_over_vid_commitment = <Types as NodeType>::SignatureKey::sign(
                 &self.builder_keys.1,
@@ -278,20 +265,42 @@ where
     }
 }
 
-pub struct GlobalStateTxnSubmitter<Types: NodeType> {
-    pub global_state: Arc<RwLock<GlobalState<Types>>>,
-}
+// pub struct GlobalStateTxnSubmitter<Types: NodeType> {
+//     pub global_state: Arc<RwLock<GlobalState<Types>>>,
+// }
+
+// #[async_trait]
+// impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalStateTxnSubmitter<Types> {
+//     async fn submit_txn(
+//         &mut self,
+//         txn: <Types as NodeType>::Transaction,
+//     ) -> Result<(), BuildError> {
+//         self.global_state.read_arc().await.submit_txn(txn).await
+//     }
+// }
+
+// impl write state for GlobalState
+// #[async_trait]
+// impl<Types: NodeType> ReadState for GlobalStateTxnSubmitter<Types> {
+//     type State = Self;
+
+//     async fn read<T>(
+//         &self,
+//         op: impl Send + for<'a> FnOnce(&'a Self::State) -> BoxFuture<'a, T> + 'async_trait,
+//     ) -> T {
+//         op(self).await
+//     }
+// }
 
 #[async_trait]
-impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalStateTxnSubmitter<Types> {
+impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalState<Types> {
     async fn submit_txn(
         &mut self,
         txn: <Types as NodeType>::Transaction,
     ) -> Result<(), BuildError> {
-        self.global_state.read_arc().await.submit_txn(txn).await
+        self.submit_client_txn(txn).await
     }
 }
-
 #[async_trait]
 impl<Types: NodeType> ReadState for GlobalState<Types> {
     type State = Self;
@@ -303,6 +312,16 @@ impl<Types: NodeType> ReadState for GlobalState<Types> {
         op(self).await
     }
 }
+
+// #[async_trait]
+// impl<Types: NodeType> WriteState for GlobalState<Types> {
+//     async fn write<T>(
+//         &self,
+//         op: impl Send + for<'a> FnOnce(&'a mut Self::State) -> BoxFuture<'a, T> + 'async_trait,
+//     ) -> T {
+//         op(self).await
+//     }
+// }
 
 /// Listen to the events from the HotShot and pass onto to the builder states
 pub async fn run_standalone_builder_service<Types: NodeType, I: NodeImplementation<Types>>(
