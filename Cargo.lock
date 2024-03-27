@@ -3231,14 +3231,42 @@ dependencies = [
  "futures",
  "hotshot",
  "hotshot-builder-api",
+ "hotshot-events-service",
  "hotshot-example-types",
  "hotshot-types",
  "serde",
  "sha2 0.10.8",
  "snafu 0.8.2",
+ "surf-disco",
  "tagged-base64 0.3.4",
  "tide-disco",
  "tracing",
+ "versioned-binary-serialization",
+]
+
+[[package]]
+name = "hotshot-events-service"
+version = "0.1.0"
+source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?tag=0.1.0#8078f475d3919189c86dbdc54db4c0adc809a06f"
+dependencies = [
+ "async-broadcast",
+ "async-compatibility-layer 1.0.0 (git+https://github.com/EspressoSystems/async-compatibility-layer.git?tag=1.4.2)",
+ "async-lock 2.8.0",
+ "async-std",
+ "async-trait",
+ "clap",
+ "derivative",
+ "derive_more",
+ "either",
+ "futures",
+ "hotshot-types",
+ "serde",
+ "snafu 0.8.2",
+ "tagged-base64 0.3.4",
+ "tide-disco",
+ "toml",
+ "tracing",
+ "versioned-binary-serialization",
 ]
 
 [[package]]
@@ -7424,7 +7452,7 @@ dependencies = [
 [[package]]
 name = "surf-disco"
 version = "0.5.0"
-source = "git+https://github.com/EspressoSystems/surf-disco.git?tag=v0.5.0#956cebd8d9784de42ea41fd30ec382de8246cb9c"
+source = "git+https://github.com/EspressoSystems/surf-disco?tag=v0.5.0#956cebd8d9784de42ea41fd30ec382de8246cb9c"
 dependencies = [
  "async-std",
  "async-tungstenite",

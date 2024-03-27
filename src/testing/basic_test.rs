@@ -340,7 +340,7 @@ mod tests {
             };
             let sdecide_msg = DecideMessage::<TestTypes> {
                 leaf_chain: Arc::new(vec![leaf_info.clone()]),
-                qc: Arc::new(justify_qc),
+                //qc: Arc::new(justify_qc),
                 block_size: Some(encoded_transactions.len() as u64),
             };
 

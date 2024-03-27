@@ -55,7 +55,7 @@ pub struct TransactionMessage<TYPES: NodeType> {
 #[derive(Clone, Debug)]
 pub struct DecideMessage<TYPES: NodeType> {
     pub leaf_chain: Arc<LeafChain<TYPES>>,
-    pub qc: Arc<QuorumCertificate<TYPES>>,
+    //pub qc: Arc<QuorumCertificate<TYPES>>,
     pub block_size: Option<u64>,
 }
 /// DA Proposal Message to be put on the da proposal channel
@@ -506,7 +506,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // if you haven't launched the clone, then you don't exit, you need atleast one clone to function properly
         // the special value can be 0 itself, or a view number 0 is also right answer
         let leaf_chain = decide_msg.leaf_chain;
-        let _qc = decide_msg.qc;
+        //let _qc = decide_msg.qc;
         let _block_size = decide_msg.block_size;
 
         let _latest_decide_parent_commitment = leaf_chain[0].leaf.parent_commitment;
