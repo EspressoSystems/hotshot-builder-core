@@ -261,9 +261,12 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalState<Types> {
         txn: <Types as NodeType>::Transaction,
     ) -> Result<(), BuildError> {
         tracing::debug!("Submitting transaction to the builder states{:?}", txn);
-        let x = self.submit_client_txn(txn).await;
-        tracing::info!("Transaction submitted to the builder states{:?}", x);
-        x
+        let response = self.submit_client_txn(txn).await;
+        tracing::info!(
+            "Transaction submitted to the builder states, sending response: {:?}",
+            response
+        );
+        response
     }
 }
 #[async_trait]
