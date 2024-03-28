@@ -3,7 +3,13 @@
 //
 
 #![allow(clippy::redundant_field_names)]
-use hotshot::{traits::NodeImplementation, types::SystemContextHandle};
+use hotshot::{
+    traits::{
+        election::static_committee::{GeneralStaticCommittee, StaticElectionConfig},
+        NodeImplementation,
+    },
+    types::SystemContextHandle,
+};
 use hotshot_builder_api::{
     block_info::{AvailableBlockData, AvailableBlockHeaderInput, AvailableBlockInfo},
     builder::BuildError,
@@ -11,9 +17,11 @@ use hotshot_builder_api::{
 };
 use hotshot_types::{
     event::{Event, EventType},
+    signature_key::BLSPubKey,
     traits::{
         block_contents::{BlockHeader, BlockPayload},
         consensus_api::ConsensusApi,
+        election::Membership,
         node_implementation::NodeType,
         signature_key::SignatureKey,
     },
@@ -28,21 +36,18 @@ use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
 use async_compatibility_layer::channel::UnboundedReceiver;
-use async_lock::RwLock;
 use async_std::task::JoinHandle;
 use async_trait::async_trait;
 use commit::Committable;
 use derivative::Derivative;
 use futures::future::BoxFuture;
-use futures::stream::{Stream, StreamExt};
+use futures::stream::StreamExt;
 use hotshot_events_service::events::Error as EventStreamError;
 use hotshot_events_service::events_source::{BuilderEvent, BuilderEventType};
-use sha2::{digest::crypto_common::rand_core::block, Digest, Sha256};
-use std::{collections::HashMap, sync::Arc};
-use surf_disco::socket::{Connection, Unsupported};
-use tide_disco::method::{ReadState, WriteState};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use tide_disco::method::ReadState;
 use tracing;
-use versioned_binary_serialization::version::{StaticVersion, StaticVersionType};
 #[derive(clap::Args, Default)]
 pub struct Options {
     #[clap(short, long, env = "ESPRESSO_BUILDER_PORT")]
@@ -68,7 +73,6 @@ pub struct GlobalState<Types: NodeType> {
         (
             Types::BlockPayload,
             <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
-            //Option<Arc<JoinHandle<VidCommitment>>>,
             UnboundedReceiver<JoinHandle<VidCommitment>>,
         ),
     >,
@@ -85,19 +89,6 @@ pub struct GlobalState<Types: NodeType> {
     // Instance state
     pub instance_state: Types::InstanceState,
 }
-// // impl debug for GlobalState, and exclude the fetch handle from the debug
-// impl<Types: NodeType> std::fmt::Debug for GlobalState<Types> {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("GlobalState")
-//             .field("builder_keys", &self.builder_keys)
-//             .field("block_hash_to_block", &self.block_hash_to_block.keys())
-//             .field("request_sender", &self.request_sender)
-//             .field("response_receiver", &self.response_receiver)
-//             .field("tx_sender", &self.tx_sender)
-//             .field("instance_state", &self.instance_state)
-//             .finish()
-//     }
-// }
 
 impl<Types: NodeType> GlobalState<Types> {
     pub fn new(
@@ -256,11 +247,6 @@ where
                 _phantom: Default::default(),
             };
             Ok(reponse)
-            //}
-            // Err(e) => Err(BuildError::Error {
-            //     message: "Block not found erroe while await on join handle".to_string(),
-            // }),
-            //}
         } else {
             Err(BuildError::Error {
                 message: "Block not found".to_string(),
@@ -268,34 +254,6 @@ where
         }
     }
 }
-
-// pub struct GlobalStateTxnSubmitter<Types: NodeType> {
-//     pub global_state: Arc<RwLock<GlobalState<Types>>>,
-// }
-
-// #[async_trait]
-// impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalStateTxnSubmitter<Types> {
-//     async fn submit_txn(
-//         &mut self,
-//         txn: <Types as NodeType>::Transaction,
-//     ) -> Result<(), BuildError> {
-//         self.global_state.read_arc().await.submit_txn(txn).await
-//     }
-// }
-
-// impl write state for GlobalState
-// #[async_trait]
-// impl<Types: NodeType> ReadState for GlobalStateTxnSubmitter<Types> {
-//     type State = Self;
-
-//     async fn read<T>(
-//         &self,
-//         op: impl Send + for<'a> FnOnce(&'a Self::State) -> BoxFuture<'a, T> + 'async_trait,
-//     ) -> T {
-//         op(self).await
-//     }
-// }
-
 #[async_trait]
 impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalState<Types> {
     async fn submit_txn(
@@ -319,20 +277,7 @@ impl<Types: NodeType> ReadState for GlobalState<Types> {
         op(self).await
     }
 }
-
-// #[async_trait]
-// impl<Types: NodeType> WriteState for GlobalState<Types> {
-//     async fn write<T>(
-//         &self,
-//         op: impl Send + for<'a> FnOnce(&'a mut Self::State) -> BoxFuture<'a, T> + 'async_trait,
-//     ) -> T {
-//         op(self).await
-//     }
-// }
-pub async fn run_non_permissioned_standalone_builder_service<
-    Types: NodeType,
-    I: NodeImplementation<Types>,
->(
+pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
     // sending a transaction from the hotshot mempool to the builder states
     tx_sender: BroadcastSender<MessageType<Types>>,
 
@@ -346,134 +291,170 @@ pub async fn run_non_permissioned_standalone_builder_service<
     decide_sender: BroadcastSender<MessageType<Types>>,
 
     // connection to the events stream
-    subscribed_events: ,
-    
+    mut subscribed_events: surf_disco::socket::Connection<
+        BuilderEvent<Types>,
+        surf_disco::socket::Unsupported,
+        EventStreamError,
+        versioned_binary_serialization::version::StaticVersion<0, 1>,
+    >,
+
+    // instance state
     instance_state: Types::InstanceState,
 ) {
-    let event = subscribed_events.next().await.unwrap();
+    loop {
+        let event = subscribed_events.next().await.unwrap();
+        tracing::debug!("Builder Event received from HotShot: {:?}", event);
+        match event {
+            Ok(event) => {
+                match event.event {
+                    BuilderEventType::HotshotError { error } => {
+                        tracing::error!("Error event in HotShot: {:?}", error);
+                    }
+                    // TODO: Use this information to setup the builder
+                    // starup event
+                    BuilderEventType::StarupInfo {
+                        known_node_with_stake,
+                        non_statekd_node_count,
+                    } => {
+                        // let election_config = StaticElectionConfig {
+                        //     num_nodes_with_stake: known_node_with_stake.len() as u64,
+                        //     num_nodes_without_stake: non_statekd_node_count as u64,
+                        // };
 
-    match event {
-        Ok(event) => {
-            match event.event {
-                BuilderEventType::HotshotError { error } => {
-                    tracing::error!("Error event in HotShot: {:?}", error);
-                }
-                // starup event
-                BuilderEventType::StarupInfo {
-                    known_node_with_stake,
-                    non_statekd_node_count,
-                } => {
-                    tracing::debug!(
+                        // let election_config = GeneralStaticCommittee::default_election_config(
+                        //     known_node_with_stake.len() as u64,
+                        //     non_statekd_node_count as u64,
+                        // );
+
+                        // let membership = GeneralStaticCommittee::create_election(
+                        //     known_node_with_stake,
+                        //     election_config,
+                        // );
+
+                        tracing::info!(
                         "Startup info: Known nodes with stake: {:?}, Non-staked node count: {:?}",
                         known_node_with_stake,
                         non_statekd_node_count
                     );
-                }
-                // tx event
-                BuilderEventType::HotshotTransactions { transactions } => {
-                    // iterate over the transactions and send them to the tx_sender, might get duplicate transactions but builder needs to filter them
-                    for tx_message in transactions {
-                        let tx_msg = TransactionMessage::<Types> {
-                            tx: tx_message,
-                            tx_type: TransactionSource::HotShot,
+                    }
+                    // tx event
+                    BuilderEventType::HotshotTransactions { transactions } => {
+                        // iterate over the transactions and send them to the tx_sender, might get duplicate transactions but builder needs to filter them
+                        for tx_message in transactions {
+                            let tx_msg = TransactionMessage::<Types> {
+                                tx: tx_message,
+                                tx_type: TransactionSource::HotShot,
+                            };
+                            tracing::debug!(
+                                "Sending transaction to the builder states{:?}",
+                                tx_msg
+                            );
+                            tx_sender
+                                .broadcast(MessageType::TransactionMessage(tx_msg))
+                                .await
+                                .unwrap();
+                        }
+                    }
+                    // decide event
+                    BuilderEventType::HotshotDecide {
+                        leaf_chain,
+                        block_size,
+                    } => {
+                        let decide_msg: DecideMessage<Types> = DecideMessage::<Types> {
+                            leaf_chain: leaf_chain,
+                            block_size: block_size,
                         };
-                        tracing::debug!("Sending transaction to the builder states{:?}", tx_msg);
-                        tx_sender
-                            .broadcast(MessageType::TransactionMessage(tx_msg))
+                        tracing::debug!(
+                            "Sending Decide event to the builder states{:?}",
+                            decide_msg
+                        );
+                        decide_sender
+                            .broadcast(MessageType::DecideMessage(decide_msg))
                             .await
                             .unwrap();
                     }
-                }
-                // decide event
-                BuilderEventType::HotshotDecide {
-                    leaf_chain,
-                    block_size,
-                } => {
-                    let decide_msg: DecideMessage<Types> = DecideMessage::<Types> {
-                        leaf_chain: leaf_chain,
-                        block_size: block_size,
-                    };
-                    tracing::debug!("Sending Decide event to the builder states{:?}", decide_msg);
-                    decide_sender
-                        .broadcast(MessageType::DecideMessage(decide_msg))
-                        .await
-                        .unwrap();
-                }
-                // DA proposal event
-                BuilderEventType::HotshotDAProposal { proposal, sender } => {
-                    // process the DA proposal
-                    // get the leader for current view
-                    //let leader = hotshot_handle.get_leader(proposal.data.view_number).await;
-                    tracing::debug!(
-                        "DAProposal: Leader: {:?} for the view: {:?}",
-                        sender,
-                        proposal.data.view_number
-                    );
+                    // DA proposal event
+                    BuilderEventType::HotshotDAProposal { proposal, sender } => {
+                        // process the DA proposal
+                        // get the leader for current view
+                        //let leader = hotshot_handle.get_leader(proposal.data.view_number).await;
+                        tracing::debug!(
+                            "DAProposal: Leader: {:?} for the view: {:?}",
+                            sender,
+                            proposal.data.view_number
+                        );
 
-                    // get the encoded transactions hash
-                    let encoded_txns_hash = Sha256::digest(&proposal.data.encoded_transactions);
-                    // check if the sender is the leader and the signature is valid; if yes, broadcast the DA proposal
-                    if sender.validate(&proposal.signature, &encoded_txns_hash) {
-                        //let total_nodes = hotshot_handle.total_nodes();
-                        // TODO: Fix this total_nodes
-                        // One solution, add a new field to da proposal
-                        let da_msg = DAProposalMessage::<Types> {
-                            proposal: proposal,
-                            sender: sender,
-                            total_nodes: 8,
-                        };
-                        tracing::debug!("Sending DA proposal to the builder states{:?}", da_msg);
-                        da_sender
-                            .broadcast(MessageType::DAProposalMessage(da_msg))
-                            .await
-                            .unwrap();
-                    } else {
-                        tracing::error!("Validation Failure on DAProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", proposal.data.view_number, sender, sender);
+                        // get the encoded transactions hash
+                        let encoded_txns_hash = Sha256::digest(&proposal.data.encoded_transactions);
+                        // check if the sender is the leader and the signature is valid; if yes, broadcast the DA proposal
+                        if sender.validate(&proposal.signature, &encoded_txns_hash) {
+                            //let total_nodes = hotshot_handle.total_nodes();
+                            // TODO: Fix this total_nodes
+                            // One solution, add a new field to da proposal
+                            let da_msg = DAProposalMessage::<Types> {
+                                proposal: proposal,
+                                sender: sender,
+                                total_nodes: 8,
+                            };
+                            tracing::debug!(
+                                "Sending DA proposal to the builder states{:?}",
+                                da_msg
+                            );
+                            da_sender
+                                .broadcast(MessageType::DAProposalMessage(da_msg))
+                                .await
+                                .unwrap();
+                        } else {
+                            tracing::error!("Validation Failure on DAProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", proposal.data.view_number, sender, sender);
+                        }
                     }
-                }
-                // QC proposal event
-                BuilderEventType::HotshotQuorumProposal { proposal, sender } => {
-                    // process the QC proposal
-                    tracing::debug!(
-                        "QCProposal: Leader: {:?} for the view: {:?}",
-                        sender,
-                        proposal.data.view_number
-                    );
-                    // get the payload commitment
-                    let _payload_commitment = proposal.data.block_header.payload_commitment();
-                    // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
-                    // let qc_msg = QCMessage::<Types> {
-                    //     proposal: proposal.clone(),
-                    //     sender: sender.clone(),
-                    // };
-                    // tracing::debug!("Sending QC proposal to the builder states{:?}", qc_msg);
-                    // TODO: Fix this validation part, it is not on payload_commitment, it is on the leaf_commitment
-                    // TODO: and reconstrucing leaf is bit complex
-                    // TODO: https://github.com/EspressoSystems/hs-builder-core/issues/58
-                    let leaf = get_leaf(&proposal.data, &instance_state).await;
-                    if sender.validate(&proposal.signature, leaf.commit().as_ref()) {
-                        //tracing::error!("Validation Failure on QCProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", proposal.data.view_number, leader, sender);
-                        let qc_msg = QCMessage::<Types> {
-                            proposal: proposal,
-                            sender: sender,
-                        };
-                        tracing::debug!("Sending QC proposal to the builder states{:?}", qc_msg);
-                        qc_sender
-                            .broadcast(MessageType::QCMessage(qc_msg))
-                            .await
-                            .unwrap();
-                    } else {
-                        tracing::error!("Validation Failure on QCProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", proposal.data.view_number, sender, sender);
+                    // QC proposal event
+                    BuilderEventType::HotshotQuorumProposal { proposal, sender } => {
+                        // process the QC proposal
+                        tracing::debug!(
+                            "QCProposal: Leader: {:?} for the view: {:?}",
+                            sender,
+                            proposal.data.view_number
+                        );
+                        // get the payload commitment
+                        let _payload_commitment = proposal.data.block_header.payload_commitment();
+                        // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
+                        // let qc_msg = QCMessage::<Types> {
+                        //     proposal: proposal.clone(),
+                        //     sender: sender.clone(),
+                        // };
+                        // tracing::debug!("Sending QC proposal to the builder states{:?}", qc_msg);
+                        // TODO: Fix this validation part, it is not on payload_commitment, it is on the leaf_commitment
+                        // TODO: and reconstrucing leaf is bit complex
+                        // TODO: https://github.com/EspressoSystems/hs-builder-core/issues/58
+                        let leaf = get_leaf(&proposal.data, &instance_state).await;
+                        if sender.validate(&proposal.signature, leaf.commit().as_ref()) {
+                            //tracing::error!("Validation Failure on QCProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", proposal.data.view_number, leader, sender);
+                            let qc_msg = QCMessage::<Types> {
+                                proposal: proposal,
+                                sender: sender,
+                            };
+                            tracing::debug!(
+                                "Sending QC proposal to the builder states{:?}",
+                                qc_msg
+                            );
+                            qc_sender
+                                .broadcast(MessageType::QCMessage(qc_msg))
+                                .await
+                                .unwrap();
+                        } else {
+                            tracing::error!("Validation Failure on QCProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", proposal.data.view_number, sender, sender);
+                        }
                     }
-                }
-                _ => {
-                    tracing::error!("Unhandled event from Builder");
-                    //tracing::error!("Unhandled event from Builder: {:?}", event.event);
+                    _ => {
+                        tracing::error!("Unhandled event from Builder");
+                        //tracing::error!("Unhandled event from Builder: {:?}", event.event);
+                    }
                 }
             }
-        }
-        Err(e) => {
-            tracing::error!("Error in the event stream: {:?}", e);
+            Err(e) => {
+                tracing::error!("Error in the event stream: {:?}", e);
+            }
         }
     }
 }
@@ -499,7 +480,7 @@ pub async fn run_permissioned_standalone_builder_service<
 
     // pass the instance state
     instance_state: Types::InstanceState,
-) -> Result<(), ()> {
+) {
     let mut event_stream = hotshot_handle.get_event_stream();
     loop {
         tracing::debug!("Waiting for events from HotShot");
