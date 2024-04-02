@@ -318,35 +318,29 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                     // TODO: Use this information to setup the builder
                     // starup event
                     BuilderEventType::StarupInfo {
-                        known_nodes_with_stake,
+                        known_node_with_stake,
                         non_statekd_node_count,
                     } => {
-                        // deserialize the known nodes with stake
-                        let mut known_nodes_with_stake_deserialized: Vec<PeerConfig<PubKey>> =
-                            vec![];
-
-                        for peer in known_nodes_with_stake {
-                            let peer_config_deserialised =
-                                PeerConfig::<PubKey>::from_bytes(&peer).unwrap();
-                            known_nodes_with_stake_deserialized.push(peer_config_deserialised);
-                        }
-
                         // // static election config
                         let election_config: StaticElectionConfig =
                             GeneralStaticCommittee::<SeqTypes, PubKey>::default_election_config(
-                                known_nodes_with_stake_deserialized.len() as u64,
+                                known_node_with_stake.len() as u64,
                                 non_statekd_node_count as u64,
                             );
 
+                        let known_nodes_with_stake: Vec<
+                            PeerConfig<<Types as NodeType>::SignatureKey>,
+                        > = known_node_with_stake.clone();
+
                         let membership: GeneralStaticCommittee<SeqTypes, PubKey> =
                             GeneralStaticCommittee::<SeqTypes, PubKey>::create_election(
-                                known_nodes_with_stake_deserialized.clone(),
+                                known_node_with_stake.clone(),
                                 election_config,
                             );
 
                         tracing::info!(
                         "Startup info: Known nodes with stake: {:?}, Non-staked node count: {:?}",
-                        known_nodes_with_stake_deserialized,
+                        known_node_with_stake,
                         non_statekd_node_count
                     );
                     }

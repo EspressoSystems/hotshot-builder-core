@@ -27,8 +27,8 @@ surf-disco = { git = "https://github.com/EspressoSystems/surf-disco", tag = "v0.
 tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64", tag = "0.3.4" }
 tracing = "0.1"
 snafu = "0.8"
-#hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.0" }
-hotshot-events-service = { path = "../hotshot-events-service" }
+hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.0" }
+#hotshot-events-service = { path = "../hotshot-events-service" }
 sequencer = { git = "https://github.com/EspressoSystems/espresso-sequencer.git", branch = "main" }
 versioned-binary-serialization = { git = "https://github.com/EspressoSystems/versioned-binary-serialization.git", tag = "0.1.2" }
 
