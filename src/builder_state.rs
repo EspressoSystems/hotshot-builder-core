@@ -1,12 +1,7 @@
-// Copyright (c) 2024 Espresso Systems (espressosys.com)
-// This file is part of the HotShot Builder Protocol.
-//
-
 use hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
     event::{LeafChain, LeafInfo},
     message::Proposal,
-    simple_certificate::QuorumCertificate,
     traits::block_contents::{BlockHeader, BlockPayload},
     traits::{
         block_contents::vid_commitment,
@@ -92,18 +87,6 @@ pub struct BuildBlockInfo<TYPES: NodeType> {
     // pub encoded_txns: Vec<u8>,
     // pub vid_num_nodes: usize,
 }
-// // impl debug for BuildBlockInfo
-// impl<TYPES: NodeType> Debug for BuildBlockInfo<TYPES> {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("BuildBlockInfo")
-//             .field("builder_hash", &self.builder_hash)
-//             .field("block_size", &self.block_size)
-//             .field("offered_fee", &self.offered_fee)
-//             .field("block_payload", &self.block_payload)
-//             .field("metadata", &self.metadata)
-//             .finish()
-//     }
-// }
 
 /// Response Message to be put on the response channel
 #[derive(Debug, Clone)]
@@ -117,9 +100,7 @@ pub enum Status {
     ShouldExit,
     ShouldContinue,
 }
-// use derivative::Derivative;
-// #[derive(Derivative)]
-// #[derivative(Debug)]
+
 #[derive(Debug, Clone)]
 pub struct BuilderState<TYPES: NodeType> {
     // timestamp to tx hash, used for ordering for the transactions
@@ -201,7 +182,7 @@ pub async fn get_leaf<TYPES: NodeType>(
     let leaf: Leaf<_> = Leaf {
         view_number: quorum_proposal.view_number,
         justify_qc: quorum_proposal.justify_qc.clone(),
-        parent_commitment: parent_commitment,
+        parent_commitment,
         block_header: quorum_proposal.block_header.clone(),
         block_payload: None,
     };
@@ -251,10 +232,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     fn process_external_transaction(&mut self, tx: TYPES::Transaction) {
         // PRIVATE MEMPOOL TRANSACTION PROCESSING
         tracing::info!("Processing external transaction");
-        // check if the transaction already exists in either the included set or the local tx pool
-        // if it exits, then we can ignore it and return
-        // else we can insert it into local tx pool
-        // get tx_hash as keu
         let tx_hash = tx.commit();
         // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
         if self.tx_hash_to_available_txns.contains_key(&tx_hash)
@@ -309,25 +286,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
                                            builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
     async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>) {
-        // Validation
-        // check for view number
-        // check for signature validation and correct leader (both of these are done in the service.rs i.e. before putting hotshot events onto the da channel)
-
-        // bootstrapping part
-        // if the view number is 0 and no more clone is active then keep going, and don't return from it
-        let to_debug = da_msg.clone();
-        tracing::debug!("Builder Received FDA Proposal from {:?}", to_debug);
-
-        let view_number = da_msg.proposal.data.view_number.get_u64();
+        tracing::debug!("Builder Received DA message {:?}", da_msg);
 
         // Two cases to handle:
         // Case 1: Bootstrapping phase
-        // Case 2: No intended builder state exists
-
+        // Case 2: No intended builder state exist
         // To handle both cases, we can have the bootstrap builder running,
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
         // check the presense of da_msg.proposal.data.view_number-1 in the spawned_clones_views_list
-
         if self.built_from_view_vid_leaf.0.get_u64() == self.bootstrap_view_number.get_u64()
             && (da_msg.proposal.data.view_number.get_u64() == 0
                 || !self
@@ -337,7 +303,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     .contains(&(da_msg.proposal.data.view_number - 1)))
         {
             tracing::info!("DA Proposal handled by bootstrapped builder state");
-        } else if view_number != self.built_from_view_vid_leaf.0.get_u64() + 1 {
+        }
+        // Do the validation check
+        else if da_msg.proposal.data.view_number.get_u64()
+            != self.built_from_view_vid_leaf.0.get_u64() + 1
+        {
             tracing::info!("View number is not equal to built_from_view + 1, so returning");
             return;
         }
@@ -375,7 +345,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             let da_proposal_data = DAProposal {
                 encoded_transactions: encoded_txns.clone(),
                 metadata: metadata.clone(),
-                view_number: view_number,
+                view_number,
             };
 
             // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
@@ -388,8 +358,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 // make sure we don't clone for the bootstrapping da and qc proposals
                 // also make sure we clone for the same view number( check incase payload commitments are same)
                 // this will handle the case when the intended builder state can spwan
-                if qc_proposal_data.view_number.get_u64() == view_number.get_u64() {
-                    tracing::info!("Spawning a clone");
+                if qc_proposal_data.view_number == view_number {
+                    tracing::info!("Spawning a clone from process DA proposal");
                     // remove this entry from the qc_proposal_payload_commit_to_quorum_proposal hashmap
                     self.quorum_proposal_payload_commit_to_quorum_proposal
                         .remove(&payload_vid_commitment);
@@ -411,7 +381,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         } else {
             tracing::info!("Payload commitment already exists in the da_proposal_payload_commit_to_da_proposal hashmap, so ignoring it");
         }
-        tracing::debug!("Builder Received SDA Proposal from {:?}", to_debug);
     }
 
     /// processing the quorum proposal
@@ -421,18 +390,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
                                            builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
     async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>) {
-        // Validation
-        // check for view number
-        // check for the leaf commitment
-        // check for signature validation and correct leader (both of these are done in the service.rs i.e. before putting hotshot events onto the da channel)
-        // can use this commitment to match the da proposal or vice-versa
-
-        // bootstrapping part
-        // if the view number is 0 and no more clone is active then keep going, and don't return from it
-        let to_debug = qc_msg.clone();
-        tracing::debug!("Builder Received FQC Proposal from {:?}", to_debug);
-
-        let view_number = qc_msg.proposal.data.view_number.get_u64();
+        tracing::debug!("Builder Received QC Message{:?}", qc_msg);
+        // Two cases to handle:
+        // Case 1: Bootstrapping phase
+        // Case 2: No intended builder state exist
+        // To handle both cases, we can have the bootstrap builder running,
+        // and only doing the insertion if and only if intended builder state for a particulat view is not present
+        // check the presense of da_msg.proposal.data.view_number-1 in the spawned_clones_views_list
         if self.built_from_view_vid_leaf.0.get_u64() == self.bootstrap_view_number.get_u64()
             && (qc_msg.proposal.data.view_number.get_u64() == 0
                 || !self
@@ -452,7 +416,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         }
         let qc_proposal_data = qc_msg.proposal.data;
         let sender = qc_msg.sender;
-
+        let view_number = qc_proposal_data.view_number;
         let payload_vid_commitment = qc_proposal_data.block_header.payload_commitment();
         tracing::debug!(
             "Extracted payload commitment from the quorum proposal: {:?}",
@@ -475,8 +439,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     .remove(&payload_vid_commitment);
 
                 // also make sure we clone for the same view number( check incase payload commitments are same)
-                if da_proposal_data.view_number.get_u64() == view_number {
-                    tracing::info!("Spawning a clone");
+                if da_proposal_data.view_number == view_number {
+                    tracing::info!("Spawning a clone from process QC proposal");
                     self.spawned_clones_views_list
                         .write()
                         .await
@@ -493,7 +457,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         } else {
             tracing::info!("Payload commitment already exists in the quorum_proposal_payload_commit_to_quorum_proposal hashmap, so ignoring it");
         }
-        tracing::debug!("Builder Received SQC Proposal from {:?}", to_debug);
     }
 
     /// processing the decide event
@@ -638,27 +601,17 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
             //let num_txns = <TYPES::BlockPayload as TestBlockPayload>::txn_count(&payload);
             let encoded_txns: Vec<u8> = payload.encode().unwrap().collect();
-
             let block_size: u64 = encoded_txns.len() as u64;
-
             let offered_fee: u64 = 0;
 
             // get the total nodes from the builder state.
             // stored while processing the DA Proposal
             let vid_num_nodes = self.total_nodes.get();
 
-            // convert vid_num_nodes to usize
-            // spawn a task to calculate the VID commitment, and pass the builder handle to the global state
+            // spawn a task to calculate the VID commitment, and pass the handle to the global state
             // later global state can await on it before replying to the proposer
-
-            // let (vid_handle_sender, vid_handle_receiver) = oneshot::<JoinHandle<VidCommitment>>();
-
-            // use async_broadcast::broadcast;
-            // // let (vid_handle_sender, vid_handle_receiver) =
-            // //     broadcast::<JoinHandle<VidCommitment>>(1);
-            //let (oneshot_sender, oneshot_reciever) = oneshot();
             let (unbounded_sender, unbounded_reciever) = unbounded();
-            #[allow(unused_must_use)]
+            #[allow(clippy::let_and_return)]
             let handle = async_spawn(async move {
                 let vidc = vid_commitment(&encoded_txns, vid_num_nodes);
                 vidc
@@ -681,7 +634,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
     async fn process_block_request(&mut self, req: RequestMessage) {
         let requested_vid_commitment = req.requested_vid_commitment;
-        //let vid_nodes = req.total_nodes;
         if requested_vid_commitment == self.built_from_view_vid_leaf.1 {
             let response = self.build_block(requested_vid_commitment).await;
 
@@ -716,8 +668,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                 response.vid_receiver,
                             ),
                         );
-
-                    //self.response_sender.send(response).await.unwrap();
                 }
                 None => {
                     tracing::warn!("No response to send");
@@ -845,6 +795,7 @@ pub enum MessageType<TYPES: NodeType> {
     QCMessage(QCMessage<TYPES>),
     RequestMessage(RequestMessage),
 }
+
 #[allow(clippy::too_many_arguments)]
 impl<TYPES: NodeType> BuilderState<TYPES> {
     pub fn new(

@@ -3221,7 +3221,6 @@ dependencies = [
  "async-trait",
  "clap",
  "commit",
- "derivative",
  "futures",
  "hotshot",
  "hotshot-builder-api",
