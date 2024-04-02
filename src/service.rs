@@ -45,7 +45,6 @@ use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use hotshot_events_service::events::Error as EventStreamError;
 use hotshot_events_service::events_source::{BuilderEvent, BuilderEventType};
-use sequencer::{PubKey, SeqTypes};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use tide_disco::method::ReadState;
@@ -282,7 +281,9 @@ impl<Types: NodeType> ReadState for GlobalState<Types> {
         op(self).await
     }
 }
-pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
+pub async fn run_non_permissioned_standalone_builder_service<
+    Types: NodeType<ElectionConfigType = StaticElectionConfig>,
+>(
     // sending a transaction from the hotshot mempool to the builder states
     tx_sender: BroadcastSender<MessageType<Types>>,
 
@@ -322,21 +323,22 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                         non_statekd_node_count,
                     } => {
                         // // static election config
-                        let election_config: StaticElectionConfig =
-                            GeneralStaticCommittee::<SeqTypes, PubKey>::default_election_config(
-                                known_node_with_stake.len() as u64,
-                                non_statekd_node_count as u64,
-                            );
+                        let election_config: StaticElectionConfig = GeneralStaticCommittee::<
+                            Types,
+                            <Types as NodeType>::SignatureKey,
+                        >::default_election_config(
+                            known_node_with_stake.len() as u64,
+                            non_statekd_node_count as u64,
+                        );
 
-                        let known_nodes_with_stake: Vec<
-                            PeerConfig<<Types as NodeType>::SignatureKey>,
-                        > = known_node_with_stake.clone();
-
-                        let membership: GeneralStaticCommittee<SeqTypes, PubKey> =
-                            GeneralStaticCommittee::<SeqTypes, PubKey>::create_election(
-                                known_node_with_stake.clone(),
-                                election_config,
-                            );
+                        let membership: GeneralStaticCommittee<
+                            Types,
+                            <Types as NodeType>::SignatureKey,
+                        > = GeneralStaticCommittee::<Types,
+                        <Types as NodeType>::SignatureKey>::create_election(
+                            known_node_with_stake.clone(),
+                            election_config,
+                        );
 
                         tracing::info!(
                         "Startup info: Known nodes with stake: {:?}, Non-staked node count: {:?}",

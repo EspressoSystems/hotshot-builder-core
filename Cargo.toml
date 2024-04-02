@@ -29,7 +29,6 @@ tracing = "0.1"
 snafu = "0.8"
 hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.0" }
 #hotshot-events-service = { path = "../hotshot-events-service" }
-sequencer = { git = "https://github.com/EspressoSystems/espresso-sequencer.git", branch = "main" }
 versioned-binary-serialization = { git = "https://github.com/EspressoSystems/versioned-binary-serialization.git", tag = "0.1.2" }
 
 [dev-dependencies]
