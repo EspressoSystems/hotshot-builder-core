@@ -3156,7 +3156,7 @@ dependencies = [
 
 [[package]]
 name = "hotshot-builder-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
