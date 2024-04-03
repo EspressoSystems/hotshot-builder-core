@@ -530,12 +530,10 @@ async fn handle_qc_event<Types: NodeType>(
         qc_proposal.data.view_number
     );
 
-    //let leaf = get_leaf(&qc_proposal.data, instance_state).await;
     let leaf = Leaf::from_proposal(&qc_proposal);
 
     // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
     if sender == leader && sender.validate(&qc_proposal.signature, leaf.commit().as_ref()) {
-        //tracing::error!("Validation Failure on QCProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", proposal.data.view_number, leader, sender);
         let qc_msg = QCMessage::<Types> {
             proposal: qc_proposal,
             sender: leader,

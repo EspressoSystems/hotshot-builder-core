@@ -50,7 +50,6 @@ pub struct TransactionMessage<TYPES: NodeType> {
 #[derive(Clone, Debug)]
 pub struct DecideMessage<TYPES: NodeType> {
     pub leaf_chain: Arc<LeafChain<TYPES>>,
-    //pub qc: Arc<QuorumCertificate<TYPES>>,
     pub block_size: Option<u64>,
 }
 /// DA Proposal Message to be put on the da proposal channel
@@ -70,11 +69,8 @@ pub struct QCMessage<TYPES: NodeType> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RequestMessage {
     pub requested_vid_commitment: VidCommitment,
-    //pub total_nodes: usize
 }
 /// Response Message to be put on the response channel
-// #[derive(Derivative)]
-// #[derivative(Debug)]
 #[derive(Debug)]
 pub struct BuildBlockInfo<TYPES: NodeType> {
     pub builder_hash: BuilderCommitment,
@@ -82,10 +78,7 @@ pub struct BuildBlockInfo<TYPES: NodeType> {
     pub offered_fee: u64,
     pub block_payload: TYPES::BlockPayload,
     pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
-    //pub vid_receiver: UnboundedReceiver<VidCommitment>,
     pub vid_receiver: UnboundedReceiver<JoinHandle<VidCommitment>>,
-    // pub encoded_txns: Vec<u8>,
-    // pub vid_num_nodes: usize,
 }
 
 /// Response Message to be put on the response channel
@@ -573,7 +566,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // add the local builder commitment list
             self.builder_commitments.push(builder_hash.clone());
 
-            //let num_txns = <TYPES::BlockPayload as TestBlockPayload>::txn_count(&payload);
             let encoded_txns: Vec<u8> = payload.encode().unwrap().collect();
             let block_size: u64 = encoded_txns.len() as u64;
             let offered_fee: u64 = 0;
