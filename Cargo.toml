@@ -6,9 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+snafu = "0.8"
+tracing = "0.1"
 futures = "0.3"
 async-broadcast = "0.7.0"
-async-compatibility-layer = { git = "https://github.com/EspressoSystems/async-compatibility-layer.git", tag = "1.4.1", features = [
+async-compatibility-layer = { git = "https://github.com/EspressoSystems/async-compatibility-layer.git", tag = "1.4.2", features = [
     "logging-utils",
 ] }
 async-lock = "2.8"
@@ -19,15 +21,12 @@ commit = { git = "https://github.com/EspressoSystems/commit.git" }
 hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.28" }
 hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.28" }
 hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.28" }
+hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.0" }
 sha2 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
-tide-disco = { git = "https://github.com/EspressoSystems/tide-disco", tag = "v0.5.0" }
-surf-disco = { git = "https://github.com/EspressoSystems/surf-disco", tag = "v0.5.0" }
 tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64", tag = "0.3.4" }
-tracing = "0.1"
-snafu = "0.8"
-hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.0" }
-#hotshot-events-service = { path = "../hotshot-events-service" }
+surf-disco = { git = "https://github.com/EspressoSystems/surf-disco", tag = "v0.5.0" }
+tide-disco = { git = "https://github.com/EspressoSystems/tide-disco", tag = "v0.5.0" }
 versioned-binary-serialization = { git = "https://github.com/EspressoSystems/versioned-binary-serialization.git", tag = "0.1.2" }
 
 [dev-dependencies]

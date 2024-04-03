@@ -1,13 +1,3 @@
-// Copyright (c) 2024 Espresso Systems (espressosys.com)
-// This file is part of the HotShot Builder Protocol.
-//
-
-// Builder Phase 1 Testing
-//
-
-#![allow(unused_imports)]
-#![allow(clippy::redundant_field_names)]
-use async_std::task;
 pub use hotshot::traits::election::static_committee::{
     GeneralStaticCommittee, StaticElectionConfig,
 };
@@ -21,38 +11,26 @@ pub use hotshot_types::{
         node_implementation::{ConsensusTime, NodeType},
     },
 };
-use sha2::{Digest, Sha256};
-use std::sync::{Arc, Mutex};
 
 pub use crate::builder_state::{BuilderProgress, BuilderState, MessageType, ResponseMessage};
 pub use async_broadcast::{
     broadcast, Receiver as BroadcastReceiver, RecvError, Sender as BroadcastSender, TryRecvError,
 };
-// tests
-use async_compatibility_layer::art::{async_sleep, async_spawn};
-use commit::{Commitment, CommitmentBoundsArkless};
-use tracing;
 /// The following tests are performed:
 #[cfg(test)]
 mod tests {
-
+    use super::*;
     use std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
 
+    use async_compatibility_layer::art::async_spawn;
     use async_compatibility_layer::channel::unbounded;
-    use commit::Committable;
     use hotshot::types::SignatureKey;
     use hotshot_types::{
         data::QuorumProposal,
         event::LeafInfo,
-        message::Message,
-        simple_certificate::Threshold,
         simple_vote::QuorumData,
-        traits::{
-            block_contents::{vid_commitment, BlockHeader},
-            election::Membership,
-        },
-        utils::View,
-        vote::{Certificate, HasViewNumber},
+        traits::block_contents::{vid_commitment, BlockHeader},
+        vote::Certificate,
     };
 
     use hotshot_example_types::{
@@ -66,6 +44,10 @@ mod tests {
     };
     use crate::service::GlobalState;
     use async_lock::RwLock;
+    use async_std::task;
+    use commit::{Commitment, CommitmentBoundsArkless, Committable};
+    use sha2::{Digest, Sha256};
+    use std::sync::Arc;
 
     #[derive(Debug, Clone)]
     pub struct CustomError {
@@ -73,7 +55,6 @@ mod tests {
         pub error: TryRecvError,
     }
 
-    use super::*;
     use serde::{Deserialize, Serialize};
     /// This test simulates multiple builder states receiving messages from the channels and processing them
     #[async_std::test]
@@ -147,6 +128,7 @@ mod tests {
         let mut sreq_msgs: Vec<MessageType<TestTypes>> = Vec::new();
         // storing response messages
         let mut rres_msgs: Vec<ResponseMessage> = Vec::new();
+        let validated_state = Arc::new(TestValidatedState::default());
 
         // generate num_test messages for each type and send it to the respective channels;
         for i in 0..num_test_messages as u32 {
@@ -326,21 +308,14 @@ mod tests {
                     current_leaf
                 }
             };
-            // let x =
-            //     hotshot_types::traits::states::ValidatedState::<TestTypes>::ValidatedState::genesis(
-            //         &TestInstanceState {},
-            //     );
-            //hotshot_types::traits::states::ValidatedState;
-            //use hotshot::traits:
-            let leaf_info = LeafInfo {
-                leaf: leaf.clone(),
-                state: Arc::new(TestValidatedState::default()),
-                delta: None,
-                vid: None,
-            };
+
             let sdecide_msg = DecideMessage::<TestTypes> {
-                leaf_chain: Arc::new(vec![leaf_info.clone()]),
-                //qc: Arc::new(justify_qc),
+                leaf_chain: Arc::new(vec![LeafInfo::new(
+                    leaf.clone(),
+                    validated_state.clone(),
+                    None,
+                    None,
+                )]),
                 block_size: Some(encoded_transactions.len() as u64),
             };
 
