@@ -21,7 +21,7 @@ commit = { git = "https://github.com/EspressoSystems/commit.git" }
 hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.28" }
 hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.28" }
 hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.28" }
-hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.0" }
+hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.1" }
 sha2 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64", tag = "0.3.4" }

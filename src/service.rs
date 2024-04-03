@@ -305,9 +305,9 @@ pub async fn run_non_permissioned_standalone_builder_service<
     // handle the starup event at the start
     let membership = if let Some(Ok(event)) = subscribed_events.next().await {
         match event.event {
-            BuilderEventType::StarupInfo {
+            BuilderEventType::StartupInfo {
                 known_node_with_stake,
-                non_statekd_node_count,
+                non_staked_node_count,
             } => {
                 // Create membership. It is similar to init() in sequencer/src/context.rs
                 let election_config: StaticElectionConfig = GeneralStaticCommittee::<
@@ -315,7 +315,7 @@ pub async fn run_non_permissioned_standalone_builder_service<
                     <Types as NodeType>::SignatureKey,
                 >::default_election_config(
                     known_node_with_stake.len() as u64,
-                    non_statekd_node_count as u64,
+                    non_staked_node_count as u64,
                 );
 
                 let membership: GeneralStaticCommittee<
@@ -330,7 +330,7 @@ pub async fn run_non_permissioned_standalone_builder_service<
                 tracing::info!(
                     "Startup info: Known nodes with stake: {:?}, Non-staked node count: {:?}",
                     known_node_with_stake,
-                    non_statekd_node_count
+                    non_staked_node_count
                 );
                 membership
             }
@@ -354,7 +354,7 @@ pub async fn run_non_permissioned_standalone_builder_service<
                     }
                     // TODO: Use this information to setup the builder
                     // starup event
-                    BuilderEventType::StarupInfo { .. } => {
+                    BuilderEventType::StartupInfo { .. } => {
                         tracing::warn!("Startup info event received again");
                     }
                     // tx event
