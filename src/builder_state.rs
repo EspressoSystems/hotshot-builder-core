@@ -14,16 +14,15 @@ use hotshot_types::{
 
 use commit::{Commitment, Committable};
 
+use crate::service::GlobalState;
+use crate::WaitAndKeep;
 use async_broadcast::Receiver as BroadcastReceiver;
 use async_compatibility_layer::channel::{unbounded, UnboundedSender};
 use async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
 use async_lock::RwLock;
-use async_std::task::JoinHandle;
 use async_trait::async_trait;
-use futures::StreamExt;
-
-use crate::service::GlobalState;
 use core::panic;
+use futures::StreamExt;
 use std::collections::{hash_map::Entry, BTreeSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
@@ -78,7 +77,7 @@ pub struct BuildBlockInfo<TYPES: NodeType> {
     pub offered_fee: u64,
     pub block_payload: TYPES::BlockPayload,
     pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
-    pub vid_receiver: UnboundedReceiver<JoinHandle<VidCommitment>>,
+    pub vid_receiver: UnboundedReceiver<VidCommitment>,
 }
 
 /// Response Message to be put on the response channel
@@ -577,12 +576,16 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // spawn a task to calculate the VID commitment, and pass the handle to the global state
             // later global state can await on it before replying to the proposer
             let (unbounded_sender, unbounded_reciever) = unbounded();
-            #[allow(clippy::let_and_return)]
-            let handle = async_spawn(async move {
+            // #[allow(clippy::let_and_return)]
+            // let handle = async_spawn(async move {
+            //     let vidc = vid_commitment(&encoded_txns, vid_num_nodes);
+            //     vidc
+            // });
+            #[allow(unused_must_use)]
+            async_spawn(async move {
                 let vidc = vid_commitment(&encoded_txns, vid_num_nodes);
-                vidc
+                unbounded_sender.send(vidc);
             });
-            unbounded_sender.send(handle).await.unwrap();
 
             return Some(BuildBlockInfo {
                 builder_hash,
@@ -631,7 +634,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                             (
                                 response.block_payload,
                                 response.metadata,
-                                response.vid_receiver,
+                                Arc::new(RwLock::new(WaitAndKeep::Wait(response.vid_receiver))),
                             ),
                         );
                 }

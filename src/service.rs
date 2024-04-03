@@ -26,10 +26,11 @@ use crate::builder_state::{
     DAProposalMessage, DecideMessage, QCMessage, TransactionMessage, TransactionSource,
 };
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
+use crate::WaitAndKeep;
 use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
 use async_compatibility_layer::channel::UnboundedReceiver;
-use async_std::task::JoinHandle;
+use async_lock::RwLock;
 use async_trait::async_trait;
 use commit::Committable;
 use futures::future::BoxFuture;
@@ -61,7 +62,7 @@ pub struct GlobalState<Types: NodeType> {
         (
             Types::BlockPayload,
             <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
-            UnboundedReceiver<JoinHandle<VidCommitment>>,
+            Arc<RwLock<WaitAndKeep<VidCommitment>>>,
         ),
     >,
     // sending a request from the hotshot to the builder states
@@ -223,17 +224,18 @@ where
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
         if let Some(block) = self.block_hash_to_block.get(block_hash) {
             tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
-            let join_handle = block.2.recv().await.unwrap();
+            //let join_handle = block.2.recv().await.unwrap();
             // wait on the handle for the vid computation before returning the response
-            let vid_commitement = join_handle.await;
+            let vid_commitment = block.2.write().await.get().await?;
+            //let vid_commitement = join_handle.await;
 
             let signature_over_vid_commitment = <Types as NodeType>::SignatureKey::sign(
                 &self.builder_keys.1,
-                vid_commitement.as_ref(),
+                vid_commitment.as_ref(),
             )
             .expect("Claim block header input signing failed");
             let reponse = AvailableBlockHeaderInput::<Types> {
-                vid_commitment: vid_commitement,
+                vid_commitment,
                 signature: signature_over_vid_commitment,
                 sender: self.builder_keys.0.clone(),
                 _phantom: Default::default(),
@@ -356,7 +358,6 @@ pub async fn run_non_permissioned_standalone_builder_service<
                     BuilderEventType::HotshotError { error } => {
                         tracing::error!("Error event in HotShot: {:?}", error);
                     }
-                    // TODO: Use this information to setup the builder
                     // starup event
                     BuilderEventType::StartupInfo { .. } => {
                         tracing::warn!("Startup info event received again");
