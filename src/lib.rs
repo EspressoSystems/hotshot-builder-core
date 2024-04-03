@@ -37,8 +37,8 @@ impl<T: Clone> WaitAndKeep<T> {
                     message: "failed to resolve VidCommitment from channel".to_string(),
                 });
                 if got.is_ok() {
-                    let replace = WaitAndKeep::Keep(got.clone().unwrap());
-                    let _ = core::mem::replace(self, replace);
+                    let mut replace = WaitAndKeep::Keep(got.clone().unwrap());
+                    let _ = core::mem::swap(self, &mut replace);
                 }
                 got
             }

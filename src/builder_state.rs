@@ -584,7 +584,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             #[allow(unused_must_use)]
             async_spawn(async move {
                 let vidc = vid_commitment(&encoded_txns, vid_num_nodes);
-                unbounded_sender.send(vidc);
+                unbounded_sender.send(vidc).await;
             });
 
             return Some(BuildBlockInfo {
