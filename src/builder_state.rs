@@ -167,28 +167,6 @@ pub struct BuilderState<TYPES: NodeType> {
     pub spawned_clones_views_list: Arc<RwLock<BTreeSet<TYPES::Time>>>,
 }
 
-/// Helper function to get the leaf from the quorum proposal
-pub async fn get_leaf<TYPES: NodeType>(
-    quorum_proposal: &QuorumProposal<TYPES>,
-    instance_state: &TYPES::InstanceState,
-) -> Leaf<TYPES> {
-    let parent_commitment = if quorum_proposal.justify_qc.is_genesis {
-        // get the instance state from the global state
-        Leaf::genesis(instance_state).commit()
-    } else {
-        quorum_proposal.justify_qc.get_data().leaf_commit
-    };
-
-    let leaf: Leaf<_> = Leaf {
-        view_number: quorum_proposal.view_number,
-        justify_qc: quorum_proposal.justify_qc.clone(),
-        parent_commitment,
-        block_header: quorum_proposal.block_header.clone(),
-        block_payload: None,
-    };
-    leaf
-}
-
 /// Trait to hold the helper functions for the builder
 #[async_trait]
 pub trait BuilderProgress<TYPES: NodeType> {
@@ -472,11 +450,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         //let _qc = decide_msg.qc;
         let _block_size = decide_msg.block_size;
 
-        let _latest_decide_parent_commitment = leaf_chain[0].leaf.parent_commitment;
+        let _latest_decide_parent_commitment = leaf_chain[0].leaf.get_parent_commitment();
 
         let _latest_decide_commitment = leaf_chain[0].leaf.commit();
 
-        let latest_leaf_view_number = leaf_chain[0].leaf.view_number;
+        let latest_leaf_view_number = leaf_chain[0].leaf.get_view_number();
 
         // bootstrapping case
         // handle the case when we hear a decide event before we have atleast one clone, in that case, we might exit the builder
@@ -555,11 +533,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         self.built_from_view_vid_leaf.0 = quorum_proposal.view_number;
         self.built_from_view_vid_leaf.1 = quorum_proposal.block_header.payload_commitment();
 
-        let leaf = get_leaf(
-            &quorum_proposal,
-            &self.global_state.read_arc().await.instance_state,
-        )
-        .await;
+        let leaf = Leaf::from_quorum_proposal(&quorum_proposal);
 
         self.built_from_view_vid_leaf.2 = leaf.commit();
 

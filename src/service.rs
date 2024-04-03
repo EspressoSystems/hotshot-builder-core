@@ -11,7 +11,7 @@ use hotshot_builder_api::{
     data_source::{AcceptsTxnSubmits, BuilderDataSource},
 };
 use hotshot_types::{
-    data::{DAProposal, QuorumProposal},
+    data::{DAProposal, Leaf, QuorumProposal},
     event::{EventType, LeafInfo},
     message::Proposal,
     traits::{
@@ -23,7 +23,7 @@ use hotshot_types::{
 };
 
 use crate::builder_state::{
-    get_leaf, DAProposalMessage, DecideMessage, QCMessage, TransactionMessage, TransactionSource,
+    DAProposalMessage, DecideMessage, QCMessage, TransactionMessage, TransactionSource,
 };
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use async_broadcast::Sender as BroadcastSender;
@@ -245,6 +245,9 @@ where
             })
         }
     }
+    async fn get_builder_address(&self) -> Result<<Types as NodeType>::SignatureKey, BuildError> {
+        Ok(self.builder_keys.0.clone())
+    }
 }
 #[async_trait]
 impl<Types: NodeType> AcceptsTxnSubmits<Types> for GlobalState<Types> {
@@ -325,6 +328,7 @@ pub async fn run_non_permissioned_standalone_builder_service<
                 <Types as NodeType>::SignatureKey>::create_election(
                     known_node_with_stake.clone(),
                     election_config,
+                    0,
                 );
 
                 tracing::info!(
@@ -518,7 +522,7 @@ async fn handle_qc_event<Types: NodeType>(
     qc_proposal: Proposal<Types, QuorumProposal<Types>>,
     sender: <Types as NodeType>::SignatureKey,
     leader: <Types as NodeType>::SignatureKey,
-    instance_state: &Types::InstanceState,
+    _instance_state: &Types::InstanceState,
 ) {
     tracing::debug!(
         "QCProposal: Leader: {:?} for the view: {:?}",
@@ -526,7 +530,8 @@ async fn handle_qc_event<Types: NodeType>(
         qc_proposal.data.view_number
     );
 
-    let leaf = get_leaf(&qc_proposal.data, instance_state).await;
+    //let leaf = get_leaf(&qc_proposal.data, instance_state).await;
+    let leaf = Leaf::from_proposal(&qc_proposal);
 
     // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
     if sender == leader && sender.validate(&qc_proposal.signature, leaf.commit().as_ref()) {

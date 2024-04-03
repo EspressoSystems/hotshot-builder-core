@@ -30,7 +30,6 @@ mod tests {
         event::LeafInfo,
         simple_vote::QuorumData,
         traits::block_contents::{vid_commitment, BlockHeader},
-        vote::Certificate,
     };
 
     use hotshot_example_types::{
@@ -208,23 +207,7 @@ mod tests {
                     let _metadata = <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
                         &sqc_msgs[(i - 1) as usize].proposal.data.block_header,
                     );
-                    // Construct a leaf
-                    let leaf: Leaf<_> = Leaf {
-                        view_number: sqc_msgs[(i - 1) as usize].proposal.data.view_number,
-                        justify_qc: sqc_msgs[(i - 1) as usize].proposal.data.justify_qc.clone(),
-                        parent_commitment: sqc_msgs[(i - 1) as usize]
-                            .proposal
-                            .data
-                            .justify_qc
-                            .get_data()
-                            .leaf_commit,
-                        block_header: sqc_msgs[(i - 1) as usize]
-                            .proposal
-                            .data
-                            .block_header
-                            .clone(),
-                        block_payload: None,
-                    };
+                    let leaf = Leaf::from_proposal(&sqc_msgs[(i - 1) as usize].proposal);
 
                     let q_data = QuorumData::<TestTypes> {
                         leaf_commit: leaf.commit(),
@@ -287,23 +270,16 @@ mod tests {
             let leaf = match i {
                 0 => Leaf::genesis(&TestInstanceState {}),
                 _ => {
-                    let current_leaf: Leaf<_> = Leaf {
-                        view_number: ViewNumber::new(i as u64),
-                        justify_qc: justify_qc.clone(),
-                        parent_commitment: sqc_msgs[(i - 1) as usize]
-                            .proposal
-                            .data
-                            .justify_qc
-                            .get_data()
-                            .leaf_commit,
-                        block_header: qc_proposal.block_header.clone(),
-                        block_payload: Some(BlockPayload::from_bytes(
-                            encoded_transactions.clone().into_iter(),
-                            <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
-                                &qc_proposal.block_header,
-                            ),
-                        )),
-                    };
+                    let block_payload = BlockPayload::from_bytes(
+                        encoded_transactions.clone().into_iter(),
+                        <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
+                            &qc_proposal.block_header,
+                        ),
+                    );
+                    let mut current_leaf = Leaf::from_quorum_proposal(&qc_proposal);
+                    current_leaf
+                        .fill_block_payload(block_payload, TEST_NUM_NODES_IN_VID_COMPUTATION)
+                        .unwrap();
                     current_leaf
                 }
             };
