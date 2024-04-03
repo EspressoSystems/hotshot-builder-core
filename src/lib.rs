@@ -38,7 +38,7 @@ impl<T: Clone> WaitAndKeep<T> {
                 });
                 if got.is_ok() {
                     let mut replace = WaitAndKeep::Keep(got.clone().unwrap());
-                    let _ = core::mem::swap(self, &mut replace);
+                    core::mem::swap(self, &mut replace);
                 }
                 got
             }
