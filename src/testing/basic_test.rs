@@ -246,7 +246,7 @@ mod tests {
                     SimpleCertificate::<TestTypes, QuorumData<TestTypes>, SuccessThreshold> {
                         data: q_data.clone(),
                         vote_commitment: q_data.commit(),
-                        view_number: view_number,
+                        view_number,
                         signatures: previous_justify_qc.signatures.clone(),
                         is_genesis: true, // todo setting true because we don't have signatures of QCType
                         _pd: PhantomData,
@@ -256,8 +256,7 @@ mod tests {
             tracing::debug!("Iteration: {} justify_qc: {:?}", i, justify_qc);
 
             let qc_proposal = QuorumProposal::<TestTypes> {
-                //block_header: TestBlockHeader::genesis(&TestInstanceState {}).0,
-                block_header: block_header,
+                block_header,
                 view_number: ViewNumber::new(i as u64),
                 justify_qc: justify_qc.clone(),
                 upgrade_certificate: None,
@@ -338,7 +337,7 @@ mod tests {
             // send decide and request messages later
             let requested_vid_commitment = payload_commitment;
             let request_message = MessageType::<TestTypes>::RequestMessage(RequestMessage {
-                requested_vid_commitment: requested_vid_commitment,
+                requested_vid_commitment,
             });
 
             stx_msgs.push(stx_msg);
@@ -404,7 +403,7 @@ mod tests {
             .try_recv()
         {
             rres_msgs.push(res_msg);
-            if rres_msgs.len() == (num_test_messages - 1) as usize {
+            if rres_msgs.len() == (num_test_messages - 1) {
                 break;
             }
         }
