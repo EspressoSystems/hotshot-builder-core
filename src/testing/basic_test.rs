@@ -1,13 +1,3 @@
-// Copyright (c) 2024 Espresso Systems (espressosys.com)
-// This file is part of the HotShot Builder Protocol.
-//
-
-// Builder Phase 1 Testing
-//
-
-#![allow(unused_imports)]
-#![allow(clippy::redundant_field_names)]
-use async_std::task;
 pub use hotshot::traits::election::static_committee::{
     GeneralStaticCommittee, StaticElectionConfig,
 };
@@ -21,38 +11,25 @@ pub use hotshot_types::{
         node_implementation::{ConsensusTime, NodeType},
     },
 };
-use sha2::{Digest, Sha256};
-use std::sync::{Arc, Mutex};
 
 pub use crate::builder_state::{BuilderProgress, BuilderState, MessageType, ResponseMessage};
 pub use async_broadcast::{
     broadcast, Receiver as BroadcastReceiver, RecvError, Sender as BroadcastSender, TryRecvError,
 };
-// tests
-use async_compatibility_layer::art::{async_sleep, async_spawn};
-use commit::{Commitment, CommitmentBoundsArkless};
-use tracing;
 /// The following tests are performed:
 #[cfg(test)]
 mod tests {
-
+    use super::*;
     use std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
 
+    use async_compatibility_layer::art::async_spawn;
     use async_compatibility_layer::channel::unbounded;
-    use commit::Committable;
     use hotshot::types::SignatureKey;
     use hotshot_types::{
         data::QuorumProposal,
         event::LeafInfo,
-        message::Message,
-        simple_certificate::Threshold,
         simple_vote::QuorumData,
-        traits::{
-            block_contents::{vid_commitment, BlockHeader},
-            election::Membership,
-        },
-        utils::View,
-        vote::{Certificate, HasViewNumber},
+        traits::block_contents::{vid_commitment, BlockHeader},
     };
 
     use hotshot_example_types::{
@@ -66,6 +43,10 @@ mod tests {
     };
     use crate::service::GlobalState;
     use async_lock::RwLock;
+    use async_std::task;
+    use commit::{Commitment, CommitmentBoundsArkless, Committable};
+    use sha2::{Digest, Sha256};
+    use std::sync::Arc;
 
     #[derive(Debug, Clone)]
     pub struct CustomError {
@@ -73,7 +54,6 @@ mod tests {
         pub error: TryRecvError,
     }
 
-    use super::*;
     use serde::{Deserialize, Serialize};
     /// This test simulates multiple builder states receiving messages from the channels and processing them
     #[async_std::test]
@@ -136,6 +116,7 @@ mod tests {
             req_sender,
             res_receiver,
             tx_sender.clone(),
+            TestInstanceState {},
         );
 
         // to store all the sent messages
@@ -163,7 +144,7 @@ mod tests {
             let da_proposal = DAProposal {
                 encoded_transactions: encoded_transactions.clone(),
                 metadata: (),
-                view_number: ViewNumber::new((i + 1) as u64),
+                view_number: ViewNumber::new(i as u64),
             };
             let encoded_transactions_hash = Sha256::digest(&encoded_transactions);
             let seed = [i as u8; 32];
@@ -214,7 +195,7 @@ mod tests {
             let block_header = TestBlockHeader {
                 block_number: i as u64,
                 payload_commitment: encoded_txns_vid_commitment,
-                timestamp: i as u64 + 1u64,
+                timestamp: i as u64,
             };
 
             let justify_qc = match i {
@@ -226,24 +207,7 @@ mod tests {
                     let _metadata = <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
                         &sqc_msgs[(i - 1) as usize].proposal.data.block_header,
                     );
-                    // Construct a leaf
-                    let leaf: Leaf<_> = Leaf {
-                        view_number: sqc_msgs[(i - 1) as usize].proposal.data.view_number,
-                        justify_qc: sqc_msgs[(i - 1) as usize].proposal.data.justify_qc.clone(),
-                        parent_commitment: sqc_msgs[(i - 1) as usize]
-                            .proposal
-                            .data
-                            .justify_qc
-                            .get_data()
-                            .leaf_commit,
-                        block_header: sqc_msgs[(i - 1) as usize]
-                            .proposal
-                            .data
-                            .block_header
-                            .clone(),
-                        block_payload: None,
-                        proposer_id: sqc_msgs[(i - 1) as usize].proposal.data.proposer_id,
-                    };
+                    let leaf = Leaf::from_proposal(&sqc_msgs[(i - 1) as usize].proposal);
 
                     let q_data = QuorumData::<TestTypes> {
                         leaf_commit: leaf.commit(),
@@ -265,7 +229,7 @@ mod tests {
                     SimpleCertificate::<TestTypes, QuorumData<TestTypes>, SuccessThreshold> {
                         data: q_data.clone(),
                         vote_commitment: q_data.commit(),
-                        view_number: view_number,
+                        view_number,
                         signatures: previous_justify_qc.signatures.clone(),
                         is_genesis: true, // todo setting true because we don't have signatures of QCType
                         _pd: PhantomData,
@@ -275,14 +239,11 @@ mod tests {
             tracing::debug!("Iteration: {} justify_qc: {:?}", i, justify_qc);
 
             let qc_proposal = QuorumProposal::<TestTypes> {
-                //block_header: TestBlockHeader::genesis(&TestInstanceState {}).0,
-                block_header: block_header,
+                block_header,
                 view_number: ViewNumber::new(i as u64),
                 justify_qc: justify_qc.clone(),
-                timeout_certificate: None,
                 upgrade_certificate: None,
-                proposer_id: pub_key,
-                view_sync_certificate: None,
+                proposal_certificate: None,
             };
 
             let payload_commitment =
@@ -309,24 +270,16 @@ mod tests {
             let leaf = match i {
                 0 => Leaf::genesis(&TestInstanceState {}),
                 _ => {
-                    let current_leaf: Leaf<_> = Leaf {
-                        view_number: ViewNumber::new(i as u64),
-                        justify_qc: justify_qc.clone(),
-                        parent_commitment: sqc_msgs[(i - 1) as usize]
-                            .proposal
-                            .data
-                            .justify_qc
-                            .get_data()
-                            .leaf_commit,
-                        block_header: qc_proposal.block_header.clone(),
-                        block_payload: Some(BlockPayload::from_bytes(
-                            encoded_transactions.clone().into_iter(),
-                            <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
-                                &qc_proposal.block_header,
-                            ),
-                        )),
-                        proposer_id: qc_proposal.proposer_id,
-                    };
+                    let block_payload = BlockPayload::from_bytes(
+                        encoded_transactions.clone().into_iter(),
+                        <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
+                            &qc_proposal.block_header,
+                        ),
+                    );
+                    let mut current_leaf = Leaf::from_quorum_proposal(&qc_proposal);
+                    current_leaf
+                        .fill_block_payload(block_payload, TEST_NUM_NODES_IN_VID_COMPUTATION)
+                        .unwrap();
                     current_leaf
                 }
             };
@@ -338,7 +291,6 @@ mod tests {
                     None,
                     None,
                 )]),
-                qc: Arc::new(justify_qc),
                 block_size: Some(encoded_transactions.len() as u64),
             };
 
@@ -361,7 +313,7 @@ mod tests {
             // send decide and request messages later
             let requested_vid_commitment = payload_commitment;
             let request_message = MessageType::<TestTypes>::RequestMessage(RequestMessage {
-                requested_vid_commitment: requested_vid_commitment,
+                requested_vid_commitment,
             });
 
             stx_msgs.push(stx_msg);
@@ -389,6 +341,7 @@ mod tests {
                 arc_rwlock_global_state_clone,
                 res_sender,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
+                ViewNumber::new(0),
             );
 
             //builder_state.event_loop().await;
@@ -426,9 +379,9 @@ mod tests {
             .try_recv()
         {
             rres_msgs.push(res_msg);
-            // if rres_msgs.len() == (num_test_messages-1) as usize{
-            //     break;
-            // }
+            if rres_msgs.len() == (num_test_messages - 1) {
+                break;
+            }
         }
         assert_eq!(rres_msgs.len(), (num_test_messages - 1));
         //task::sleep(std::time::Duration::from_secs(60)).await;

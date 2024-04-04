@@ -1,2 +1,3 @@
-# hs-builder-core
-Builder support libraries for hotshot
+# hotshot-builder-core
+
+Builder support library for hotshot

@@ -19,3 +19,29 @@ pub mod service;
 
 // tracking the testing
 pub mod testing;
+
+use async_compatibility_layer::channel::UnboundedReceiver;
+use hotshot_builder_api::builder::BuildError;
+#[derive(Debug)]
+pub enum WaitAndKeep<T> {
+    Keep(T),
+    Wait(UnboundedReceiver<T>),
+}
+
+impl<T: Clone> WaitAndKeep<T> {
+    pub async fn get(&mut self) -> Result<T, BuildError> {
+        match self {
+            WaitAndKeep::Keep(t) => Ok(t.clone()),
+            WaitAndKeep::Wait(fut) => {
+                let got = fut.recv().await.map_err(|_| BuildError::Error {
+                    message: "failed to resolve VidCommitment from channel".to_string(),
+                });
+                if got.is_ok() {
+                    let mut replace = WaitAndKeep::Keep(got.clone().unwrap());
+                    core::mem::swap(self, &mut replace);
+                }
+                got
+            }
+        }
+    }
+}
