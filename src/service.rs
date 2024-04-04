@@ -132,7 +132,7 @@ impl<Types: NodeType> GlobalState<Types> {
 }
 
 /*
-Handing Builder API responses
+Handling Builder API responses
 */
 #[async_trait]
 impl<Types: NodeType> BuilderDataSource<Types> for GlobalState<Types>
@@ -224,11 +224,7 @@ where
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
         if let Some(block) = self.block_hash_to_block.get(block_hash) {
             tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
-            //let join_handle = block.2.recv().await.unwrap();
-            // wait on the handle for the vid computation before returning the response
             let vid_commitment = block.2.write().await.get().await?;
-            //let vid_commitement = join_handle.await;
-
             let signature_over_vid_commitment = <Types as NodeType>::SignatureKey::sign(
                 &self.builder_keys.1,
                 vid_commitment.as_ref(),

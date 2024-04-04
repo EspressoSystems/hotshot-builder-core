@@ -455,20 +455,18 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         if self.built_from_view_vid_leaf.0.get_u64() == self.bootstrap_view_number.get_u64() {
             tracing::info!("Bootstrapped builder state, should continue");
             // split_off returns greater than equal to set, so we want everything after the latest decide event
-            let splitted_list = self
+            let split_list = self
                 .spawned_clones_views_list
                 .write()
                 .await
                 .split_off(&(latest_leaf_view_number + 1));
 
             // update the spawned_clones_views_list with the splitted list now
-            *self.spawned_clones_views_list.write().await = splitted_list;
+            *self.spawned_clones_views_list.write().await = split_list;
             //return Some(Status::ShouldContinue);
         } else if self.built_from_view_vid_leaf.0 <= latest_leaf_view_number {
             tracing::info!("Built-in view is less than equal to the currently decided leaf so exiting the builder state");
             // convert leaf commitments into buildercommiments
-            //let leaf_commitments:Vec<BuilderCommitment> = leaf_chain.iter().map(|leaf| leaf.get_block_payload().unwrap().builder_commitment(&leaf.get_block_header().metadata())).collect();
-
             // remove the handles from the global state
             // TODO: Does it make sense to remove it here or should we remove in api responses?
             self.global_state.write_arc().await.remove_handles(
@@ -576,29 +574,24 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // spawn a task to calculate the VID commitment, and pass the handle to the global state
             // later global state can await on it before replying to the proposer
             let (unbounded_sender, unbounded_reciever) = unbounded();
-            // #[allow(clippy::let_and_return)]
-            // let handle = async_spawn(async move {
-            //     let vidc = vid_commitment(&encoded_txns, vid_num_nodes);
-            //     vidc
-            // });
             #[allow(unused_must_use)]
             async_spawn(async move {
                 let vidc = vid_commitment(&encoded_txns, vid_num_nodes);
                 unbounded_sender.send(vidc).await;
             });
 
-            return Some(BuildBlockInfo {
+            Some(BuildBlockInfo {
                 builder_hash,
                 block_size,
                 offered_fee,
                 block_payload: payload,
                 metadata,
                 vid_receiver: unbounded_reciever,
-            });
-        };
-
-        tracing::warn!("build block, returning None");
-        None
+            })
+        } else {
+            tracing::warn!("build block, returning None");
+            None
+        }
     }
 
     async fn process_block_request(&mut self, req: RequestMessage) {

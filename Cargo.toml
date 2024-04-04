@@ -2,7 +2,6 @@
 name = "hotshot-builder-core"
 version = "0.1.2"
 edition = "2021"
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -17,14 +16,14 @@ clap = { version = "4.4", features = ["derive", "env"] }
 commit = { git = "https://github.com/EspressoSystems/commit.git" }
 futures = "0.3"
 hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.32" }
-hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.32" }
 hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.32" }
 hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.1" }
-sha2 = "0.10"
+hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.32" }
 serde = { version = "1.0", features = ["derive"] }
-tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64", tag = "0.3.4" }
-surf-disco = { git = "https://github.com/EspressoSystems/surf-disco", tag = "v0.5.0" }
+sha2 = "0.10"
 snafu = "0.8"
+surf-disco = { git = "https://github.com/EspressoSystems/surf-disco", tag = "v0.5.0" }
+tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64", tag = "0.3.4" }
 tide-disco = { git = "https://github.com/EspressoSystems/tide-disco", tag = "v0.5.0" }
 tracing = "0.1"
 versioned-binary-serialization = { git = "https://github.com/EspressoSystems/versioned-binary-serialization.git", tag = "0.1.2" }
