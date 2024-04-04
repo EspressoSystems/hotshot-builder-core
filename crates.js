@@ -1,1 +1,1 @@
-window.ALL_CRATES = ["hs_builder_core"];
+window.ALL_CRATES = ["hotshot_builder_core"];
