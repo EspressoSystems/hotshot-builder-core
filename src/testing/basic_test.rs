@@ -26,7 +26,6 @@ mod tests {
     use async_compatibility_layer::channel::unbounded;
     use hotshot::types::SignatureKey;
     use hotshot_types::{
-        data::QuorumProposal,
         event::LeafInfo,
         simple_vote::QuorumData,
         traits::block_contents::{vid_commitment, BlockHeader},
@@ -47,12 +46,6 @@ mod tests {
     use commit::{Commitment, CommitmentBoundsArkless, Committable};
     use sha2::{Digest, Sha256};
     use std::sync::Arc;
-
-    #[derive(Debug, Clone)]
-    pub struct CustomError {
-        pub index: usize,
-        pub error: TryRecvError,
-    }
 
     use serde::{Deserialize, Serialize};
     /// This test simulates multiple builder states receiving messages from the channels and processing them

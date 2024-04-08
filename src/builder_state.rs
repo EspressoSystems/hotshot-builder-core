@@ -155,7 +155,7 @@ pub struct BuilderState<TYPES: NodeType> {
     // bootstrapped view number
     pub bootstrap_view_number: TYPES::Time,
 
-    // list of views for which we have builder spwaned clones
+    // list of views for which we have builder spawned clones
     pub spawned_clones_views_list: Arc<RwLock<BTreeSet<TYPES::Time>>>,
 }
 
@@ -263,7 +263,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // Case 2: No intended builder state exist
         // To handle both cases, we can have the bootstrap builder running,
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
-        // check the presense of da_msg.proposal.data.view_number-1 in the spawned_clones_views_list
+        // check the presence of da_msg.proposal.data.view_number-1 in the spawned_clones_views_list
         if self.built_from_view_vid_leaf.0.get_u64() == self.bootstrap_view_number.get_u64()
             && (da_msg.proposal.data.view_number.get_u64() == 0
                 || !self
@@ -327,7 +327,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
                 // make sure we don't clone for the bootstrapping da and qc proposals
                 // also make sure we clone for the same view number( check incase payload commitments are same)
-                // this will handle the case when the intended builder state can spwan
+                // this will handle the case when the intended builder state can spawn
                 if qc_proposal_data.view_number == view_number {
                     tracing::info!("Spawning a clone from process DA proposal");
                     // remove this entry from the qc_proposal_payload_commit_to_quorum_proposal hashmap
@@ -366,7 +366,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // Case 2: No intended builder state exist
         // To handle both cases, we can have the bootstrap builder running,
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
-        // check the presense of da_msg.proposal.data.view_number-1 in the spawned_clones_views_list
+        // check the presence of da_msg.proposal.data.view_number-1 in the spawned_clones_views_list
         if self.built_from_view_vid_leaf.0.get_u64() == self.bootstrap_view_number.get_u64()
             && (qc_msg.proposal.data.view_number.get_u64() == 0
                 || !self
@@ -461,7 +461,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 .await
                 .split_off(&(latest_leaf_view_number + 1));
 
-            // update the spawned_clones_views_list with the splitted list now
+            // update the spawned_clones_views_list with the split list now
             *self.spawned_clones_views_list.write().await = split_list;
             //return Some(Status::ShouldContinue);
         } else if self.built_from_view_vid_leaf.0 <= latest_leaf_view_number {
@@ -477,7 +477,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             return Some(Status::ShouldExit);
         }
 
-        // go through all the leafs
+        // go through all the leaves
         for LeafInfo { leaf, .. } in leaf_chain.iter() {
             let block_payload = leaf.get_block_payload();
             match block_payload {
@@ -510,7 +510,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     }
 
     // spawn a clone of the builder state
-    #[tracing::instrument(skip_all, name = "spwan_clone", 
+    #[tracing::instrument(skip_all, name = "spawn_clone", 
                                     fields(builder_view=%self.built_from_view_vid_leaf.0.get_u64(),
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
                                            builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
@@ -573,7 +573,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
             // spawn a task to calculate the VID commitment, and pass the handle to the global state
             // later global state can await on it before replying to the proposer
-            let (unbounded_sender, unbounded_reciever) = unbounded();
+            let (unbounded_sender, unbounded_receiver) = unbounded();
             #[allow(unused_must_use)]
             async_spawn(async move {
                 let vidc = vid_commitment(&encoded_txns, vid_num_nodes);
@@ -586,7 +586,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 offered_fee,
                 block_payload: payload,
                 metadata,
-                vid_receiver: unbounded_reciever,
+                vid_receiver: unbounded_receiver,
             })
         } else {
             tracing::warn!("build block, returning None");
