@@ -206,7 +206,6 @@ where
                 metadata: block.1.clone(),
                 signature: signature_over_builder_commitment,
                 sender: self.builder_keys.0.clone(),
-                _phantom: Default::default(),
             };
             Ok(block_data)
         } else {
