@@ -32,7 +32,7 @@ pub use async_broadcast::{broadcast, RecvError, TryRecvError};
 use async_compatibility_layer::channel::UnboundedReceiver;
 use async_lock::RwLock;
 use async_trait::async_trait;
-use commit::Committable;
+use committable::Committable;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use hotshot_events_service::{
@@ -44,7 +44,6 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tide_disco::method::ReadState;
-use tracing;
 
 #[allow(clippy::type_complexity)]
 #[derive(Debug)]
@@ -297,7 +296,7 @@ pub async fn run_non_permissioned_standalone_builder_service<
         BuilderEvent<Types>,
         surf_disco::socket::Unsupported,
         EventStreamError,
-        versioned_binary_serialization::version::StaticVersion<0, 1>,
+        vbs::version::StaticVersion<0, 1>,
     >,
 
     // instance state

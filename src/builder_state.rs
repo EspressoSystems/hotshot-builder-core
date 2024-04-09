@@ -12,7 +12,7 @@ use hotshot_types::{
     vote::Certificate,
 };
 
-use commit::{Commitment, Committable};
+use committable::{Commitment, Committable};
 
 use crate::service::GlobalState;
 use crate::WaitAndKeep;
