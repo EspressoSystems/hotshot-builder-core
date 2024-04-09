@@ -15,8 +15,11 @@ use hotshot_types::{
     event::{EventType, LeafInfo},
     message::Proposal,
     traits::{
-        block_contents::BlockPayload, consensus_api::ConsensusApi, election::Membership,
-        node_implementation::NodeType, signature_key::SignatureKey,
+        block_contents::BlockPayload,
+        consensus_api::ConsensusApi,
+        election::Membership,
+        node_implementation::NodeType,
+        signature_key::{BuilderSignatureKey, SignatureKey},
     },
     utils::BuilderCommitment,
     vid::VidCommitment,
@@ -32,7 +35,7 @@ pub use async_broadcast::{broadcast, RecvError, TryRecvError};
 use async_compatibility_layer::channel::UnboundedReceiver;
 use async_lock::RwLock;
 use async_trait::async_trait;
-use commit::Committable;
+use committable::Committable;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use hotshot_events_service::{
@@ -53,8 +56,8 @@ pub struct GlobalState<Types: NodeType> {
     // May be ideal place as GlobalState interacts with hotshot apis
     // and then can sign on responsers as desired
     pub builder_keys: (
-        Types::SignatureKey,                                             // pub key
-        <<Types as NodeType>::SignatureKey as SignatureKey>::PrivateKey, // private key
+        Types::BuilderSignatureKey, // pub key
+        <<Types as NodeType>::BuilderSignatureKey as BuilderSignatureKey>::BuilderPrivateKey, // private key
     ),
     // data store for the blocks
     pub block_hash_to_block: HashMap<
@@ -82,8 +85,8 @@ pub struct GlobalState<Types: NodeType> {
 impl<Types: NodeType> GlobalState<Types> {
     pub fn new(
         builder_keys: (
-            Types::SignatureKey,
-            <<Types as NodeType>::SignatureKey as SignatureKey>::PrivateKey,
+            Types::BuilderSignatureKey,
+            <<Types as NodeType>::BuilderSignatureKey as BuilderSignatureKey>::BuilderPrivateKey,
         ),
         request_sender: BroadcastSender<MessageType<Types>>,
         response_receiver: UnboundedReceiver<ResponseMessage>,
@@ -167,11 +170,12 @@ where
                 combined_bytes.extend_from_slice(response.offered_fee.to_be_bytes().as_ref());
                 combined_bytes.extend_from_slice(response.builder_hash.as_ref());
 
-                let signature_over_block_info = <Types as NodeType>::SignatureKey::sign(
-                    &self.builder_keys.1,
-                    combined_bytes.as_ref(),
-                )
-                .expect("Available block info signing failed");
+                let signature_over_block_info =
+                    <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
+                        &self.builder_keys.1,
+                        combined_bytes.as_ref(),
+                    )
+                    .expect("Available block info signing failed");
 
                 // insert the block info into local hashmap
                 let initial_block_info = AvailableBlockInfo::<Types> {
@@ -200,8 +204,11 @@ where
             // sign over the builder commitment, as the proposer can computer it based on provide block_payload
             // and the metata data
             let signature_over_builder_commitment =
-                <Types as NodeType>::SignatureKey::sign(&self.builder_keys.1, block_hash.as_ref())
-                    .expect("Claim block signing failed");
+                <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
+                    &self.builder_keys.1,
+                    block_hash.as_ref(),
+                )
+                .expect("Claim block signing failed");
             let block_data = AvailableBlockData::<Types> {
                 block_payload: block.0.clone(),
                 metadata: block.1.clone(),
@@ -225,11 +232,12 @@ where
         if let Some(block) = self.block_hash_to_block.get(block_hash) {
             tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
             let vid_commitment = block.2.write().await.get().await?;
-            let signature_over_vid_commitment = <Types as NodeType>::SignatureKey::sign(
-                &self.builder_keys.1,
-                vid_commitment.as_ref(),
-            )
-            .expect("Claim block header input signing failed");
+            let signature_over_vid_commitment =
+                <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
+                    &self.builder_keys.1,
+                    vid_commitment.as_ref(),
+                )
+                .expect("Claim block header input signing failed");
             let reponse = AvailableBlockHeaderInput::<Types> {
                 vid_commitment,
                 signature: signature_over_vid_commitment,
@@ -243,7 +251,9 @@ where
             })
         }
     }
-    async fn get_builder_address(&self) -> Result<<Types as NodeType>::SignatureKey, BuildError> {
+    async fn get_builder_address(
+        &self,
+    ) -> Result<<Types as NodeType>::BuilderSignatureKey, BuildError> {
         Ok(self.builder_keys.0.clone())
     }
 }
@@ -297,7 +307,7 @@ pub async fn run_non_permissioned_standalone_builder_service<
         BuilderEvent<Types>,
         surf_disco::socket::Unsupported,
         EventStreamError,
-        versioned_binary_serialization::version::StaticVersion<0, 1>,
+        vbs::version::StaticVersion<0, 1>,
     >,
 
     // instance state

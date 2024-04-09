@@ -28,6 +28,7 @@ mod tests {
     use hotshot_types::{
         data::QuorumProposal,
         event::LeafInfo,
+        signature_key::BuilderKey,
         simple_vote::QuorumData,
         traits::block_contents::{vid_commitment, BlockHeader},
     };
@@ -44,7 +45,7 @@ mod tests {
     use crate::service::GlobalState;
     use async_lock::RwLock;
     use async_std::task;
-    use commit::{Commitment, CommitmentBoundsArkless, Committable};
+    use committable::{Commitment, CommitmentBoundsArkless, Committable};
     use sha2::{Digest, Sha256};
     use std::sync::Arc;
 
@@ -86,6 +87,7 @@ mod tests {
             type ValidatedState = TestValidatedState;
             type InstanceState = TestInstanceState;
             type Membership = GeneralStaticCommittee<TestTypes, Self::SignatureKey>;
+            type BuilderSignatureKey = BuilderKey;
         }
         // no of test messages to send
         let num_test_messages = 5;
