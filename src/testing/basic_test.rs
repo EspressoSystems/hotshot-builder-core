@@ -27,6 +27,7 @@ mod tests {
     use hotshot::types::SignatureKey;
     use hotshot_types::{
         event::LeafInfo,
+        signature_key::BuilderKey,
         simple_vote::QuorumData,
         traits::block_contents::{vid_commitment, BlockHeader},
     };
@@ -85,6 +86,7 @@ mod tests {
             type ValidatedState = TestValidatedState;
             type InstanceState = TestInstanceState;
             type Membership = GeneralStaticCommittee<TestTypes, Self::SignatureKey>;
+            type BuilderSignatureKey = BuilderKey;
         }
         // no of test messages to send
         let num_test_messages = 5;
@@ -206,7 +208,8 @@ mod tests {
                     let _metadata = <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
                         &sqc_msgs[(i - 1) as usize].proposal.data.block_header,
                     );
-                    let leaf = Leaf::from_proposal(&sqc_msgs[(i - 1) as usize].proposal);
+                    let leaf =
+                        Leaf::from_quorum_proposal(&sqc_msgs[(i - 1) as usize].proposal.data);
 
                     let q_data = QuorumData::<TestTypes> {
                         leaf_commit: leaf.commit(),
@@ -230,7 +233,7 @@ mod tests {
                         vote_commitment: q_data.commit(),
                         view_number,
                         signatures: previous_justify_qc.signatures.clone(),
-                        is_genesis: true, // todo setting true because we don't have signatures of QCType
+                        is_genesis: false,
                         _pd: PhantomData,
                     }
                 }
