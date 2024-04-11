@@ -578,6 +578,43 @@
 <a href="#576" id="576">576</a>
 <a href="#577" id="577">577</a>
 <a href="#578" id="578">578</a>
+<a href="#579" id="579">579</a>
+<a href="#580" id="580">580</a>
+<a href="#581" id="581">581</a>
+<a href="#582" id="582">582</a>
+<a href="#583" id="583">583</a>
+<a href="#584" id="584">584</a>
+<a href="#585" id="585">585</a>
+<a href="#586" id="586">586</a>
+<a href="#587" id="587">587</a>
+<a href="#588" id="588">588</a>
+<a href="#589" id="589">589</a>
+<a href="#590" id="590">590</a>
+<a href="#591" id="591">591</a>
+<a href="#592" id="592">592</a>
+<a href="#593" id="593">593</a>
+<a href="#594" id="594">594</a>
+<a href="#595" id="595">595</a>
+<a href="#596" id="596">596</a>
+<a href="#597" id="597">597</a>
+<a href="#598" id="598">598</a>
+<a href="#599" id="599">599</a>
+<a href="#600" id="600">600</a>
+<a href="#601" id="601">601</a>
+<a href="#602" id="602">602</a>
+<a href="#603" id="603">603</a>
+<a href="#604" id="604">604</a>
+<a href="#605" id="605">605</a>
+<a href="#606" id="606">606</a>
+<a href="#607" id="607">607</a>
+<a href="#608" id="608">608</a>
+<a href="#609" id="609">609</a>
+<a href="#610" id="610">610</a>
+<a href="#611" id="611">611</a>
+<a href="#612" id="612">612</a>
+<a href="#613" id="613">613</a>
+<a href="#614" id="614">614</a>
+<a href="#615" id="615">615</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{
         election::static_committee::{GeneralStaticCommittee, StaticElectionConfig},
@@ -595,8 +632,11 @@
     event::{EventType, LeafInfo},
     message::Proposal,
     traits::{
-        block_contents::BlockPayload, consensus_api::ConsensusApi, election::Membership,
-        node_implementation::NodeType, signature_key::SignatureKey,
+        block_contents::BlockPayload,
+        consensus_api::ConsensusApi,
+        election::Membership,
+        node_implementation::NodeType,
+        signature_key::{BuilderSignatureKey, SignatureKey},
     },
     utils::BuilderCommitment,
     vid::VidCommitment,
@@ -621,8 +661,10 @@
 };
 <span class="kw">use </span>sha2::{Digest, Sha256};
 <span class="kw">use </span>std::collections::HashMap;
+<span class="kw">use </span>std::fmt::Display;
 <span class="kw">use </span>std::num::NonZeroUsize;
 <span class="kw">use </span>std::sync::Arc;
+<span class="kw">use </span>tagged_base64::TaggedBase64;
 <span class="kw">use </span>tide_disco::method::ReadState;
 
 <span class="attr">#[allow(clippy::type_complexity)]
@@ -632,8 +674,8 @@
     // May be ideal place as GlobalState interacts with hotshot apis
     // and then can sign on responsers as desired
     </span><span class="kw">pub </span>builder_keys: (
-        Types::SignatureKey,                                             <span class="comment">// pub key
-        </span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PrivateKey, <span class="comment">// private key
+        Types::BuilderSignatureKey, <span class="comment">// pub key
+        </span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey <span class="kw">as </span>BuilderSignatureKey&gt;::BuilderPrivateKey, <span class="comment">// private key
     </span>),
     <span class="comment">// data store for the blocks
     </span><span class="kw">pub </span>block_hash_to_block: HashMap&lt;
@@ -661,8 +703,8 @@
 <span class="kw">impl</span>&lt;Types: NodeType&gt; GlobalState&lt;Types&gt; {
     <span class="kw">pub fn </span>new(
         builder_keys: (
-            Types::SignatureKey,
-            &lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PrivateKey,
+            Types::BuilderSignatureKey,
+            &lt;&lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey <span class="kw">as </span>BuilderSignatureKey&gt;::BuilderPrivateKey,
         ),
         request_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
         response_receiver: UnboundedReceiver&lt;ResponseMessage&gt;,
@@ -716,13 +758,24 @@ Handling Builder API responses
 </span><span class="attr">#[async_trait]
 </span><span class="kw">impl</span>&lt;Types: NodeType&gt; BuilderDataSource&lt;Types&gt; <span class="kw">for </span>GlobalState&lt;Types&gt;
 <span class="kw">where
-    </span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType:
-        <span class="kw">for</span>&lt;<span class="lifetime">'a</span>&gt; TryFrom&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>tagged_base64::TaggedBase64&gt; + Into&lt;tagged_base64::TaggedBase64&gt;,
+    for</span>&lt;<span class="lifetime">'a</span>&gt; &lt;&lt;Types::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType <span class="kw">as </span>TryFrom&lt;
+        <span class="kw-2">&amp;</span><span class="lifetime">'a </span>TaggedBase64,
+    &gt;&gt;::Error: Display,
+    <span class="kw">for</span>&lt;<span class="lifetime">'a</span>&gt; &lt;Types::SignatureKey <span class="kw">as </span>TryFrom&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>TaggedBase64&gt;&gt;::Error: Display,
 {
     <span class="kw">async fn </span>get_available_blocks(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         for_parent: <span class="kw-2">&amp;</span>VidCommitment,
+        sender: Types::SignatureKey,
+        signature: <span class="kw-2">&amp;</span>&lt;Types::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;AvailableBlockInfo&lt;Types&gt;&gt;, BuildError&gt; {
+        <span class="comment">// verify the signatue
+        </span><span class="kw">if </span>!sender.validate(signature, for_parent.as_ref()) {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(BuildError::Error {
+                message: <span class="string">"Signature validation failed"</span>.to_string(),
+            });
+        }
+
         <span class="kw">let </span>req_msg = RequestMessage {
             requested_vid_commitment: <span class="kw-2">*</span>for_parent,
         };
@@ -746,11 +799,12 @@ Handling Builder API responses
                 combined_bytes.extend_from_slice(response.offered_fee.to_be_bytes().as_ref());
                 combined_bytes.extend_from_slice(response.builder_hash.as_ref());
 
-                <span class="kw">let </span>signature_over_block_info = &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey::sign(
-                    <span class="kw-2">&amp;</span><span class="self">self</span>.builder_keys.<span class="number">1</span>,
-                    combined_bytes.as_ref(),
-                )
-                .expect(<span class="string">"Available block info signing failed"</span>);
+                <span class="kw">let </span>signature_over_block_info =
+                    &lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey::sign_builder_message(
+                        <span class="kw-2">&amp;</span><span class="self">self</span>.builder_keys.<span class="number">1</span>,
+                        combined_bytes.as_ref(),
+                    )
+                    .expect(<span class="string">"Available block info signing failed"</span>);
 
                 <span class="comment">// insert the block info into local hashmap
                 </span><span class="kw">let </span>initial_block_info = AvailableBlockInfo::&lt;Types&gt; {
@@ -772,15 +826,25 @@ Handling Builder API responses
     <span class="kw">async fn </span>claim_block(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         block_hash: <span class="kw-2">&amp;</span>BuilderCommitment,
-        _signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
+        sender: Types::SignatureKey,
+        signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;AvailableBlockData&lt;Types&gt;, BuildError&gt; {
-        <span class="comment">// TODO, Verify the signature over the proposer request
-        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(block) = <span class="self">self</span>.block_hash_to_block.get(block_hash) {
+        <span class="comment">// verify the signatue
+        </span><span class="kw">if </span>!sender.validate(signature, block_hash.as_ref()) {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(BuildError::Error {
+                message: <span class="string">"Signature validation failed"</span>.to_string(),
+            });
+        }
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(block) = <span class="self">self</span>.block_hash_to_block.get(block_hash) {
             <span class="comment">// sign over the builder commitment, as the proposer can computer it based on provide block_payload
             // and the metata data
-            </span><span class="kw">let </span>signature_over_builder_commitment =
-                &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey::sign(<span class="kw-2">&amp;</span><span class="self">self</span>.builder_keys.<span class="number">1</span>, block_hash.as_ref())
-                    .expect(<span class="string">"Claim block signing failed"</span>);
+            </span><span class="kw">let </span>response_block_hash = block.<span class="number">0</span>.builder_commitment(<span class="kw-2">&amp;</span>block.<span class="number">1</span>);
+            <span class="kw">let </span>signature_over_builder_commitment =
+                &lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey::sign_builder_message(
+                    <span class="kw-2">&amp;</span><span class="self">self</span>.builder_keys.<span class="number">1</span>,
+                    response_block_hash.as_ref(),
+                )
+                .expect(<span class="string">"Claim block signing failed"</span>);
             <span class="kw">let </span>block_data = AvailableBlockData::&lt;Types&gt; {
                 block_payload: block.<span class="number">0</span>.clone(),
                 metadata: block.<span class="number">1</span>.clone(),
@@ -798,16 +862,24 @@ Handling Builder API responses
     <span class="kw">async fn </span>claim_block_header_input(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         block_hash: <span class="kw-2">&amp;</span>BuilderCommitment,
-        _signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
+        sender: Types::SignatureKey,
+        signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;AvailableBlockHeaderInput&lt;Types&gt;, BuildError&gt; {
+        <span class="comment">// verify the signatue
+        </span><span class="kw">if </span>!sender.validate(signature, block_hash.as_ref()) {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(BuildError::Error {
+                message: <span class="string">"Signature validation failed"</span>.to_string(),
+            });
+        }
         <span class="kw">if let </span><span class="prelude-val">Some</span>(block) = <span class="self">self</span>.block_hash_to_block.get(block_hash) {
             <span class="macro">tracing::debug!</span>(<span class="string">"Waiting for vid commitment for block {:?}"</span>, block_hash);
             <span class="kw">let </span>vid_commitment = block.<span class="number">2</span>.write().<span class="kw">await</span>.get().<span class="kw">await</span><span class="question-mark">?</span>;
-            <span class="kw">let </span>signature_over_vid_commitment = &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey::sign(
-                <span class="kw-2">&amp;</span><span class="self">self</span>.builder_keys.<span class="number">1</span>,
-                vid_commitment.as_ref(),
-            )
-            .expect(<span class="string">"Claim block header input signing failed"</span>);
+            <span class="kw">let </span>signature_over_vid_commitment =
+                &lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey::sign_builder_message(
+                    <span class="kw-2">&amp;</span><span class="self">self</span>.builder_keys.<span class="number">1</span>,
+                    vid_commitment.as_ref(),
+                )
+                .expect(<span class="string">"Claim block header input signing failed"</span>);
             <span class="kw">let </span>reponse = AvailableBlockHeaderInput::&lt;Types&gt; {
                 vid_commitment,
                 signature: signature_over_vid_commitment,
@@ -821,7 +893,9 @@ Handling Builder API responses
             })
         }
     }
-    <span class="kw">async fn </span>get_builder_address(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey, BuildError&gt; {
+    <span class="kw">async fn </span>get_builder_address(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey, BuildError&gt; {
         <span class="prelude-val">Ok</span>(<span class="self">self</span>.builder_keys.<span class="number">0</span>.clone())
     }
 }
@@ -1105,7 +1179,7 @@ Utility functions to handle the hotshot events
         qc_proposal.data.view_number
     );
 
-    <span class="kw">let </span>leaf = Leaf::from_proposal(<span class="kw-2">&amp;</span>qc_proposal);
+    <span class="kw">let </span>leaf = Leaf::from_quorum_proposal(<span class="kw-2">&amp;</span>qc_proposal.data);
 
     <span class="comment">// check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
     </span><span class="kw">if </span>sender == leader &amp;&amp; sender.validate(<span class="kw-2">&amp;</span>qc_proposal.signature, leaf.commit().as_ref()) {
