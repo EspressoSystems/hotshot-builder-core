@@ -200,7 +200,7 @@ mod tests {
             };
 
             let justify_qc = match i {
-                0 => QuorumCertificate::<TestTypes>::genesis(&TestInstanceState {}),
+                0 => QuorumCertificate::<TestTypes>::genesis(),
                 _ => {
                     let previous_justify_qc =
                         sqc_msgs[(i - 1) as usize].proposal.data.justify_qc.clone();
@@ -233,6 +233,7 @@ mod tests {
                         vote_commitment: q_data.commit(),
                         view_number,
                         signatures: previous_justify_qc.signatures.clone(),
+                        is_genesis: false,
                         _pd: PhantomData,
                     }
                 }
