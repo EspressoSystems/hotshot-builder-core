@@ -304,6 +304,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         self.total_nodes = NonZeroUsize::new(total_nodes).unwrap();
 
         let payload_vid_commitment = vid_commitment(&encoded_txns, total_nodes);
+
         tracing::debug!(
             "Generated payload commitment from the da proposal: {:?}",
             payload_vid_commitment

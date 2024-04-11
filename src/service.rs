@@ -562,7 +562,7 @@ async fn handle_qc_event<Types: NodeType>(
         qc_proposal.data.view_number
     );
 
-    let leaf = Leaf::from_proposal(&qc_proposal);
+    let leaf = Leaf::from_quorum_proposal(&qc_proposal.data);
 
     // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
     if sender == leader && sender.validate(&qc_proposal.signature, leaf.commit().as_ref()) {

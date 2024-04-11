@@ -200,7 +200,7 @@ mod tests {
             };
 
             let justify_qc = match i {
-                0 => QuorumCertificate::<TestTypes>::genesis(),
+                0 => QuorumCertificate::<TestTypes>::genesis(&TestInstanceState {}),
                 _ => {
                     let previous_justify_qc =
                         sqc_msgs[(i - 1) as usize].proposal.data.justify_qc.clone();
@@ -208,7 +208,8 @@ mod tests {
                     let _metadata = <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
                         &sqc_msgs[(i - 1) as usize].proposal.data.block_header,
                     );
-                    let leaf = Leaf::from_proposal(&sqc_msgs[(i - 1) as usize].proposal);
+                    let leaf =
+                        Leaf::from_quorum_proposal(&sqc_msgs[(i - 1) as usize].proposal.data);
 
                     let q_data = QuorumData::<TestTypes> {
                         leaf_commit: leaf.commit(),
@@ -232,7 +233,6 @@ mod tests {
                         vote_commitment: q_data.commit(),
                         view_number,
                         signatures: previous_justify_qc.signatures.clone(),
-                        is_genesis: true, // todo setting true because we don't have signatures of QCType
                         _pd: PhantomData,
                     }
                 }
