@@ -13,20 +13,20 @@ async-lock = "2.8"
 async-std = { version = "1.9.0", features = ["unstable", "attributes"] }
 async-trait = "0.1"
 clap = { version = "4.4", features = ["derive", "env"] }
-commit = { git = "https://github.com/EspressoSystems/commit.git" }
+committable = "0.2"
 futures = "0.3"
-hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.32" }
-hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.32" }
-hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.1" }
-hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.32" }
+hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.34" }
+hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.34" }
+hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.2" }
+hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.34" }
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
 snafu = "0.8"
-surf-disco = { git = "https://github.com/EspressoSystems/surf-disco", tag = "v0.5.0" }
-tagged-base64 = { git = "https://github.com/EspressoSystems/tagged-base64", tag = "0.3.4" }
-tide-disco = { git = "https://github.com/EspressoSystems/tide-disco", tag = "v0.5.0" }
+surf-disco = "0.6"
+tagged-base64 = "0.4"
+tide-disco = "0.6"
 tracing = "0.1"
-versioned-binary-serialization = { git = "https://github.com/EspressoSystems/versioned-binary-serialization.git", tag = "0.1.2" }
+vbs = "0.1"
 
 [dev-dependencies]
-hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.32" }
+hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.34" }
