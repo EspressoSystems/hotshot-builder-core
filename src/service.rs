@@ -49,7 +49,6 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tagged_base64::TaggedBase64;
 use tide_disco::method::ReadState;
-use tracing;
 
 #[allow(clippy::type_complexity)]
 #[derive(Debug)]
