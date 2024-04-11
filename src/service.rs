@@ -44,8 +44,10 @@ use hotshot_events_service::{
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use tagged_base64::TaggedBase64;
 use tide_disco::method::ReadState;
 use tracing;
 
@@ -140,13 +142,24 @@ Handling Builder API responses
 #[async_trait]
 impl<Types: NodeType> BuilderDataSource<Types> for GlobalState<Types>
 where
-    <<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType:
-        for<'a> TryFrom<&'a tagged_base64::TaggedBase64> + Into<tagged_base64::TaggedBase64>,
+    for<'a> <<Types::SignatureKey as SignatureKey>::PureAssembledSignatureType as TryFrom<
+        &'a TaggedBase64,
+    >>::Error: Display,
+    for<'a> <Types::SignatureKey as TryFrom<&'a TaggedBase64>>::Error: Display,
 {
     async fn get_available_blocks(
         &self,
         for_parent: &VidCommitment,
+        sender: Types::SignatureKey,
+        signature: &<Types::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<Vec<AvailableBlockInfo<Types>>, BuildError> {
+        // verify the signatue
+        if !sender.validate(signature, for_parent.as_ref()) {
+            return Err(BuildError::Error {
+                message: "Signature validation failed".to_string(),
+            });
+        }
+
         let req_msg = RequestMessage {
             requested_vid_commitment: *for_parent,
         };
@@ -197,16 +210,23 @@ where
     async fn claim_block(
         &self,
         block_hash: &BuilderCommitment,
-        _signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
+        sender: Types::SignatureKey,
+        signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockData<Types>, BuildError> {
-        // TODO, Verify the signature over the proposer request
+        // verify the signatue
+        if !sender.validate(signature, block_hash.as_ref()) {
+            return Err(BuildError::Error {
+                message: "Signature validation failed".to_string(),
+            });
+        }
         if let Some(block) = self.block_hash_to_block.get(block_hash) {
             // sign over the builder commitment, as the proposer can computer it based on provide block_payload
             // and the metata data
+            let response_block_hash = block.0.builder_commitment(&block.1);
             let signature_over_builder_commitment =
                 <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
                     &self.builder_keys.1,
-                    block_hash.as_ref(),
+                    response_block_hash.as_ref(),
                 )
                 .expect("Claim block signing failed");
             let block_data = AvailableBlockData::<Types> {
@@ -214,7 +234,6 @@ where
                 metadata: block.1.clone(),
                 signature: signature_over_builder_commitment,
                 sender: self.builder_keys.0.clone(),
-                _phantom: Default::default(),
             };
             Ok(block_data)
         } else {
@@ -227,8 +246,15 @@ where
     async fn claim_block_header_input(
         &self,
         block_hash: &BuilderCommitment,
-        _signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
+        sender: Types::SignatureKey,
+        signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
+        // verify the signatue
+        if !sender.validate(signature, block_hash.as_ref()) {
+            return Err(BuildError::Error {
+                message: "Signature validation failed".to_string(),
+            });
+        }
         if let Some(block) = self.block_hash_to_block.get(block_hash) {
             tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
             let vid_commitment = block.2.write().await.get().await?;
