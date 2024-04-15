@@ -22,7 +22,7 @@ use hotshot_types::{
         signature_key::{BuilderSignatureKey, SignatureKey},
     },
     utils::BuilderCommitment,
-    vid::VidCommitment,
+    vid::{VidCommitment, VidPrecomputeData},
 };
 
 use crate::builder_state::{
@@ -55,7 +55,7 @@ use tide_disco::method::ReadState;
 pub struct GlobalState<Types: NodeType> {
     // identity keys for the builder
     // May be ideal place as GlobalState interacts with hotshot apis
-    // and then can sign on responsers as desired
+    // and then can sign on responders as desired
     pub builder_keys: (
         Types::BuilderSignatureKey, // pub key
         <<Types as NodeType>::BuilderSignatureKey as BuilderSignatureKey>::BuilderPrivateKey, // private key
@@ -66,7 +66,8 @@ pub struct GlobalState<Types: NodeType> {
         (
             Types::BlockPayload,
             <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
-            Arc<RwLock<WaitAndKeep<VidCommitment>>>,
+            Arc<RwLock<WaitAndKeep<(VidCommitment, VidPrecomputeData)>>>,
+            u64, // Fees
         ),
     >,
     // sending a request from the hotshot to the builder states
@@ -116,7 +117,7 @@ impl<Types: NodeType> GlobalState<Types> {
         }
     }
     // private mempool submit txn
-    // Currenlty, we don't differentiate between the transactions from the hotshot and the private mempool
+    // Currently, we don't differentiate between the transactions from the hotshot and the private mempool
     pub async fn submit_client_txn(
         &self,
         txn: <Types as NodeType>::Transaction,
@@ -152,7 +153,7 @@ where
         sender: Types::SignatureKey,
         signature: &<Types::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<Vec<AvailableBlockInfo<Types>>, BuildError> {
-        // verify the signatue
+        // verify the signature
         if !sender.validate(signature, for_parent.as_ref()) {
             return Err(BuildError::Error {
                 message: "Signature validation failed".to_string(),
@@ -212,7 +213,7 @@ where
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockData<Types>, BuildError> {
-        // verify the signatue
+        // verify the signature
         if !sender.validate(signature, block_hash.as_ref()) {
             return Err(BuildError::Error {
                 message: "Signature validation failed".to_string(),
@@ -248,7 +249,7 @@ where
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
-        // verify the signatue
+        // verify the signature
         if !sender.validate(signature, block_hash.as_ref()) {
             return Err(BuildError::Error {
                 message: "Signature validation failed".to_string(),
@@ -256,20 +257,34 @@ where
         }
         if let Some(block) = self.block_hash_to_block.get(block_hash) {
             tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
-            let vid_commitment = block.2.write().await.get().await?;
+            let (vid_commitment, vid_precompute_data) = block.2.write().await.get().await?;
             let signature_over_vid_commitment =
                 <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
                     &self.builder_keys.1,
                     vid_commitment.as_ref(),
                 )
-                .expect("Claim block header input signing failed");
-            let reponse = AvailableBlockHeaderInput::<Types> {
+                .expect("Claim block header input message signing failed");
+            let combined_response_bytes = {
+                let mut combined_response_bytes: Vec<u8> = Vec::new();
+                combined_response_bytes.extend_from_slice(block.3.to_be_bytes().as_ref());
+                combined_response_bytes.extend_from_slice(block_hash.as_ref());
+                combined_response_bytes.extend_from_slice(vid_commitment.as_ref());
+                combined_response_bytes
+            };
+            let fee_signature = <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
+                &self.builder_keys.1,
+                combined_response_bytes.as_ref(),
+            )
+            .expect("Claim block header input fee signing failed");
+            let response = AvailableBlockHeaderInput::<Types> {
                 vid_commitment,
-                signature: signature_over_vid_commitment,
+                vid_precompute_data,
+                fee_signature,
+                message_signature: signature_over_vid_commitment,
                 sender: self.builder_keys.0.clone(),
                 _phantom: Default::default(),
             };
-            Ok(reponse)
+            Ok(response)
         } else {
             Err(BuildError::Error {
                 message: "Block not found".to_string(),
@@ -338,7 +353,7 @@ pub async fn run_non_permissioned_standalone_builder_service<
     // instance state
     instance_state: Types::InstanceState,
 ) {
-    // handle the starup event at the start
+    // handle the startup event at the start
     let membership = if let Some(Ok(event)) = subscribed_events.next().await {
         match event.event {
             BuilderEventType::StartupInfo {
@@ -389,7 +404,7 @@ pub async fn run_non_permissioned_standalone_builder_service<
                     BuilderEventType::HotshotError { error } => {
                         tracing::error!("Error event in HotShot: {:?}", error);
                     }
-                    // starup event
+                    // startup event
                     BuilderEventType::StartupInfo { .. } => {
                         tracing::warn!("Startup info event received again");
                     }
@@ -493,7 +508,7 @@ pub async fn run_permissioned_standalone_builder_service<
                     EventType::DAProposal { proposal, sender } => {
                         // get the leader for current view
                         let leader = hotshot_handle.get_leader(proposal.data.view_number).await;
-                        // get the committe staked node count
+                        // get the committee staked node count
                         let total_nodes = hotshot_handle.total_nodes();
 
                         handle_da_event(&da_sender, proposal, sender, leader, total_nodes).await;
