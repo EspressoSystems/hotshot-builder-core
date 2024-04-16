@@ -135,6 +135,9 @@ mod tests {
             // Prepare the transaction message
             let tx = TestTransaction(vec![i as u8]);
             let encoded_transactions = TestTransaction::encode(vec![tx.clone()]).unwrap();
+            let payload =
+                TestBlockPayload::from_bytes(encoded_transactions.clone().into_iter(), &());
+            let builder_commitment = payload.builder_commitment(&());
 
             let stx_msg = TransactionMessage::<TestTypes> {
                 tx: tx.clone(),
@@ -196,6 +199,7 @@ mod tests {
             let block_header = TestBlockHeader {
                 block_number: i as u64,
                 payload_commitment: encoded_txns_vid_commitment,
+                builder_commitment,
                 timestamp: i as u64,
             };
 
