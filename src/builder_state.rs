@@ -136,7 +136,7 @@ pub struct BuilderState<TYPES: NodeType> {
     pub quorum_proposal_payload_commit_to_quorum_proposal:
         HashMap<BuilderCommitment, QuorumProposal<TYPES>>,
 
-    /// the spwaned from info for a builder state
+    /// the spawned from info for a builder state
     pub built_from_info: BuiltFromInfo<TYPES>,
 
     // Channel Receivers for the HotShot events, Tx_receiver could also receive the external transactions
@@ -320,18 +320,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // set the total nodes required for the VID computation // later required in the build_block
         self.total_nodes = NonZeroUsize::new(total_nodes).unwrap();
 
-<<<<<<< HEAD
         // form a block payload from the encoded transactions
         let block_payload = <TYPES::BlockPayload as BlockPayload>::from_bytes(
             encoded_txns.clone().into_iter(),
             &metadata,
-=======
-        let payload_vid_commitment = vid_commitment(&encoded_txns, total_nodes);
-
-        tracing::debug!(
-            "Generated payload commitment from the da proposal: {:?}",
-            payload_vid_commitment
->>>>>>> main
         );
         // get the builder commitment from the block payload
         let payload_builder_commitment = block_payload.builder_commitment(&metadata);

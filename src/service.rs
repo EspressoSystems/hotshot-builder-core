@@ -149,19 +149,11 @@ where
 {
     async fn get_available_blocks(
         &self,
-<<<<<<< HEAD
         for_parent: &BuilderCommitment,
         sender: Types::SignatureKey,
         signature: &<Types::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<Vec<AvailableBlockInfo<Types>>, BuildError> {
         // verify the signature
-=======
-        for_parent: &VidCommitment,
-        sender: Types::SignatureKey,
-        signature: &<Types::SignatureKey as SignatureKey>::PureAssembledSignatureType,
-    ) -> Result<Vec<AvailableBlockInfo<Types>>, BuildError> {
-        // verify the signatue
->>>>>>> main
         if !sender.validate(signature, for_parent.as_ref()) {
             return Err(BuildError::Error {
                 message: "Signature validation failed".to_string(),
@@ -221,11 +213,7 @@ where
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockData<Types>, BuildError> {
-<<<<<<< HEAD
         // verify the signature
-=======
-        // verify the signatue
->>>>>>> main
         if !sender.validate(signature, block_hash.as_ref()) {
             return Err(BuildError::Error {
                 message: "Signature validation failed".to_string(),
@@ -261,11 +249,7 @@ where
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
-<<<<<<< HEAD
         // verify the signature
-=======
-        // verify the signatue
->>>>>>> main
         if !sender.validate(signature, block_hash.as_ref()) {
             return Err(BuildError::Error {
                 message: "Signature validation failed".to_string(),
@@ -273,17 +257,12 @@ where
         }
         if let Some(block) = self.block_hash_to_block.get(block_hash) {
             tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
-<<<<<<< HEAD
             let (vid_commitment, vid_precompute_data) = block.2.write().await.get().await?;
-=======
-            let vid_commitment = block.2.write().await.get().await?;
->>>>>>> main
             let signature_over_vid_commitment =
                 <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
                     &self.builder_keys.1,
                     vid_commitment.as_ref(),
                 )
-<<<<<<< HEAD
                 .expect("Claim block header input message signing failed");
             let combined_response_bytes = {
                 let mut combined_response_bytes: Vec<u8> = Vec::new();
@@ -298,10 +277,6 @@ where
             )
             .expect("Claim block header input fee signing failed");
             let response = AvailableBlockHeaderInput::<Types> {
-=======
-                .expect("Claim block header input signing failed");
-            let reponse = AvailableBlockHeaderInput::<Types> {
->>>>>>> main
                 vid_commitment,
                 vid_precompute_data,
                 fee_signature,
