@@ -149,7 +149,7 @@ where
 {
     async fn get_available_blocks(
         &self,
-        for_parent: &VidCommitment,
+        for_parent: &BuilderCommitment,
         sender: Types::SignatureKey,
         signature: &<Types::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<Vec<AvailableBlockInfo<Types>>, BuildError> {
@@ -161,7 +161,7 @@ where
         }
 
         let req_msg = RequestMessage {
-            requested_vid_commitment: *for_parent,
+            requested_builder_commitment: for_parent.clone(),
         };
         self.request_sender
             .broadcast(MessageType::RequestMessage(req_msg.clone()))

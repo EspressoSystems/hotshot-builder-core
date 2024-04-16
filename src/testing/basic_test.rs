@@ -30,6 +30,7 @@ mod tests {
         signature_key::BuilderKey,
         simple_vote::QuorumData,
         traits::block_contents::{vid_commitment, BlockHeader},
+        utils::BuilderCommitment,
     };
 
     use hotshot_example_types::{
@@ -38,8 +39,8 @@ mod tests {
     };
 
     use crate::builder_state::{
-        DAProposalMessage, DecideMessage, QCMessage, RequestMessage, TransactionMessage,
-        TransactionSource,
+        BuiltFromInfo, DAProposalMessage, DecideMessage, QCMessage, RequestMessage,
+        TransactionMessage, TransactionSource,
     };
     use crate::service::GlobalState;
     use async_lock::RwLock;
@@ -167,18 +168,6 @@ mod tests {
                 total_nodes: TEST_NUM_NODES_IN_VID_COMPUTATION,
             };
 
-            // calculate the vid commitment over the encoded_transactions
-            tracing::debug!(
-                "Encoded transactions: {:?}\n Num nodes:{}",
-                encoded_transactions,
-                TEST_NUM_NODES_IN_VID_COMPUTATION
-            );
-            let encoded_txns_vid_commitment =
-                vid_commitment(&encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION);
-            tracing::debug!(
-                "Encoded transactions vid commitment: {:?}",
-                encoded_txns_vid_commitment
-            );
             // Prepare the QC proposal message
             // calculate the vid commitment over the encoded_transactions
             tracing::debug!(
@@ -248,14 +237,21 @@ mod tests {
                 proposal_certificate: None,
             };
 
-            let payload_commitment =
+            let payload_vid_commitment =
                 <TestBlockHeader as BlockHeader<TestTypes>>::payload_commitment(
                     &qc_proposal.block_header,
+                );
+            let payload_builder_commitment =
+                <TestBlockHeader as BlockHeader<TestTypes>>::builder_commitment(
+                    &qc_proposal.block_header,
+                    &<TestBlockHeader as BlockHeader<TestTypes>>::metadata(
+                        &qc_proposal.block_header,
+                    ),
                 );
 
             let qc_signature = <TestTypes as hotshot_types::traits::node_implementation::NodeType>::SignatureKey::sign(
                         &private_key,
-                        payload_commitment.as_ref(),
+                        payload_vid_commitment.as_ref(),
                         ).expect("Failed to sign payload commitment while preparing QC proposal");
 
             let sqc_msg = QCMessage::<TestTypes> {
@@ -313,9 +309,9 @@ mod tests {
                 .unwrap();
 
             // send decide and request messages later
-            let requested_vid_commitment = payload_commitment;
+            let requested_builder_commitment = payload_builder_commitment;
             let request_message = MessageType::<TestTypes>::RequestMessage(RequestMessage {
-                requested_vid_commitment,
+                requested_builder_commitment,
             });
 
             stx_msgs.push(stx_msg);
@@ -329,12 +325,14 @@ mod tests {
         let arc_rwlock_global_state = Arc::new(RwLock::new(global_state));
         let arc_rwlock_global_state_clone = arc_rwlock_global_state.clone();
         let handle = async_spawn(async move {
+            let built_from_info = BuiltFromInfo {
+                view_number: ViewNumber::new(0),
+                vid_commitment: vid_commitment(&vec![], 8),
+                leaf_commit: Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage(),
+                builder_commitment: BuilderCommitment::from_bytes(&[]),
+            };
             let builder_state = BuilderState::<TestTypes>::new(
-                (
-                    ViewNumber::new(0),
-                    vid_commitment(&vec![], 8),
-                    Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage(),
-                ),
+                built_from_info,
                 tx_receiver,
                 decide_receiver,
                 da_receiver,
