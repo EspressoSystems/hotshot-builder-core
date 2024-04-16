@@ -329,7 +329,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let payload_builder_commitment = block_payload.builder_commitment(&metadata);
 
         tracing::debug!(
-            "Generated builder commitment from the da proposal: {:?}",
+            "Extracted builder commitment from the da proposal: {:?}",
             payload_builder_commitment
         );
 
@@ -411,12 +411,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let qc_proposal_data = qc_msg.proposal.data;
         let sender = qc_msg.sender;
         let view_number = qc_proposal_data.view_number;
-        let payload_builder_commitment = qc_proposal_data
-            .block_header
-            .builder_commitment(qc_proposal_data.block_header.metadata());
+        let payload_builder_commitment = qc_proposal_data.block_header.builder_commitment();
 
         tracing::debug!(
-            "Extracted payload commitment from the quorum proposal: {:?}",
+            "Extracted payload builder commitment from the quorum proposal: {:?}",
             payload_builder_commitment
         );
 
@@ -542,9 +540,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     ) {
         self.built_from_info.view_number = quorum_proposal.view_number;
         self.built_from_info.vid_commitment = quorum_proposal.block_header.payload_commitment();
-        self.built_from_info.builder_commitment = quorum_proposal
-            .block_header
-            .builder_commitment(quorum_proposal.block_header.metadata());
+        self.built_from_info.builder_commitment = quorum_proposal.block_header.builder_commitment();
         self.built_from_info.leaf_commit = Leaf::from_quorum_proposal(&quorum_proposal).commit();
 
         let payload = <TYPES::BlockPayload as BlockPayload>::from_bytes(

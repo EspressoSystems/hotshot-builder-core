@@ -107,7 +107,6 @@ mod tests {
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
         let (res_sender, res_receiver) = unbounded();
 
-        //let global_state_clone = global_state.clone();
         // generate the keys for the buidler
         let seed = [201_u8; 32];
         let (builder_pub_key, builder_private_key) =
@@ -170,21 +169,29 @@ mod tests {
 
             // Prepare the QC proposal message
             // calculate the vid commitment over the encoded_transactions
+
+            let (block_payload, metadata) =
+                <TestBlockPayload as BlockPayload>::from_transactions(vec![tx.clone()]).unwrap();
+
             tracing::debug!(
                 "Encoded transactions: {:?} Num nodes:{}",
                 encoded_transactions,
                 TEST_NUM_NODES_IN_VID_COMPUTATION
             );
-            let encoded_txns_vid_commitment =
+            let block_payload_commitment =
                 vid_commitment(&encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION);
+
             tracing::debug!(
-                "Encoded transactions vid commitment: {:?}",
-                encoded_txns_vid_commitment
+                "Block Payload vid commitment: {:?}",
+                block_payload_commitment
             );
+
+            let builder_commitment = block_payload.builder_commitment(&metadata);
 
             let block_header = TestBlockHeader {
                 block_number: i as u64,
-                payload_commitment: encoded_txns_vid_commitment,
+                payload_commitment: block_payload_commitment,
+                builder_commitment,
                 timestamp: i as u64,
             };
 
@@ -244,9 +251,6 @@ mod tests {
             let payload_builder_commitment =
                 <TestBlockHeader as BlockHeader<TestTypes>>::builder_commitment(
                     &qc_proposal.block_header,
-                    &<TestBlockHeader as BlockHeader<TestTypes>>::metadata(
-                        &qc_proposal.block_header,
-                    ),
                 );
 
             let qc_signature = <TestTypes as hotshot_types::traits::node_implementation::NodeType>::SignatureKey::sign(
@@ -329,7 +333,7 @@ mod tests {
                 view_number: ViewNumber::new(0),
                 vid_commitment: vid_commitment(&vec![], 8),
                 leaf_commit: Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage(),
-                builder_commitment: BuilderCommitment::from_bytes(&[]),
+                builder_commitment: BuilderCommitment::from_bytes([]),
             };
             let builder_state = BuilderState::<TestTypes>::new(
                 built_from_info,
