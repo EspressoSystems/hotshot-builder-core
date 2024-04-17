@@ -554,7 +554,7 @@ async fn handle_qc_event<Types: NodeType>(
     qc_proposal: Proposal<Types, QuorumProposal<Types>>,
     sender: <Types as NodeType>::SignatureKey,
     leader: <Types as NodeType>::SignatureKey,
-    _instance_state: &Types::InstanceState,
+    instance_state: &Types::InstanceState,
 ) {
     tracing::debug!(
         "QCProposal: Leader: {:?} for the view: {:?}",
@@ -562,7 +562,13 @@ async fn handle_qc_event<Types: NodeType>(
         qc_proposal.data.view_number
     );
 
-    let leaf = Leaf::from_quorum_proposal(&qc_proposal.data);
+    let mut leaf = Leaf::from_quorum_proposal(&qc_proposal.data);
+
+    // Hack for genesis mis-handling in HotShot.
+    // Once the is_genesis field is removed, you can delete this block.
+    if qc_proposal.data.justify_qc.is_genesis {
+        leaf.set_parent_commitment(Leaf::genesis(instance_state).commit());
+    }
 
     // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
     if sender == leader && sender.validate(&qc_proposal.signature, leaf.commit().as_ref()) {
