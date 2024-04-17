@@ -331,7 +331,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 // also make sure we clone for the same view number( check incase payload commitments are same)
                 // this will handle the case when the intended builder state can spwan
                 if qc_proposal_data.view_number == view_number {
-                    tracing::info!("Spawning a clone from process DA proposal");
+                    tracing::info!(
+                        "Spawning a clone from process DA proposal for view number: {:?}",
+                        view_number
+                    );
                     // remove this entry from the qc_proposal_payload_commit_to_quorum_proposal hashmap
                     self.quorum_proposal_payload_commit_to_quorum_proposal
                         .remove(&payload_vid_commitment);
@@ -412,7 +415,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
                 // also make sure we clone for the same view number( check incase payload commitments are same)
                 if da_proposal_data.view_number == view_number {
-                    tracing::info!("Spawning a clone from process QC proposal");
+                    tracing::info!(
+                        "Spawning a clone from process QC proposal for view number: {:?}",
+                        view_number
+                    );
                     self.spawned_clones_views_list
                         .write()
                         .await
