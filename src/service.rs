@@ -155,7 +155,7 @@ where
         // verify the signatue
         if !sender.validate(signature, for_parent.as_ref()) {
             return Err(BuildError::Error {
-                message: "Signature validation failed".to_string(),
+                message: "Signature validation failed in get_available_blocks".to_string(),
             });
         }
 
@@ -202,7 +202,7 @@ where
                     sender: self.builder_keys.0.clone(),
                     _phantom: Default::default(),
                 };
-                tracing::debug!("Initial block info: {:?}", initial_block_info);
+                tracing::debug!("sending Initial block info: {:?}", initial_block_info);
                 Ok(vec![initial_block_info])
             }
             _ => Err(BuildError::Error {
@@ -216,10 +216,11 @@ where
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockData<Types>, BuildError> {
+        tracing::debug!("Received request for Claiming block {:?}", block_hash);
         // verify the signatue
         if !sender.validate(signature, block_hash.as_ref()) {
             return Err(BuildError::Error {
-                message: "Signature validation failed".to_string(),
+                message: "Signature validation failed in claim block".to_string(),
             });
         }
         if let Some(block) = self.block_hash_to_block.get(block_hash) {
@@ -238,6 +239,7 @@ where
                 signature: signature_over_builder_commitment,
                 sender: self.builder_keys.0.clone(),
             };
+            tracing::debug!("Sending Claimed block data: {:?}", block_data);
             Ok(block_data)
         } else {
             Err(BuildError::Error {
@@ -252,10 +254,14 @@ where
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
+        tracing::debug!(
+            "Received request for Claiming block header input {:?}",
+            block_hash
+        );
         // verify the signatue
         if !sender.validate(signature, block_hash.as_ref()) {
             return Err(BuildError::Error {
-                message: "Signature validation failed".to_string(),
+                message: "Signature validation failed in claim block header input".to_string(),
             });
         }
         if let Some(block) = self.block_hash_to_block.get(block_hash) {
@@ -267,13 +273,14 @@ where
                     vid_commitment.as_ref(),
                 )
                 .expect("Claim block header input signing failed");
-            let reponse = AvailableBlockHeaderInput::<Types> {
+            let response = AvailableBlockHeaderInput::<Types> {
                 vid_commitment,
                 signature: signature_over_vid_commitment,
                 sender: self.builder_keys.0.clone(),
                 _phantom: Default::default(),
             };
-            Ok(reponse)
+            tracing::debug!("Sending Claimed block header input: {:?}", response);
+            Ok(response)
         } else {
             Err(BuildError::Error {
                 message: "Block not found".to_string(),

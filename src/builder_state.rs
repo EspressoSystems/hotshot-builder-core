@@ -493,6 +493,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         if let Some((timestamp, _, _)) = self.tx_hash_to_available_txns.get(tx_hash)
                         {
                             if self.timestamp_to_tx.contains_key(timestamp) {
+                                tracing::debug!("Removing transaction from timestamp_to_tx map");
                                 self.timestamp_to_tx.remove(timestamp);
                             }
                             self.tx_hash_to_available_txns.remove(tx_hash);
