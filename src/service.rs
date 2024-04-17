@@ -282,7 +282,6 @@ where
                 fee_signature,
                 message_signature: signature_over_vid_commitment,
                 sender: self.builder_keys.0.clone(),
-                _phantom: Default::default(),
             };
             Ok(response)
         } else {

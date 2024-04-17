@@ -3020,7 +3020,7 @@ dependencies = [
 [[package]]
 name = "hotshot"
 version = "0.5.37"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#08d2c3954e61a03764e73ba59bac29de09001c8d"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#7f983906f46fb77ed2c9fb3eb4e4d63d8112e0ef"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3065,7 +3065,7 @@ dependencies = [
 [[package]]
 name = "hotshot-builder-api"
 version = "0.1.6"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#08d2c3954e61a03764e73ba59bac29de09001c8d"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#7f983906f46fb77ed2c9fb3eb4e4d63d8112e0ef"
 dependencies = [
  "async-trait",
  "clap",
@@ -3136,7 +3136,7 @@ dependencies = [
 [[package]]
 name = "hotshot-example-types"
 version = "0.5.37"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#08d2c3954e61a03764e73ba59bac29de09001c8d"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#7f983906f46fb77ed2c9fb3eb4e4d63d8112e0ef"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3166,7 +3166,7 @@ dependencies = [
 [[package]]
 name = "hotshot-orchestrator"
 version = "0.5.37"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#08d2c3954e61a03764e73ba59bac29de09001c8d"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#7f983906f46fb77ed2c9fb3eb4e4d63d8112e0ef"
 dependencies = [
  "anyhow",
  "async-compatibility-layer",
@@ -3195,7 +3195,7 @@ dependencies = [
 [[package]]
 name = "hotshot-task"
 version = "0.5.37"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#08d2c3954e61a03764e73ba59bac29de09001c8d"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#7f983906f46fb77ed2c9fb3eb4e4d63d8112e0ef"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
@@ -3208,7 +3208,7 @@ dependencies = [
 [[package]]
 name = "hotshot-task-impls"
 version = "0.5.37"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#08d2c3954e61a03764e73ba59bac29de09001c8d"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#7f983906f46fb77ed2c9fb3eb4e4d63d8112e0ef"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3241,7 +3241,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.11"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#08d2c3954e61a03764e73ba59bac29de09001c8d"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#7f983906f46fb77ed2c9fb3eb4e4d63d8112e0ef"
 dependencies = [
  "anyhow",
  "ark-bls12-381",
@@ -3291,7 +3291,7 @@ dependencies = [
 [[package]]
 name = "hotshot-web-server"
 version = "0.5.37"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#08d2c3954e61a03764e73ba59bac29de09001c8d"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#7f983906f46fb77ed2c9fb3eb4e4d63d8112e0ef"
 dependencies = [
  "async-compatibility-layer",
  "async-lock 2.8.0",
@@ -4362,7 +4362,7 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.5.37"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#08d2c3954e61a03764e73ba59bac29de09001c8d"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=nfy/builder_commitment_support#7f983906f46fb77ed2c9fb3eb4e4d63d8112e0ef"
 dependencies = [
  "anyhow",
  "async-compatibility-layer",
