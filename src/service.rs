@@ -162,6 +162,10 @@ where
         let req_msg = RequestMessage {
             requested_vid_commitment: *for_parent,
         };
+        tracing::debug!(
+            "Requesting available blocks for {:?}",
+            req_msg.requested_vid_commitment
+        );
         self.request_sender
             .broadcast(MessageType::RequestMessage(req_msg.clone()))
             .await
@@ -382,7 +386,7 @@ pub async fn run_non_permissioned_standalone_builder_service<
 
     loop {
         let event = subscribed_events.next().await.unwrap();
-        tracing::debug!("Builder Event received from HotShot: {:?}", event);
+        //tracing::debug!("Builder Event received from HotShot: {:?}", event);
         match event {
             Ok(event) => {
                 match event.event {
@@ -539,7 +543,10 @@ async fn handle_da_event<Types: NodeType>(
             sender: leader,
             total_nodes: total_nodes.into(),
         };
-        tracing::debug!("Sending DA proposal to the builder states{:?}", da_msg);
+        tracing::debug!(
+            "Sending DA proposal to the builder states for view number {:?}",
+            da_msg.proposal.data.view_number
+        );
         da_channel_sender
             .broadcast(MessageType::DAProposalMessage(da_msg))
             .await
@@ -576,7 +583,10 @@ async fn handle_qc_event<Types: NodeType>(
             proposal: qc_proposal,
             sender: leader,
         };
-        tracing::debug!("Sending QC proposal to the builder states{:?}", qc_msg);
+        tracing::debug!(
+            "Sending QC proposal to the builder states{:?}",
+            qc_msg.proposal.data.view_number
+        );
         qc_channel_sender
             .broadcast(MessageType::QCMessage(qc_msg))
             .await
@@ -595,7 +605,11 @@ async fn handle_decide_event<Types: NodeType>(
         leaf_chain,
         block_size,
     };
-    tracing::debug!("Sending Decide event to the builder states{:?}", decide_msg);
+    let latest_leaf_view_num = decide_msg.leaf_chain[0].leaf.get_view_number();
+    tracing::debug!(
+        "Sending Decide event to the builder states for view {:?}",
+        latest_leaf_view_num
+    );
     decide_channel_sender
         .broadcast(MessageType::DecideMessage(decide_msg))
         .await

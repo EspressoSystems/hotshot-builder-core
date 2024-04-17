@@ -696,7 +696,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match da {
                             Some(da) => {
                                 if let MessageType::DAProposalMessage(rda_msg) = da {
-                                    tracing::info!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_view_vid_leaf, rda_msg);
+                                    tracing::info!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_view_vid_leaf, rda_msg.proposal.data.view_number);
                                     self.process_da_proposal(rda_msg).await;
                                 }
                             }
@@ -709,7 +709,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match qc {
                             Some(qc) => {
                                 if let MessageType::QCMessage(rqc_msg) = qc {
-                                    tracing::info!("Received qc msg in builder {:?}:\n {:?} from index", self.built_from_view_vid_leaf, rqc_msg);
+                                    tracing::info!("Received qc msg in builder {:?}:\n {:?} from index", self.built_from_view_vid_leaf, rqc_msg.proposal.data.view_number);
                                     self.process_quorum_proposal(rqc_msg).await;
                                 }
                             }
