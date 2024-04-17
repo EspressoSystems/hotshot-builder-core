@@ -696,7 +696,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match da {
                             Some(da) => {
                                 if let MessageType::DAProposalMessage(rda_msg) = da {
-                                    tracing::debug!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_view_vid_leaf, rda_msg);
+                                    tracing::info!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_view_vid_leaf, rda_msg);
                                     self.process_da_proposal(rda_msg).await;
                                 }
                             }
@@ -709,7 +709,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match qc {
                             Some(qc) => {
                                 if let MessageType::QCMessage(rqc_msg) = qc {
-                                    tracing::debug!("Received qc msg in builder {:?}:\n {:?} from index", self.built_from_view_vid_leaf, rqc_msg);
+                                    tracing::info!("Received qc msg in builder {:?}:\n {:?} from index", self.built_from_view_vid_leaf, rqc_msg);
                                     self.process_quorum_proposal(rqc_msg).await;
                                 }
                             }
@@ -722,19 +722,19 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match decide {
                             Some(decide) => {
                                 if let MessageType::DecideMessage(rdecide_msg) = decide {
-                                    tracing::debug!("Received decide msg in builder {:?}:\n {:?} from index", self.built_from_view_vid_leaf, rdecide_msg);
+                                    tracing::info!("Received decide msg in builder {:?}:\n {:?} from index", self.built_from_view_vid_leaf, rdecide_msg);
                                     let decide_status = self.process_decide_event(rdecide_msg).await;
                                     match decide_status{
                                         Some(Status::ShouldExit) => {
-                                            tracing::debug!("Exiting the builder {:?}", self.built_from_view_vid_leaf);
+                                            tracing::info!("Exiting the builder {:?}", self.built_from_view_vid_leaf);
                                             break;
                                         }
                                         Some(Status::ShouldContinue) => {
-                                            tracing::debug!("continue the builder {:?}", self.built_from_view_vid_leaf);
+                                            tracing::info!("continue the builder {:?}", self.built_from_view_vid_leaf);
                                             continue;
                                         }
                                         None => {
-                                            tracing::debug!("None type: continue the builder {:?}", self.built_from_view_vid_leaf);
+                                            tracing::info!("None type: continue the builder {:?}", self.built_from_view_vid_leaf);
                                             continue;
                                         }
                                     }
