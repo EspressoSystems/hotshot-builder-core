@@ -612,7 +612,10 @@ async fn handle_tx_event<Types: NodeType>(
             tx: tx_message,
             tx_type: TransactionSource::HotShot,
         };
-        tracing::debug!("Sending transaction to the builder states{:?}", tx_msg);
+        tracing::debug!(
+            "Sending transaction to the builder states{:?}",
+            tx_msg.tx.commit()
+        );
         tx_channel_sender
             .broadcast(MessageType::TransactionMessage(tx_msg))
             .await

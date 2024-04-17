@@ -678,7 +678,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match tx {
                             Some(tx) => {
                                 if let MessageType::TransactionMessage(rtx_msg) = tx {
-                                    tracing::debug!("Received tx msg in builder {:?}:\n {:?}", self.built_from_view_vid_leaf, rtx_msg);
+                                    tracing::debug!("Received tx msg in builder {:?}:\n {:?}", self.built_from_view_vid_leaf, rtx_msg.tx.commit());
                                     if rtx_msg.tx_type == TransactionSource::HotShot {
                                         self.process_hotshot_transaction(rtx_msg.tx);
                                     } else {
