@@ -467,7 +467,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             *self.spawned_clones_views_list.write().await = split_list;
             //return Some(Status::ShouldContinue);
         } else if self.built_from_view_vid_leaf.0 <= latest_leaf_view_number {
-            tracing::info!("Built-in view is less than equal to the currently decided leaf so exiting the builder state");
+            tracing::info!("Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_view_vid_leaf.0.get_u64());
             // convert leaf commitments into buildercommiments
             // remove the handles from the global state
             // TODO: Does it make sense to remove it here or should we remove in api responses?
