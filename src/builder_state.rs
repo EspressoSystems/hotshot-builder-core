@@ -207,7 +207,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         if self.tx_hash_to_available_txns.contains_key(&tx_hash)
             || self.included_txns.contains(&tx_hash)
         {
-            tracing::info!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
+            tracing::debug!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
         } else {
             // get the current timestamp in nanoseconds; it used for ordering the transactions
             let tx_timestamp = SystemTime::now()
@@ -228,13 +228,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
                                            builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
     fn process_hotshot_transaction(&mut self, tx: TYPES::Transaction) {
+        tracing::info!("Processing hotshot transaction");
         let tx_hash = tx.commit();
         // HOTSHOT MEMPOOL TRANSACTION PROCESSING
         // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
         if self.tx_hash_to_available_txns.contains_key(&tx_hash)
             || self.included_txns.contains(&tx_hash)
         {
-            tracing::info!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
+            tracing::debug!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
             return;
         } else {
             // get the current timestamp in nanoseconds
