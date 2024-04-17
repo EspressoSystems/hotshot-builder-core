@@ -584,7 +584,7 @@ async fn handle_qc_event<Types: NodeType>(
             sender: leader,
         };
         tracing::debug!(
-            "Sending QC proposal to the builder states{:?}",
+            "Sending QC proposal to the builder states for view {:?}",
             qc_msg.proposal.data.view_number
         );
         qc_channel_sender
