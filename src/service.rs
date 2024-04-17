@@ -172,11 +172,6 @@ where
             .unwrap();
 
         let response_received = self.response_receiver.recv().await;
-        tracing::debug!(
-            "Response received for request{:?} {:?}",
-            req_msg,
-            response_received
-        );
         match response_received {
             Ok(response) => {
                 // to sign combine the block_hash i.e builder commitment, block size and offered fee
@@ -202,7 +197,10 @@ where
                     sender: self.builder_keys.0.clone(),
                     _phantom: Default::default(),
                 };
-                tracing::debug!("sending Initial block info: {:?}", initial_block_info);
+                tracing::debug!(
+                    "sending Initial block info response for {:?}",
+                    req_msg.requested_vid_commitment
+                );
                 Ok(vec![initial_block_info])
             }
             _ => Err(BuildError::Error {
@@ -216,7 +214,7 @@ where
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockData<Types>, BuildError> {
-        tracing::debug!("Received request for Claiming block {:?}", block_hash);
+        tracing::debug!("Received request for claiming block for {:?}", block_hash);
         // verify the signatue
         if !sender.validate(signature, block_hash.as_ref()) {
             return Err(BuildError::Error {
@@ -239,7 +237,7 @@ where
                 signature: signature_over_builder_commitment,
                 sender: self.builder_keys.0.clone(),
             };
-            tracing::debug!("Sending Claimed block data: {:?}", block_data);
+            tracing::debug!("Sending claimed block data for {:?}", block_hash);
             Ok(block_data)
         } else {
             Err(BuildError::Error {
@@ -255,7 +253,7 @@ where
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
         tracing::debug!(
-            "Received request for Claiming block header input {:?}",
+            "Received request for claiming block header input for {:?}",
             block_hash
         );
         // verify the signatue
@@ -279,7 +277,10 @@ where
                 sender: self.builder_keys.0.clone(),
                 _phantom: Default::default(),
             };
-            tracing::debug!("Sending Claimed block header input: {:?}", response);
+            tracing::debug!(
+                "Sending claimed block header input response for {:?}",
+                block_hash
+            );
             Ok(response)
         } else {
             Err(BuildError::Error {
