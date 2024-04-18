@@ -22,7 +22,7 @@ use hotshot_types::{
         signature_key::{BuilderSignatureKey, SignatureKey},
     },
     utils::BuilderCommitment,
-    vid::VidCommitment,
+    vid::{VidCommitment, VidPrecomputeData},
 };
 
 use crate::builder_state::{
@@ -55,7 +55,7 @@ use tide_disco::method::ReadState;
 pub struct GlobalState<Types: NodeType> {
     // identity keys for the builder
     // May be ideal place as GlobalState interacts with hotshot apis
-    // and then can sign on responsers as desired
+    // and then can sign on responders as desired
     pub builder_keys: (
         Types::BuilderSignatureKey, // pub key
         <<Types as NodeType>::BuilderSignatureKey as BuilderSignatureKey>::BuilderPrivateKey, // private key
@@ -66,12 +66,13 @@ pub struct GlobalState<Types: NodeType> {
         (
             Types::BlockPayload,
             <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
-            Arc<RwLock<WaitAndKeep<VidCommitment>>>,
+            Arc<RwLock<WaitAndKeep<(VidCommitment, VidPrecomputeData)>>>,
+            u64, // Fees
         ),
     >,
 
     // registered builer states
-    pub spawned_builder_states: HashSet<VidCommitment>,
+    pub spawned_builder_states: HashSet<BuilderCommitment>,
 
     // sending a request from the hotshot to the builder states
     pub request_sender: BroadcastSender<MessageType<Types>>,
@@ -97,14 +98,14 @@ impl<Types: NodeType> GlobalState<Types> {
         response_receiver: UnboundedReceiver<ResponseMessage>,
         tx_sender: BroadcastSender<MessageType<Types>>,
         instance_state: Types::InstanceState,
-        bootstrapped_builder_state_id: VidCommitment,
+        bootstrapped_builder_state_id: BuilderCommitment,
     ) -> Self {
-        let mut spwaned_builder_states = HashSet::new();
-        spwaned_builder_states.insert(bootstrapped_builder_state_id);
+        let mut spawned_builder_states = HashSet::new();
+        spawned_builder_states.insert(bootstrapped_builder_state_id);
         GlobalState {
             builder_keys,
             block_hash_to_block: Default::default(),
-            spawned_builder_states: spwaned_builder_states,
+            spawned_builder_states: spawned_builder_states,
             request_sender,
             response_receiver,
             tx_sender,
@@ -115,19 +116,22 @@ impl<Types: NodeType> GlobalState<Types> {
     // remove the builder state handles based on the decide event
     pub fn remove_handles(
         &mut self,
-        vidcommitment: VidCommitment,
+        builder_commitment: &BuilderCommitment,
         block_hashes: Vec<BuilderCommitment>,
     ) {
-        tracing::info!("Removing handles for vid commitment {:?}", vidcommitment);
-        // remove the vid commitment from the spawned builder states
-        self.spawned_builder_states.remove(&vidcommitment);
+        tracing::info!(
+            "Removing handles for builder commitment {:?}",
+            builder_commitment
+        );
+        // remove the builder commitment from the spawned builder states
+        self.spawned_builder_states.remove(builder_commitment);
 
         for block_hash in block_hashes {
             self.block_hash_to_block.remove(&block_hash);
         }
     }
     // private mempool submit txn
-    // Currenlty, we don't differentiate between the transactions from the hotshot and the private mempool
+    // Currently, we don't differentiate between the transactions from the hotshot and the private mempool
     pub async fn submit_client_txn(
         &self,
         txn: <Types as NodeType>::Transaction,
@@ -159,11 +163,11 @@ where
 {
     async fn get_available_blocks(
         &self,
-        for_parent: &VidCommitment,
+        for_parent: &BuilderCommitment,
         sender: Types::SignatureKey,
         signature: &<Types::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<Vec<AvailableBlockInfo<Types>>, BuildError> {
-        // verify the signatue
+        // verify the signature
         if !sender.validate(signature, for_parent.as_ref()) {
             return Err(BuildError::Error {
                 message: "Signature validation failed in get_available_blocks".to_string(),
@@ -171,22 +175,21 @@ where
         }
 
         let mut bootstrapped_state_build_block = false;
-        // check in the local spawned builder states, if it doesn't exist, and then send the error
+        // check in the local spawned builder states, if it doesn't exist, and then let bootstrapped build a block for it
         if !self.spawned_builder_states.contains(for_parent) {
             bootstrapped_state_build_block = true;
         }
-        if !bootstrapped_state_build_block {
-            tracing::debug!("Builder state already exists for {:?}", for_parent);
-        }
 
         let req_msg = RequestMessage {
-            requested_vid_commitment: *for_parent,
+            requested_builder_commitment: (*for_parent).clone(),
             bootstrap_build_block: bootstrapped_state_build_block,
         };
+
         tracing::debug!(
             "Requesting available blocks for {:?}",
-            req_msg.requested_vid_commitment
+            req_msg.requested_builder_commitment
         );
+
         self.request_sender
             .broadcast(MessageType::RequestMessage(req_msg.clone()))
             .await
@@ -195,17 +198,13 @@ where
         let response_received = self.response_receiver.recv().await;
         match response_received {
             Ok(response) => {
-                // to sign combine the block_hash i.e builder commitment, block size and offered fee
-                let mut combined_bytes: Vec<u8> = Vec::new();
-                // TODO: see why signing is not working with 48 bytes, however it is working with 32 bytes
-                combined_bytes.extend_from_slice(response.block_size.to_be_bytes().as_ref());
-                combined_bytes.extend_from_slice(response.offered_fee.to_be_bytes().as_ref());
-                combined_bytes.extend_from_slice(response.builder_hash.as_ref());
-
+                // sign over the block info
                 let signature_over_block_info =
-                    <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
+                    <Types as NodeType>::BuilderSignatureKey::sign_block_info(
                         &self.builder_keys.1,
-                        combined_bytes.as_ref(),
+                        response.block_size,
+                        response.offered_fee,
+                        &response.builder_hash,
                     )
                     .expect("Available block info signing failed");
 
@@ -220,7 +219,7 @@ where
                 };
                 tracing::info!(
                     "sending Initial block info response for {:?}",
-                    req_msg.requested_vid_commitment
+                    req_msg.requested_builder_commitment
                 );
                 Ok(vec![initial_block_info])
             }
@@ -236,7 +235,7 @@ where
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockData<Types>, BuildError> {
         tracing::debug!("Received request for claiming block for {:?}", block_hash);
-        // verify the signatue
+        // verify the signature
         if !sender.validate(signature, block_hash.as_ref()) {
             return Err(BuildError::Error {
                 message: "Signature validation failed in claim block".to_string(),
@@ -277,7 +276,7 @@ where
             "Received request for claiming block header input for {:?}",
             block_hash
         );
-        // verify the signatue
+        // verify the signature
         if !sender.validate(signature, block_hash.as_ref()) {
             return Err(BuildError::Error {
                 message: "Signature validation failed in claim block header input".to_string(),
@@ -285,18 +284,28 @@ where
         }
         if let Some(block) = self.block_hash_to_block.get(block_hash) {
             tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
-            let vid_commitment = block.2.write().await.get().await?;
+            let (vid_commitment, vid_precompute_data) = block.2.write().await.get().await?;
             let signature_over_vid_commitment =
                 <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
                     &self.builder_keys.1,
                     vid_commitment.as_ref(),
                 )
-                .expect("Claim block header input signing failed");
+                .expect("Claim block header input message signing failed");
+
+            let signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
+                &self.builder_keys.1,
+                block.3,
+                block_hash,
+                &vid_commitment,
+            )
+            .expect("Claim block header input fee signing failed");
+
             let response = AvailableBlockHeaderInput::<Types> {
                 vid_commitment,
-                signature: signature_over_vid_commitment,
+                vid_precompute_data,
+                fee_signature: signature_over_fee_info,
+                message_signature: signature_over_vid_commitment,
                 sender: self.builder_keys.0.clone(),
-                _phantom: Default::default(),
             };
             tracing::info!(
                 "Sending claimed block header input response for {:?}",
@@ -371,7 +380,7 @@ pub async fn run_non_permissioned_standalone_builder_service<
     // instance state
     instance_state: Types::InstanceState,
 ) {
-    // handle the starup event at the start
+    // handle the startup event at the start
     let membership = if let Some(Ok(event)) = subscribed_events.next().await {
         match event.event {
             BuilderEventType::StartupInfo {
@@ -422,7 +431,7 @@ pub async fn run_non_permissioned_standalone_builder_service<
                     BuilderEventType::HotshotError { error } => {
                         tracing::error!("Error event in HotShot: {:?}", error);
                     }
-                    // starup event
+                    // startup event
                     BuilderEventType::StartupInfo { .. } => {
                         tracing::warn!("Startup info event received again");
                     }
@@ -526,7 +535,7 @@ pub async fn run_permissioned_standalone_builder_service<
                     EventType::DAProposal { proposal, sender } => {
                         // get the leader for current view
                         let leader = hotshot_handle.get_leader(proposal.data.view_number).await;
-                        // get the committe staked node count
+                        // get the committee staked node count
                         let total_nodes = hotshot_handle.total_nodes();
 
                         handle_da_event(&da_sender, proposal, sender, leader, total_nodes).await;
@@ -600,7 +609,7 @@ async fn handle_qc_event<Types: NodeType>(
 
     let mut leaf = Leaf::from_quorum_proposal(&qc_proposal.data);
 
-    // Hack for genesis mis-handling in HotShot.
+    // Hack for genesis mishandling in HotShot.
     // Once the is_genesis field is removed, you can delete this block.
     if qc_proposal.data.justify_qc.is_genesis {
         leaf.set_parent_commitment(Leaf::genesis(instance_state).commit());
