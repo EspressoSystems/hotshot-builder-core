@@ -39,7 +39,7 @@ mod tests {
     };
 
     use crate::builder_state::{
-        BuiltFromInfo, DAProposalMessage, DecideMessage, QCMessage, RequestMessage,
+        BuiltFromProposedBlock, DAProposalMessage, DecideMessage, QCMessage, RequestMessage,
         TransactionMessage, TransactionSource,
     };
     use crate::service::GlobalState;
@@ -329,7 +329,7 @@ mod tests {
         let arc_rwlock_global_state = Arc::new(RwLock::new(global_state));
         let arc_rwlock_global_state_clone = arc_rwlock_global_state.clone();
         let handle = async_spawn(async move {
-            let built_from_info = BuiltFromInfo {
+            let built_from_info = BuiltFromProposedBlock {
                 view_number: ViewNumber::new(0),
                 vid_commitment: vid_commitment(&vec![], 8),
                 leaf_commit: Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage(),
