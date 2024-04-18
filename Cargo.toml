@@ -15,7 +15,7 @@ async-trait = "0.1"
 clap = { version = "4.4", features = ["derive", "env"] }
 committable = "0.2"
 futures = "0.3"
-hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.37" }
+hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.38" }
 hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.37" }
 hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.6" }
 hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.37" }
