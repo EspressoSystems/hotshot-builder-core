@@ -68,6 +68,7 @@ pub struct QCMessage<TYPES: NodeType> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RequestMessage {
     pub requested_vid_commitment: VidCommitment,
+    pub bootstrap_build_block: bool,
 }
 /// Response Message to be put on the response channel
 #[derive(Debug)]
@@ -257,7 +258,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
                                            builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
     async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>) {
-        tracing::debug!("Builder Received DA message {:?}", da_msg);
+        tracing::debug!(
+            "Builder Received DA message for view {:?}",
+            da_msg.proposal.data.view_number
+        );
 
         // Two cases to handle:
         // Case 1: Bootstrapping phase
@@ -295,11 +299,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
         // generate the vid commitment; num nodes are received through hotshot api in service.rs and passed along with message onto channel
         let total_nodes = da_msg.total_nodes;
-        tracing::debug!(
-            "Encoded txns in da proposal: {:?} and total nodes: {:?}",
-            encoded_txns,
-            total_nodes
-        );
 
         // set the total nodes required for the VID computation // later required in the build_block
         self.total_nodes = NonZeroUsize::new(total_nodes).unwrap();
@@ -344,6 +343,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .write()
                         .await
                         .insert(qc_proposal_data.view_number);
+
                     self.clone()
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender)
                         .await;
@@ -365,7 +365,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                            builder_vid=%self.built_from_view_vid_leaf.1.clone(),
                                            builder_leaf=%self.built_from_view_vid_leaf.2.clone()))]
     async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>) {
-        tracing::debug!("Builder Received QC Message{:?}", qc_msg);
+        tracing::debug!(
+            "Builder Received QC Message for view {:?}",
+            qc_msg.proposal.data.view_number
+        );
         // Two cases to handle:
         // Case 1: Bootstrapping phase
         // Case 2: No intended builder state exist
@@ -382,8 +385,9 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         {
             tracing::info!("QC Proposal handled by bootstrapped builder state");
         } else if qc_msg.proposal.data.justify_qc.view_number != self.built_from_view_vid_leaf.0
-            || qc_msg.proposal.data.justify_qc.get_data().leaf_commit
+            || (qc_msg.proposal.data.justify_qc.get_data().leaf_commit
                 != self.built_from_view_vid_leaf.2
+                && !qc_msg.proposal.data.justify_qc.is_genesis)
         {
             tracing::info!("Either View number {:?} or leaf commit{:?} from justify qc does not match the built-in info {:?}, so returning",
             qc_msg.proposal.data.justify_qc.view_number, qc_msg.proposal.data.justify_qc.get_data().leaf_commit, self.built_from_view_vid_leaf);
@@ -393,6 +397,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let sender = qc_msg.sender;
         let view_number = qc_proposal_data.view_number;
         let payload_vid_commitment = qc_proposal_data.block_header.payload_commitment();
+
         tracing::debug!(
             "Extracted payload commitment from the quorum proposal: {:?}",
             payload_vid_commitment
@@ -551,6 +556,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 }
             });
 
+        // register the spawned builder state to spawned_builder_states in the global state
+        self.global_state
+            .write_arc()
+            .await
+            .spawned_builder_states
+            .insert(self.built_from_view_vid_leaf.1);
+
         self.event_loop();
     }
 
@@ -568,7 +580,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             }),
         ) {
             let builder_hash = payload.builder_commitment(&metadata);
-
+            // count the number of txns
+            let txn_count = payload.num_transactions(&metadata);
+            tracing::info!(
+                "Builder {:?} Building block with {:?} txns",
+                self.built_from_view_vid_leaf,
+                txn_count
+            );
             // add the local builder commitment list
             self.builder_commitments.push(builder_hash.clone());
 
@@ -605,7 +623,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
     async fn process_block_request(&mut self, req: RequestMessage) {
         let requested_vid_commitment = req.requested_vid_commitment;
-        if requested_vid_commitment == self.built_from_view_vid_leaf.1 {
+        if requested_vid_commitment == self.built_from_view_vid_leaf.1
+            || (self.built_from_view_vid_leaf.0.get_u64() == self.bootstrap_view_number.get_u64()
+                && req.bootstrap_build_block)
+        {
+            tracing::debug!(
+                "REQUEST HANDLED BY BUILDER WITH VIEW {:?}",
+                self.built_from_view_vid_leaf.0
+            );
             let response = self.build_block(requested_vid_commitment).await;
 
             match response {

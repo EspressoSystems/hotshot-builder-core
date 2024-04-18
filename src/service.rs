@@ -43,7 +43,7 @@ use hotshot_events_service::{
     events_source::{BuilderEvent, BuilderEventType},
 };
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -69,6 +69,10 @@ pub struct GlobalState<Types: NodeType> {
             Arc<RwLock<WaitAndKeep<VidCommitment>>>,
         ),
     >,
+
+    // registered builer states
+    pub spawned_builder_states: HashSet<VidCommitment>,
+
     // sending a request from the hotshot to the builder states
     pub request_sender: BroadcastSender<MessageType<Types>>,
 
@@ -93,10 +97,14 @@ impl<Types: NodeType> GlobalState<Types> {
         response_receiver: UnboundedReceiver<ResponseMessage>,
         tx_sender: BroadcastSender<MessageType<Types>>,
         instance_state: Types::InstanceState,
+        bootstrapped_builder_state_id: VidCommitment,
     ) -> Self {
+        let mut spwaned_builder_states = HashSet::new();
+        spwaned_builder_states.insert(bootstrapped_builder_state_id);
         GlobalState {
             builder_keys,
             block_hash_to_block: Default::default(),
+            spawned_builder_states: spwaned_builder_states,
             request_sender,
             response_receiver,
             tx_sender,
@@ -111,6 +119,9 @@ impl<Types: NodeType> GlobalState<Types> {
         block_hashes: Vec<BuilderCommitment>,
     ) {
         tracing::info!("Removing handles for vid commitment {:?}", vidcommitment);
+        // remove the vid commitment from the spawned builder states
+        self.spawned_builder_states.remove(&vidcommitment);
+
         for block_hash in block_hashes {
             self.block_hash_to_block.remove(&block_hash);
         }
@@ -159,8 +170,18 @@ where
             });
         }
 
+        let mut bootstrapped_state_build_block = false;
+        // check in the local spawned builder states, if it doesn't exist, and then send the error
+        if !self.spawned_builder_states.contains(for_parent) {
+            bootstrapped_state_build_block = true;
+        }
+        if !bootstrapped_state_build_block {
+            tracing::debug!("Builder state already exists for {:?}", for_parent);
+        }
+
         let req_msg = RequestMessage {
             requested_vid_commitment: *for_parent,
+            bootstrap_build_block: bootstrapped_state_build_block,
         };
         tracing::debug!(
             "Requesting available blocks for {:?}",
