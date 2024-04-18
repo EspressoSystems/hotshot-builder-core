@@ -218,7 +218,7 @@ where
                     sender: self.builder_keys.0.clone(),
                     _phantom: Default::default(),
                 };
-                tracing::debug!(
+                tracing::info!(
                     "sending Initial block info response for {:?}",
                     req_msg.requested_vid_commitment
                 );
@@ -258,7 +258,7 @@ where
                 signature: signature_over_builder_commitment,
                 sender: self.builder_keys.0.clone(),
             };
-            tracing::debug!("Sending claimed block data for {:?}", block_hash);
+            tracing::info!("Sending claimed block data for {:?}", block_hash);
             Ok(block_data)
         } else {
             Err(BuildError::Error {
@@ -298,7 +298,7 @@ where
                 sender: self.builder_keys.0.clone(),
                 _phantom: Default::default(),
             };
-            tracing::debug!(
+            tracing::info!(
                 "Sending claimed block header input response for {:?}",
                 block_hash
             );
