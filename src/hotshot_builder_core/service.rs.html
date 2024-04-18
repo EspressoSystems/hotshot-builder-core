@@ -615,6 +615,20 @@
 <a href="#613" id="613">613</a>
 <a href="#614" id="614">614</a>
 <a href="#615" id="615">615</a>
+<a href="#616" id="616">616</a>
+<a href="#617" id="617">617</a>
+<a href="#618" id="618">618</a>
+<a href="#619" id="619">619</a>
+<a href="#620" id="620">620</a>
+<a href="#621" id="621">621</a>
+<a href="#622" id="622">622</a>
+<a href="#623" id="623">623</a>
+<a href="#624" id="624">624</a>
+<a href="#625" id="625">625</a>
+<a href="#626" id="626">626</a>
+<a href="#627" id="627">627</a>
+<a href="#628" id="628">628</a>
+<a href="#629" id="629">629</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{
         election::static_committee::{GeneralStaticCommittee, StaticElectionConfig},
@@ -639,7 +653,7 @@
         signature_key::{BuilderSignatureKey, SignatureKey},
     },
     utils::BuilderCommitment,
-    vid::VidCommitment,
+    vid::{VidCommitment, VidPrecomputeData},
 };
 
 <span class="kw">use </span><span class="kw">crate</span>::builder_state::{
@@ -672,7 +686,7 @@
 </span><span class="kw">pub struct </span>GlobalState&lt;Types: NodeType&gt; {
     <span class="comment">// identity keys for the builder
     // May be ideal place as GlobalState interacts with hotshot apis
-    // and then can sign on responsers as desired
+    // and then can sign on responders as desired
     </span><span class="kw">pub </span>builder_keys: (
         Types::BuilderSignatureKey, <span class="comment">// pub key
         </span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey <span class="kw">as </span>BuilderSignatureKey&gt;::BuilderPrivateKey, <span class="comment">// private key
@@ -683,8 +697,9 @@
         (
             Types::BlockPayload,
             &lt;&lt;Types <span class="kw">as </span>NodeType&gt;::BlockPayload <span class="kw">as </span>BlockPayload&gt;::Metadata,
-            Arc&lt;RwLock&lt;WaitAndKeep&lt;VidCommitment&gt;&gt;&gt;,
-        ),
+            Arc&lt;RwLock&lt;WaitAndKeep&lt;(VidCommitment, VidPrecomputeData)&gt;&gt;&gt;,
+            u64, <span class="comment">// Fees
+        </span>),
     &gt;,
     <span class="comment">// sending a request from the hotshot to the builder states
     </span><span class="kw">pub </span>request_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
@@ -733,7 +748,7 @@
         }
     }
     <span class="comment">// private mempool submit txn
-    // Currenlty, we don't differentiate between the transactions from the hotshot and the private mempool
+    // Currently, we don't differentiate between the transactions from the hotshot and the private mempool
     </span><span class="kw">pub async fn </span>submit_client_txn(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         txn: &lt;Types <span class="kw">as </span>NodeType&gt;::Transaction,
@@ -765,11 +780,11 @@ Handling Builder API responses
 {
     <span class="kw">async fn </span>get_available_blocks(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        for_parent: <span class="kw-2">&amp;</span>VidCommitment,
+        for_parent: <span class="kw-2">&amp;</span>BuilderCommitment,
         sender: Types::SignatureKey,
         signature: <span class="kw-2">&amp;</span>&lt;Types::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;AvailableBlockInfo&lt;Types&gt;&gt;, BuildError&gt; {
-        <span class="comment">// verify the signatue
+        <span class="comment">// verify the signature
         </span><span class="kw">if </span>!sender.validate(signature, for_parent.as_ref()) {
             <span class="kw">return </span><span class="prelude-val">Err</span>(BuildError::Error {
                 message: <span class="string">"Signature validation failed"</span>.to_string(),
@@ -777,7 +792,7 @@ Handling Builder API responses
         }
 
         <span class="kw">let </span>req_msg = RequestMessage {
-            requested_vid_commitment: <span class="kw-2">*</span>for_parent,
+            requested_builder_commitment: for_parent.clone(),
         };
         <span class="self">self</span>.request_sender
             .broadcast(MessageType::RequestMessage(req_msg.clone()))
@@ -829,7 +844,7 @@ Handling Builder API responses
         sender: Types::SignatureKey,
         signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;AvailableBlockData&lt;Types&gt;, BuildError&gt; {
-        <span class="comment">// verify the signatue
+        <span class="comment">// verify the signature
         </span><span class="kw">if </span>!sender.validate(signature, block_hash.as_ref()) {
             <span class="kw">return </span><span class="prelude-val">Err</span>(BuildError::Error {
                 message: <span class="string">"Signature validation failed"</span>.to_string(),
@@ -865,7 +880,7 @@ Handling Builder API responses
         sender: Types::SignatureKey,
         signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;AvailableBlockHeaderInput&lt;Types&gt;, BuildError&gt; {
-        <span class="comment">// verify the signatue
+        <span class="comment">// verify the signature
         </span><span class="kw">if </span>!sender.validate(signature, block_hash.as_ref()) {
             <span class="kw">return </span><span class="prelude-val">Err</span>(BuildError::Error {
                 message: <span class="string">"Signature validation failed"</span>.to_string(),
@@ -873,20 +888,33 @@ Handling Builder API responses
         }
         <span class="kw">if let </span><span class="prelude-val">Some</span>(block) = <span class="self">self</span>.block_hash_to_block.get(block_hash) {
             <span class="macro">tracing::debug!</span>(<span class="string">"Waiting for vid commitment for block {:?}"</span>, block_hash);
-            <span class="kw">let </span>vid_commitment = block.<span class="number">2</span>.write().<span class="kw">await</span>.get().<span class="kw">await</span><span class="question-mark">?</span>;
+            <span class="kw">let </span>(vid_commitment, vid_precompute_data) = block.<span class="number">2</span>.write().<span class="kw">await</span>.get().<span class="kw">await</span><span class="question-mark">?</span>;
             <span class="kw">let </span>signature_over_vid_commitment =
                 &lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey::sign_builder_message(
                     <span class="kw-2">&amp;</span><span class="self">self</span>.builder_keys.<span class="number">1</span>,
                     vid_commitment.as_ref(),
                 )
-                .expect(<span class="string">"Claim block header input signing failed"</span>);
-            <span class="kw">let </span>reponse = AvailableBlockHeaderInput::&lt;Types&gt; {
-                vid_commitment,
-                signature: signature_over_vid_commitment,
-                sender: <span class="self">self</span>.builder_keys.<span class="number">0</span>.clone(),
-                _phantom: Default::default(),
+                .expect(<span class="string">"Claim block header input message signing failed"</span>);
+            <span class="kw">let </span>combined_response_bytes = {
+                <span class="kw">let </span><span class="kw-2">mut </span>combined_response_bytes: Vec&lt;u8&gt; = Vec::new();
+                combined_response_bytes.extend_from_slice(block.<span class="number">3</span>.to_be_bytes().as_ref());
+                combined_response_bytes.extend_from_slice(block_hash.as_ref());
+                combined_response_bytes.extend_from_slice(vid_commitment.as_ref());
+                combined_response_bytes
             };
-            <span class="prelude-val">Ok</span>(reponse)
+            <span class="kw">let </span>fee_signature = &lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey::sign_builder_message(
+                <span class="kw-2">&amp;</span><span class="self">self</span>.builder_keys.<span class="number">1</span>,
+                combined_response_bytes.as_ref(),
+            )
+            .expect(<span class="string">"Claim block header input fee signing failed"</span>);
+            <span class="kw">let </span>response = AvailableBlockHeaderInput::&lt;Types&gt; {
+                vid_commitment,
+                vid_precompute_data,
+                fee_signature,
+                message_signature: signature_over_vid_commitment,
+                sender: <span class="self">self</span>.builder_keys.<span class="number">0</span>.clone(),
+            };
+            <span class="prelude-val">Ok</span>(response)
         } <span class="kw">else </span>{
             <span class="prelude-val">Err</span>(BuildError::Error {
                 message: <span class="string">"Block not found"</span>.to_string(),
@@ -955,7 +983,7 @@ Running Non-Permissioned Builder Service
     <span class="comment">// instance state
     </span>instance_state: Types::InstanceState,
 ) {
-    <span class="comment">// handle the starup event at the start
+    <span class="comment">// handle the startup event at the start
     </span><span class="kw">let </span>membership = <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(event)) = subscribed_events.next().<span class="kw">await </span>{
         <span class="kw">match </span>event.event {
             BuilderEventType::StartupInfo {
@@ -1006,7 +1034,7 @@ Running Non-Permissioned Builder Service
                     BuilderEventType::HotshotError { error } =&gt; {
                         <span class="macro">tracing::error!</span>(<span class="string">"Error event in HotShot: {:?}"</span>, error);
                     }
-                    <span class="comment">// starup event
+                    <span class="comment">// startup event
                     </span>BuilderEventType::StartupInfo { .. } =&gt; {
                         <span class="macro">tracing::warn!</span>(<span class="string">"Startup info event received again"</span>);
                     }
@@ -1110,7 +1138,7 @@ Running Permissioned Builder Service
                     </span>EventType::DAProposal { proposal, sender } =&gt; {
                         <span class="comment">// get the leader for current view
                         </span><span class="kw">let </span>leader = hotshot_handle.get_leader(proposal.data.view_number).<span class="kw">await</span>;
-                        <span class="comment">// get the committe staked node count
+                        <span class="comment">// get the committee staked node count
                         </span><span class="kw">let </span>total_nodes = hotshot_handle.total_nodes();
 
                         handle_da_event(<span class="kw-2">&amp;</span>da_sender, proposal, sender, leader, total_nodes).<span class="kw">await</span>;

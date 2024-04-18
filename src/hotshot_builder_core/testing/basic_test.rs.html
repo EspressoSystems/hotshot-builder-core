@@ -391,6 +391,8 @@
 <a href="#389" id="389">389</a>
 <a href="#390" id="390">390</a>
 <a href="#391" id="391">391</a>
+<a href="#392" id="392">392</a>
+<a href="#393" id="393">393</a>
 </pre></div><pre class="rust"><code><span class="kw">pub use </span>hotshot::traits::election::static_committee::{
     GeneralStaticCommittee, StaticElectionConfig,
 };
@@ -423,6 +425,7 @@
         signature_key::BuilderKey,
         simple_vote::QuorumData,
         traits::block_contents::{vid_commitment, BlockHeader},
+        utils::BuilderCommitment,
     };
 
     <span class="kw">use </span>hotshot_example_types::{
@@ -431,8 +434,8 @@
     };
 
     <span class="kw">use </span><span class="kw">crate</span>::builder_state::{
-        DAProposalMessage, DecideMessage, QCMessage, RequestMessage, TransactionMessage,
-        TransactionSource,
+        BuiltFromProposedBlock, DAProposalMessage, DecideMessage, QCMessage, RequestMessage,
+        TransactionMessage, TransactionSource,
     };
     <span class="kw">use </span><span class="kw">crate</span>::service::GlobalState;
     <span class="kw">use </span>async_lock::RwLock;
@@ -499,8 +502,7 @@
             broadcast::&lt;MessageType&lt;TestTypes&gt;&gt;(num_test_messages * multiplication_factor);
         <span class="kw">let </span>(res_sender, res_receiver) = unbounded();
 
-        <span class="comment">//let global_state_clone = global_state.clone();
-        // generate the keys for the buidler
+        <span class="comment">// generate the keys for the buidler
         </span><span class="kw">let </span>seed = [<span class="number">201_u8</span>; <span class="number">32</span>];
         <span class="kw">let </span>(builder_pub_key, builder_private_key) =
             BLSPubKey::generated_from_seed_indexed(seed, <span class="number">2011_u64</span>);
@@ -560,35 +562,31 @@
                 total_nodes: TEST_NUM_NODES_IN_VID_COMPUTATION,
             };
 
-            <span class="comment">// calculate the vid commitment over the encoded_transactions
-            </span><span class="macro">tracing::debug!</span>(
-                <span class="string">"Encoded transactions: {:?}\n Num nodes:{}"</span>,
-                encoded_transactions,
-                TEST_NUM_NODES_IN_VID_COMPUTATION
-            );
-            <span class="kw">let </span>encoded_txns_vid_commitment =
-                vid_commitment(<span class="kw-2">&amp;</span>encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION);
-            <span class="macro">tracing::debug!</span>(
-                <span class="string">"Encoded transactions vid commitment: {:?}"</span>,
-                encoded_txns_vid_commitment
-            );
             <span class="comment">// Prepare the QC proposal message
             // calculate the vid commitment over the encoded_transactions
-            </span><span class="macro">tracing::debug!</span>(
+
+            </span><span class="kw">let </span>(block_payload, metadata) =
+                &lt;TestBlockPayload <span class="kw">as </span>BlockPayload&gt;::from_transactions(<span class="macro">vec!</span>[tx.clone()]).unwrap();
+
+            <span class="macro">tracing::debug!</span>(
                 <span class="string">"Encoded transactions: {:?} Num nodes:{}"</span>,
                 encoded_transactions,
                 TEST_NUM_NODES_IN_VID_COMPUTATION
             );
-            <span class="kw">let </span>encoded_txns_vid_commitment =
+            <span class="kw">let </span>block_payload_commitment =
                 vid_commitment(<span class="kw-2">&amp;</span>encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION);
+
             <span class="macro">tracing::debug!</span>(
-                <span class="string">"Encoded transactions vid commitment: {:?}"</span>,
-                encoded_txns_vid_commitment
+                <span class="string">"Block Payload vid commitment: {:?}"</span>,
+                block_payload_commitment
             );
+
+            <span class="kw">let </span>builder_commitment = block_payload.builder_commitment(<span class="kw-2">&amp;</span>metadata);
 
             <span class="kw">let </span>block_header = TestBlockHeader {
                 block_number: i <span class="kw">as </span>u64,
-                payload_commitment: encoded_txns_vid_commitment,
+                payload_commitment: block_payload_commitment,
+                builder_commitment,
                 timestamp: i <span class="kw">as </span>u64,
             };
 
@@ -641,14 +639,18 @@
                 proposal_certificate: <span class="prelude-val">None</span>,
             };
 
-            <span class="kw">let </span>payload_commitment =
+            <span class="kw">let </span>payload_vid_commitment =
                 &lt;TestBlockHeader <span class="kw">as </span>BlockHeader&lt;TestTypes&gt;&gt;::payload_commitment(
+                    <span class="kw-2">&amp;</span>qc_proposal.block_header,
+                );
+            <span class="kw">let </span>payload_builder_commitment =
+                &lt;TestBlockHeader <span class="kw">as </span>BlockHeader&lt;TestTypes&gt;&gt;::builder_commitment(
                     <span class="kw-2">&amp;</span>qc_proposal.block_header,
                 );
 
             <span class="kw">let </span>qc_signature = &lt;TestTypes <span class="kw">as </span>hotshot_types::traits::node_implementation::NodeType&gt;::SignatureKey::sign(
                         <span class="kw-2">&amp;</span>private_key,
-                        payload_commitment.as_ref(),
+                        payload_vid_commitment.as_ref(),
                         ).expect(<span class="string">"Failed to sign payload commitment while preparing QC proposal"</span>);
 
             <span class="kw">let </span>sqc_msg = QCMessage::&lt;TestTypes&gt; {
@@ -706,9 +708,9 @@
                 </span>.unwrap();
 
             <span class="comment">// send decide and request messages later
-            </span><span class="kw">let </span>requested_vid_commitment = payload_commitment;
+            </span><span class="kw">let </span>requested_builder_commitment = payload_builder_commitment;
             <span class="kw">let </span>request_message = MessageType::&lt;TestTypes&gt;::RequestMessage(RequestMessage {
-                requested_vid_commitment,
+                requested_builder_commitment,
             });
 
             stx_msgs.push(stx_msg);
@@ -722,12 +724,14 @@
         </span><span class="kw">let </span>arc_rwlock_global_state = Arc::new(RwLock::new(global_state));
         <span class="kw">let </span>arc_rwlock_global_state_clone = arc_rwlock_global_state.clone();
         <span class="kw">let </span>handle = async_spawn(<span class="kw">async move </span>{
+            <span class="kw">let </span>built_from_info = BuiltFromProposedBlock {
+                view_number: ViewNumber::new(<span class="number">0</span>),
+                vid_commitment: vid_commitment(<span class="kw-2">&amp;</span><span class="macro">vec!</span>[], <span class="number">8</span>),
+                leaf_commit: Commitment::&lt;Leaf&lt;TestTypes&gt;&gt;::default_commitment_no_preimage(),
+                builder_commitment: BuilderCommitment::from_bytes([]),
+            };
             <span class="kw">let </span>builder_state = BuilderState::&lt;TestTypes&gt;::new(
-                (
-                    ViewNumber::new(<span class="number">0</span>),
-                    vid_commitment(<span class="kw-2">&amp;</span><span class="macro">vec!</span>[], <span class="number">8</span>),
-                    Commitment::&lt;Leaf&lt;TestTypes&gt;&gt;::default_commitment_no_preimage(),
-                ),
+                built_from_info,
                 tx_receiver,
                 decide_receiver,
                 da_receiver,

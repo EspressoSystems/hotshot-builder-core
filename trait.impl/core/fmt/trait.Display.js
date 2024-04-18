@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"hotshot_builder_core":[["impl&lt;TYPES: <a class=\"trait\" href=\"hotshot_builder_core/testing/basic_test/trait.NodeType.html\" title=\"trait hotshot_builder_core::testing::basic_test::NodeType\">NodeType</a>&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.77.2/core/fmt/trait.Display.html\" title=\"trait core::fmt::Display\">Display</a> for <a class=\"struct\" href=\"hotshot_builder_core/builder_state/struct.BuiltFromProposedBlock.html\" title=\"struct hotshot_builder_core::builder_state::BuiltFromProposedBlock\">BuiltFromProposedBlock</a>&lt;TYPES&gt;"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
