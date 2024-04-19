@@ -68,6 +68,7 @@ pub struct QCMessage<TYPES: NodeType> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RequestMessage {
     pub requested_builder_commitment: BuilderCommitment,
+    pub bootstrap_build_block: bool,
 }
 /// Response Message to be put on the response channel
 #[derive(Debug)]
@@ -106,8 +107,8 @@ impl<TYPES: NodeType> std::fmt::Display for BuiltFromProposedBlock<TYPES> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "View Number: {:?}, VID Commitment: {:?}, Leaf Commitment: {:?}, Builder Commitment: {:?}",
-            self.view_number, self.vid_commitment, self.leaf_commit, self.builder_commitment
+            "View Number: {:?}, Builder Commitment: {:?}",
+            self.view_number, self.builder_commitment
         )
     }
 }
@@ -161,12 +162,10 @@ pub struct BuilderState<TYPES: NodeType> {
     // response sender
     pub response_sender: UnboundedSender<ResponseMessage>,
 
-    // total nodes required for the VID computation
-    // Since a builder state exists for potential block building, therefore it gets
-    // populated based on num nodes received in DA Proposal message
+    // total nodes required for the VID computation as part of block header input response
     pub total_nodes: NonZeroUsize,
 
-    // builder Commitements
+    // locally spawned builder Commitements
     pub builder_commitments: Vec<BuilderCommitment>,
 
     // bootstrapped view number
@@ -227,7 +226,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         if self.tx_hash_to_available_txns.contains_key(&tx_hash)
             || self.included_txns.contains(&tx_hash)
         {
-            tracing::info!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
+            tracing::debug!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
         } else {
             // get the current timestamp in nanoseconds; it used for ordering the transactions
             let tx_timestamp = SystemTime::now()
@@ -246,13 +245,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     #[tracing::instrument(skip_all, name = "process hotshot transaction", 
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     fn process_hotshot_transaction(&mut self, tx: TYPES::Transaction) {
+        tracing::info!("Processing hotshot transaction");
         let tx_hash = tx.commit();
         // HOTSHOT MEMPOOL TRANSACTION PROCESSING
         // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
         if self.tx_hash_to_available_txns.contains_key(&tx_hash)
             || self.included_txns.contains(&tx_hash)
         {
-            tracing::info!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
+            tracing::debug!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
             return;
         } else {
             // get the current timestamp in nanoseconds
@@ -272,7 +272,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     #[tracing::instrument(skip_all, name = "process da proposal",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>) {
-        tracing::debug!("Builder Received DA message {:?}", da_msg);
+        tracing::debug!(
+            "Builder Received DA message for view {:?}",
+            da_msg.proposal.data.view_number
+        );
 
         // Two cases to handle:
         // Case 1: Bootstrapping phase
@@ -312,12 +315,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // generate the vid commitment; num nodes are received through hotshot api in service.rs and passed along with message onto channel
         let total_nodes = da_msg.total_nodes;
 
-        tracing::debug!(
-            "Encoded txns in da proposal: {:?} and total nodes: {:?}",
-            encoded_txns,
-            total_nodes
-        );
-
         // set the total nodes required for the VID computation // later required in the build_block
         self.total_nodes = NonZeroUsize::new(total_nodes).unwrap();
 
@@ -355,7 +352,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 // also make sure we clone for the same view number( check incase payload commitments are same)
                 // this will handle the case when the intended builder state can spawn
                 if qc_proposal_data.view_number == view_number {
-                    tracing::info!("Spawning a clone from process DA proposal");
+                    tracing::info!(
+                        "Spawning a clone from process DA proposal for view number: {:?}",
+                        view_number
+                    );
                     // remove this entry from the qc_proposal_payload_commit_to_quorum_proposal hashmap
                     self.quorum_proposal_payload_commit_to_quorum_proposal
                         .remove(&payload_builder_commitment.clone());
@@ -365,6 +365,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .write()
                         .await
                         .insert(qc_proposal_data.view_number);
+
                     self.clone()
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender)
                         .await;
@@ -384,7 +385,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     #[tracing::instrument(skip_all, name = "process quorum proposal", 
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>) {
-        tracing::debug!("Builder Received QC Message{:?}", qc_msg);
+        tracing::debug!(
+            "Builder Received QC Message for view {:?}",
+            qc_msg.proposal.data.view_number
+        );
         // Two cases to handle:
         // Case 1: Bootstrapping phase
         // Case 2: No intended builder state exist
@@ -403,8 +407,9 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             tracing::info!("QC Proposal handled by bootstrapped builder state");
         } else if qc_msg.proposal.data.justify_qc.view_number
             != self.built_from_proposed_block.view_number
-            || qc_msg.proposal.data.justify_qc.get_data().leaf_commit
+            || (qc_msg.proposal.data.justify_qc.get_data().leaf_commit
                 != self.built_from_proposed_block.leaf_commit
+                && !qc_msg.proposal.data.justify_qc.is_genesis)
         {
             tracing::info!("Either View number {:?} or leaf commit{:?} from justify qc does not match the built-in info {:?}, so returning",
             qc_msg.proposal.data.justify_qc.view_number, qc_msg.proposal.data.justify_qc.get_data().leaf_commit, self.built_from_proposed_block);
@@ -439,7 +444,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
                 // also make sure we clone for the same view number( check incase payload commitments are same)
                 if da_proposal_data.view_number == view_number {
-                    tracing::info!("Spawning a clone from process QC proposal");
+                    tracing::info!(
+                        "Spawning a clone from process QC proposal for view number: {:?}",
+                        view_number
+                    );
                     self.spawned_clones_views_list
                         .write()
                         .await
@@ -490,12 +498,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             *self.spawned_clones_views_list.write().await = split_list;
             //return Some(Status::ShouldContinue);
         } else if self.built_from_proposed_block.view_number <= latest_leaf_view_number {
-            tracing::info!("Built-in view is less than equal to the currently decided leaf so exiting the builder state");
+            tracing::info!("Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
             // convert leaf commitments into buildercommiments
             // remove the handles from the global state
             // TODO: Does it make sense to remove it here or should we remove in api responses?
             self.global_state.write_arc().await.remove_handles(
-                self.built_from_proposed_block.vid_commitment,
+                &self.built_from_proposed_block.builder_commitment,
                 self.builder_commitments.clone(),
             );
 
@@ -516,6 +524,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         if let Some((timestamp, _, _)) = self.tx_hash_to_available_txns.get(tx_hash)
                         {
                             if self.timestamp_to_tx.contains_key(timestamp) {
+                                tracing::debug!("Removing transaction from timestamp_to_tx map");
                                 self.timestamp_to_tx.remove(timestamp);
                             }
                             self.tx_hash_to_available_txns.remove(tx_hash);
@@ -548,8 +557,17 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             quorum_proposal.block_header.payload_commitment();
         self.built_from_proposed_block.builder_commitment =
             quorum_proposal.block_header.builder_commitment();
-        self.built_from_proposed_block.leaf_commit =
-            Leaf::from_quorum_proposal(&quorum_proposal).commit();
+        let mut leaf = Leaf::from_quorum_proposal(&quorum_proposal);
+
+        // Hack for genesis mishandling in HotShot.
+        // Once the is_genesis field is removed, you can delete this block.
+        if quorum_proposal.justify_qc.is_genesis {
+            // get the instance state from the global state
+            let instance_state = &self.global_state.read_arc().await.instance_state;
+            leaf.set_parent_commitment(Leaf::genesis(instance_state).commit());
+        }
+
+        self.built_from_proposed_block.leaf_commit = leaf.commit();
 
         let payload = <TYPES::BlockPayload as BlockPayload>::from_bytes(
             da_proposal.encoded_transactions.clone().into_iter(),
@@ -565,6 +583,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     txn_info.remove_entry();
                 }
             });
+
+        // register the spawned builder state to spawned_builder_states in the global state
+        self.global_state
+            .write_arc()
+            .await
+            .spawned_builder_states
+            .insert(self.built_from_proposed_block.builder_commitment.clone());
 
         self.event_loop();
     }
@@ -584,7 +609,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             }),
         ) {
             let builder_hash = payload.builder_commitment(&metadata);
-
+            // count the number of txns
+            let txn_count = payload.num_transactions(&metadata);
+            tracing::info!(
+                "Builder {:?} Building block with {:?} txns",
+                self.built_from_proposed_block,
+                txn_count
+            );
             // add the local builder commitment list
             self.builder_commitments.push(builder_hash.clone());
 
@@ -622,7 +653,16 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
     async fn process_block_request(&mut self, req: RequestMessage) {
         let requested_builder_commitment = req.requested_builder_commitment.clone();
-        if requested_builder_commitment == self.built_from_proposed_block.builder_commitment {
+        // If a spawned clone is active then it will handle the request, otherwise the bootstrapped builder will handle it based on flag bootstrap_build_block
+        if requested_builder_commitment == self.built_from_proposed_block.builder_commitment
+            || (self.built_from_proposed_block.view_number.get_u64()
+                == self.bootstrap_view_number.get_u64()
+                && req.bootstrap_build_block)
+        {
+            tracing::debug!(
+                "REQUEST HANDLED BY BUILDER WITH VIEW {:?}",
+                self.built_from_proposed_block.view_number
+            );
             let response = self.build_block(requested_builder_commitment).await;
 
             match response {
@@ -663,7 +703,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 }
             }
         } else {
-            tracing::info!("Builder {:?} Requested VID commitment does not match the built_from_view, so ignoring it", self.built_from_proposed_block);
+            tracing::info!("Builder {:?} Requested Builder commitment does not match the built_from_view, so ignoring it", self.built_from_proposed_block);
         }
     }
     #[tracing::instrument(skip_all, name = "event loop", 
@@ -701,7 +741,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match tx {
                             Some(tx) => {
                                 if let MessageType::TransactionMessage(rtx_msg) = tx {
-                                    tracing::debug!("Received tx msg in builder {:?}:\n {:?}", self.built_from_proposed_block, rtx_msg);
+                                    tracing::debug!("Received tx msg in builder {:?}:\n {:?}", self.built_from_proposed_block, rtx_msg.tx.commit());
                                     if rtx_msg.tx_type == TransactionSource::HotShot {
                                         self.process_hotshot_transaction(rtx_msg.tx);
                                     } else {
@@ -719,7 +759,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match da {
                             Some(da) => {
                                 if let MessageType::DAProposalMessage(rda_msg) = da {
-                                    tracing::debug!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_proposed_block, rda_msg);
+                                    tracing::info!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_proposed_block, rda_msg.proposal.data.view_number);
                                     self.process_da_proposal(rda_msg).await;
                                 }
                             }
@@ -732,7 +772,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match qc {
                             Some(qc) => {
                                 if let MessageType::QCMessage(rqc_msg) = qc {
-                                    tracing::debug!("Received qc msg in builder {:?}:\n {:?} from index", self.built_from_proposed_block, rqc_msg);
+                                    tracing::info!("Received qc msg in builder {:?}:\n {:?} from index", self.built_from_proposed_block, rqc_msg.proposal.data.view_number);
                                     self.process_quorum_proposal(rqc_msg).await;
                                 }
                             }
