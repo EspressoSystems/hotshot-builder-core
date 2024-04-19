@@ -118,14 +118,16 @@ impl<Types: NodeType> GlobalState<Types> {
         &mut self,
         builder_vid_commitment: &VidCommitment,
         block_hashes: Vec<BuilderCommitment>,
+        bootstrap: bool,
     ) {
         tracing::info!(
             "Removing handles for builder commitment {:?}",
             builder_vid_commitment
         );
         // remove the builder commitment from the spawned builder states
-        self.spawned_builder_states.remove(builder_vid_commitment);
-
+        if !bootstrap {
+            self.spawned_builder_states.remove(builder_vid_commitment);
+        }
         for block_hash in block_hashes {
             self.block_hash_to_block.remove(&block_hash);
         }

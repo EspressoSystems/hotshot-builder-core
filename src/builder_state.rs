@@ -496,6 +496,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
             // update the spawned_clones_views_list with the split list now
             *self.spawned_clones_views_list.write().await = split_list;
+            // remove all the builder commitments
+            self.global_state.write_arc().await.remove_handles(
+                &self.built_from_proposed_block.vid_commitment,
+                self.builder_commitments.clone(),
+                true,
+            );
             //return Some(Status::ShouldContinue);
         } else if self.built_from_proposed_block.view_number <= latest_leaf_view_number {
             tracing::info!("Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
@@ -505,8 +511,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             self.global_state.write_arc().await.remove_handles(
                 &self.built_from_proposed_block.vid_commitment,
                 self.builder_commitments.clone(),
+                false,
             );
-
             return Some(Status::ShouldExit);
         }
 
