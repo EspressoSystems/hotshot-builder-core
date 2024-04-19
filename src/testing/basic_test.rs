@@ -111,7 +111,6 @@ mod tests {
         let seed = [201_u8; 32];
         let (builder_pub_key, builder_private_key) =
             BLSPubKey::generated_from_seed_indexed(seed, 2011_u64);
-        let builder_commitment = BuilderCommitment::from_raw_digest(sha2::Sha256::new().finalize());
         // instantiate the global state also
         let global_state = GlobalState::<TestTypes>::new(
             (builder_pub_key, builder_private_key),
@@ -119,7 +118,7 @@ mod tests {
             res_receiver,
             tx_sender.clone(),
             TestInstanceState {},
-            builder_commitment,
+            vid_commitment(&vec![], 8),
         );
 
         // to store all the sent messages
@@ -315,9 +314,10 @@ mod tests {
                 .unwrap();
 
             // send decide and request messages later
-            let requested_builder_commitment = payload_builder_commitment;
+            let _requested_builder_commitment = payload_builder_commitment;
+            let requested_vid_commitment = payload_vid_commitment;
             let request_message = MessageType::<TestTypes>::RequestMessage(RequestMessage {
-                requested_builder_commitment,
+                requested_vid_commitment,
                 bootstrap_build_block: false,
             });
 

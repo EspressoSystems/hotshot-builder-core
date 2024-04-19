@@ -67,7 +67,7 @@ pub struct QCMessage<TYPES: NodeType> {
 /// Request Message to be put on the request channel
 #[derive(Clone, Debug, PartialEq)]
 pub struct RequestMessage {
-    pub requested_builder_commitment: BuilderCommitment,
+    pub requested_vid_commitment: VidCommitment,
     pub bootstrap_build_block: bool,
 }
 /// Response Message to be put on the response channel
@@ -204,7 +204,7 @@ pub trait BuilderProgress<TYPES: NodeType> {
     /// build a block
     async fn build_block(
         &mut self,
-        matching_builder_commitment: BuilderCommitment,
+        matching_builder_commitment: VidCommitment,
     ) -> Option<BuildBlockInfo<TYPES>>;
 
     /// Event Loop
@@ -496,6 +496,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
             // update the spawned_clones_views_list with the split list now
             *self.spawned_clones_views_list.write().await = split_list;
+            // remove all the builder commitments
+            self.global_state.write_arc().await.remove_handles(
+                &self.built_from_proposed_block.vid_commitment,
+                self.builder_commitments.clone(),
+                true,
+            );
             //return Some(Status::ShouldContinue);
         } else if self.built_from_proposed_block.view_number <= latest_leaf_view_number {
             tracing::info!("Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
@@ -503,10 +509,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // remove the handles from the global state
             // TODO: Does it make sense to remove it here or should we remove in api responses?
             self.global_state.write_arc().await.remove_handles(
-                &self.built_from_proposed_block.builder_commitment,
+                &self.built_from_proposed_block.vid_commitment,
                 self.builder_commitments.clone(),
+                false,
             );
-
             return Some(Status::ShouldExit);
         }
 
@@ -589,7 +595,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             .write_arc()
             .await
             .spawned_builder_states
-            .insert(self.built_from_proposed_block.builder_commitment.clone());
+            .insert(self.built_from_proposed_block.vid_commitment);
 
         self.event_loop();
     }
@@ -597,10 +603,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     // build a block
     #[tracing::instrument(skip_all, name = "build block", 
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
-    async fn build_block(
-        &mut self,
-        _matching_vid: BuilderCommitment,
-    ) -> Option<BuildBlockInfo<TYPES>> {
+    async fn build_block(&mut self, _matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>> {
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
             self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
                 self.tx_hash_to_available_txns
@@ -652,9 +655,9 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     }
 
     async fn process_block_request(&mut self, req: RequestMessage) {
-        let requested_builder_commitment = req.requested_builder_commitment.clone();
+        let requested_vid_commitment = req.requested_vid_commitment;
         // If a spawned clone is active then it will handle the request, otherwise the bootstrapped builder will handle it based on flag bootstrap_build_block
-        if requested_builder_commitment == self.built_from_proposed_block.builder_commitment
+        if requested_vid_commitment == self.built_from_proposed_block.vid_commitment
             || (self.built_from_proposed_block.view_number.get_u64()
                 == self.bootstrap_view_number.get_u64()
                 && req.bootstrap_build_block)
@@ -663,7 +666,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 "REQUEST HANDLED BY BUILDER WITH VIEW {:?}",
                 self.built_from_proposed_block.view_number
             );
-            let response = self.build_block(requested_builder_commitment).await;
+            let response = self.build_block(requested_vid_commitment).await;
 
             match response {
                 Some(response) => {
