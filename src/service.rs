@@ -105,7 +105,7 @@ impl<Types: NodeType> GlobalState<Types> {
         GlobalState {
             builder_keys,
             block_hash_to_block: Default::default(),
-            spawned_builder_states: spawned_builder_states,
+            spawned_builder_states,
             request_sender,
             response_receiver,
             tx_sender,
