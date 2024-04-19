@@ -509,7 +509,6 @@
         </span><span class="kw">let </span>seed = [<span class="number">201_u8</span>; <span class="number">32</span>];
         <span class="kw">let </span>(builder_pub_key, builder_private_key) =
             BLSPubKey::generated_from_seed_indexed(seed, <span class="number">2011_u64</span>);
-        <span class="kw">let </span>builder_commitment = BuilderCommitment::from_raw_digest(sha2::Sha256::new().finalize());
         <span class="comment">// instantiate the global state also
         </span><span class="kw">let </span>global_state = GlobalState::&lt;TestTypes&gt;::new(
             (builder_pub_key, builder_private_key),
@@ -517,7 +516,7 @@
             res_receiver,
             tx_sender.clone(),
             TestInstanceState {},
-            builder_commitment,
+            vid_commitment(<span class="kw-2">&amp;</span><span class="macro">vec!</span>[], <span class="number">8</span>),
         );
 
         <span class="comment">// to store all the sent messages
@@ -713,9 +712,10 @@
                 </span>.unwrap();
 
             <span class="comment">// send decide and request messages later
-            </span><span class="kw">let </span>requested_builder_commitment = payload_builder_commitment;
+            </span><span class="kw">let </span>_requested_builder_commitment = payload_builder_commitment;
+            <span class="kw">let </span>requested_vid_commitment = payload_vid_commitment;
             <span class="kw">let </span>request_message = MessageType::&lt;TestTypes&gt;::RequestMessage(RequestMessage {
-                requested_builder_commitment,
+                requested_vid_commitment,
                 bootstrap_build_block: <span class="bool-val">false</span>,
             });
 

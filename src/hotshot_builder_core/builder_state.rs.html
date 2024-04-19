@@ -861,6 +861,9 @@
 <a href="#859" id="859">859</a>
 <a href="#860" id="860">860</a>
 <a href="#861" id="861">861</a>
+<a href="#862" id="862">862</a>
+<a href="#863" id="863">863</a>
+<a href="#864" id="864">864</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
     event::{LeafChain, LeafInfo},
@@ -930,7 +933,7 @@
 <span class="doccomment">/// Request Message to be put on the request channel
 </span><span class="attr">#[derive(Clone, Debug, PartialEq)]
 </span><span class="kw">pub struct </span>RequestMessage {
-    <span class="kw">pub </span>requested_builder_commitment: BuilderCommitment,
+    <span class="kw">pub </span>requested_vid_commitment: VidCommitment,
     <span class="kw">pub </span>bootstrap_build_block: bool,
 }
 <span class="doccomment">/// Response Message to be put on the response channel
@@ -1067,7 +1070,7 @@
     <span class="doccomment">/// build a block
     </span><span class="kw">async fn </span>build_block(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        matching_builder_commitment: BuilderCommitment,
+        matching_builder_commitment: VidCommitment,
     ) -&gt; <span class="prelude-ty">Option</span>&lt;BuildBlockInfo&lt;TYPES&gt;&gt;;
 
     <span class="doccomment">/// Event Loop
@@ -1359,6 +1362,12 @@
 
             <span class="comment">// update the spawned_clones_views_list with the split list now
             </span><span class="kw-2">*</span><span class="self">self</span>.spawned_clones_views_list.write().<span class="kw">await </span>= split_list;
+            <span class="comment">// remove all the builder commitments
+            </span><span class="self">self</span>.global_state.write_arc().<span class="kw">await</span>.remove_handles(
+                <span class="kw-2">&amp;</span><span class="self">self</span>.built_from_proposed_block.vid_commitment,
+                <span class="self">self</span>.builder_commitments.clone(),
+                <span class="bool-val">true</span>,
+            );
             <span class="comment">//return Some(Status::ShouldContinue);
         </span>} <span class="kw">else if </span><span class="self">self</span>.built_from_proposed_block.view_number &lt;= latest_leaf_view_number {
             <span class="macro">tracing::info!</span>(<span class="string">"Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}"</span>, latest_leaf_view_number.get_u64(), <span class="self">self</span>.built_from_proposed_block.view_number.get_u64());
@@ -1366,10 +1375,10 @@
             // remove the handles from the global state
             // TODO: Does it make sense to remove it here or should we remove in api responses?
             </span><span class="self">self</span>.global_state.write_arc().<span class="kw">await</span>.remove_handles(
-                <span class="kw-2">&amp;</span><span class="self">self</span>.built_from_proposed_block.builder_commitment,
+                <span class="kw-2">&amp;</span><span class="self">self</span>.built_from_proposed_block.vid_commitment,
                 <span class="self">self</span>.builder_commitments.clone(),
+                <span class="bool-val">false</span>,
             );
-
             <span class="kw">return </span><span class="prelude-val">Some</span>(Status::ShouldExit);
         }
 
@@ -1452,7 +1461,7 @@
             .write_arc()
             .<span class="kw">await
             </span>.spawned_builder_states
-            .insert(<span class="self">self</span>.built_from_proposed_block.builder_commitment.clone());
+            .insert(<span class="self">self</span>.built_from_proposed_block.vid_commitment);
 
         <span class="self">self</span>.event_loop();
     }
@@ -1460,10 +1469,7 @@
     <span class="comment">// build a block
     </span><span class="attr">#[tracing::instrument(skip_all, name = <span class="string">"build block"</span>, 
                                     fields(builder_built_from_proposed_block = %<span class="self">self</span>.built_from_proposed_block))]
-    </span><span class="kw">async fn </span>build_block(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        _matching_vid: BuilderCommitment,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;BuildBlockInfo&lt;TYPES&gt;&gt; {
+    </span><span class="kw">async fn </span>build_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _matching_vid: VidCommitment) -&gt; <span class="prelude-ty">Option</span>&lt;BuildBlockInfo&lt;TYPES&gt;&gt; {
         <span class="kw">if let </span><span class="prelude-val">Ok</span>((payload, metadata)) = &lt;TYPES::BlockPayload <span class="kw">as </span>BlockPayload&gt;::from_transactions(
             <span class="self">self</span>.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
                 <span class="self">self</span>.tx_hash_to_available_txns
@@ -1515,9 +1521,9 @@
     }
 
     <span class="kw">async fn </span>process_block_request(<span class="kw-2">&amp;mut </span><span class="self">self</span>, req: RequestMessage) {
-        <span class="kw">let </span>requested_builder_commitment = req.requested_builder_commitment.clone();
+        <span class="kw">let </span>requested_vid_commitment = req.requested_vid_commitment;
         <span class="comment">// If a spawned clone is active then it will handle the request, otherwise the bootstrapped builder will handle it based on flag bootstrap_build_block
-        </span><span class="kw">if </span>requested_builder_commitment == <span class="self">self</span>.built_from_proposed_block.builder_commitment
+        </span><span class="kw">if </span>requested_vid_commitment == <span class="self">self</span>.built_from_proposed_block.vid_commitment
             || (<span class="self">self</span>.built_from_proposed_block.view_number.get_u64()
                 == <span class="self">self</span>.bootstrap_view_number.get_u64()
                 &amp;&amp; req.bootstrap_build_block)
@@ -1526,7 +1532,7 @@
                 <span class="string">"REQUEST HANDLED BY BUILDER WITH VIEW {:?}"</span>,
                 <span class="self">self</span>.built_from_proposed_block.view_number
             );
-            <span class="kw">let </span>response = <span class="self">self</span>.build_block(requested_builder_commitment).<span class="kw">await</span>;
+            <span class="kw">let </span>response = <span class="self">self</span>.build_block(requested_vid_commitment).<span class="kw">await</span>;
 
             <span class="kw">match </span>response {
                 <span class="prelude-val">Some</span>(response) =&gt; {
