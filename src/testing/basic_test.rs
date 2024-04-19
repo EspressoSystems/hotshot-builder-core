@@ -119,7 +119,7 @@ mod tests {
             res_receiver,
             tx_sender.clone(),
             TestInstanceState {},
-            builder_commitment,
+            vid_commitment(&vec![], 8),
         );
 
         // to store all the sent messages
@@ -316,8 +316,9 @@ mod tests {
 
             // send decide and request messages later
             let requested_builder_commitment = payload_builder_commitment;
+            let requested_vid_commitment = payload_vid_commitment;
             let request_message = MessageType::<TestTypes>::RequestMessage(RequestMessage {
-                requested_builder_commitment,
+                requested_vid_commitment,
                 bootstrap_build_block: false,
             });
 

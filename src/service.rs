@@ -72,7 +72,7 @@ pub struct GlobalState<Types: NodeType> {
     >,
 
     // registered builer states
-    pub spawned_builder_states: HashSet<BuilderCommitment>,
+    pub spawned_builder_states: HashSet<VidCommitment>,
 
     // sending a request from the hotshot to the builder states
     pub request_sender: BroadcastSender<MessageType<Types>>,
@@ -98,7 +98,7 @@ impl<Types: NodeType> GlobalState<Types> {
         response_receiver: UnboundedReceiver<ResponseMessage>,
         tx_sender: BroadcastSender<MessageType<Types>>,
         instance_state: Types::InstanceState,
-        bootstrapped_builder_state_id: BuilderCommitment,
+        bootstrapped_builder_state_id: VidCommitment,
     ) -> Self {
         let mut spawned_builder_states = HashSet::new();
         spawned_builder_states.insert(bootstrapped_builder_state_id);
@@ -116,15 +116,15 @@ impl<Types: NodeType> GlobalState<Types> {
     // remove the builder state handles based on the decide event
     pub fn remove_handles(
         &mut self,
-        builder_commitment: &BuilderCommitment,
+        builder_vid_commitment: &VidCommitment,
         block_hashes: Vec<BuilderCommitment>,
     ) {
         tracing::info!(
             "Removing handles for builder commitment {:?}",
-            builder_commitment
+            builder_vid_commitment
         );
         // remove the builder commitment from the spawned builder states
-        self.spawned_builder_states.remove(builder_commitment);
+        self.spawned_builder_states.remove(builder_vid_commitment);
 
         for block_hash in block_hashes {
             self.block_hash_to_block.remove(&block_hash);
@@ -163,7 +163,7 @@ where
 {
     async fn get_available_blocks(
         &self,
-        for_parent: &BuilderCommitment,
+        for_parent: &VidCommitment,
         sender: Types::SignatureKey,
         signature: &<Types::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<Vec<AvailableBlockInfo<Types>>, BuildError> {
@@ -181,13 +181,13 @@ where
         }
 
         let req_msg = RequestMessage {
-            requested_builder_commitment: (*for_parent).clone(),
+            requested_vid_commitment: (*for_parent).clone(),
             bootstrap_build_block: bootstrapped_state_build_block,
         };
 
         tracing::debug!(
             "Requesting available blocks for {:?}",
-            req_msg.requested_builder_commitment
+            req_msg.requested_vid_commitment
         );
 
         self.request_sender
@@ -219,7 +219,7 @@ where
                 };
                 tracing::info!(
                     "sending Initial block info response for {:?}",
-                    req_msg.requested_builder_commitment
+                    req_msg.requested_vid_commitment
                 );
                 Ok(vec![initial_block_info])
             }
