@@ -181,12 +181,12 @@ where
         }
 
         let req_msg = RequestMessage {
-            requested_vid_commitment: (*for_parent).clone(),
+            requested_vid_commitment: (*for_parent),
             bootstrap_build_block: bootstrapped_state_build_block,
         };
 
         tracing::debug!(
-            "Requesting available blocks for {:?}",
+            "Requesting available blocks for parent {:?}",
             req_msg.requested_vid_commitment
         );
 
@@ -218,7 +218,7 @@ where
                     _phantom: Default::default(),
                 };
                 tracing::info!(
-                    "sending Initial block info response for {:?}",
+                    "sending Initial block info response for parent {:?}",
                     req_msg.requested_vid_commitment
                 );
                 Ok(vec![initial_block_info])
@@ -234,7 +234,10 @@ where
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockData<Types>, BuildError> {
-        tracing::debug!("Received request for claiming block for {:?}", block_hash);
+        tracing::debug!(
+            "Received request for claiming block for block hash: {:?}",
+            block_hash
+        );
         // verify the signature
         if !sender.validate(signature, block_hash.as_ref()) {
             return Err(BuildError::Error {
@@ -257,7 +260,10 @@ where
                 signature: signature_over_builder_commitment,
                 sender: self.builder_keys.0.clone(),
             };
-            tracing::info!("Sending claimed block data for {:?}", block_hash);
+            tracing::info!(
+                "Sending claimed block data for block hash: {:?}",
+                block_hash
+            );
             Ok(block_data)
         } else {
             Err(BuildError::Error {
@@ -273,7 +279,7 @@ where
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
         tracing::debug!(
-            "Received request for claiming block header input for {:?}",
+            "Received request for claiming block header input for block hash: {:?}",
             block_hash
         );
         // verify the signature
@@ -308,7 +314,7 @@ where
                 sender: self.builder_keys.0.clone(),
             };
             tracing::info!(
-                "Sending claimed block header input response for {:?}",
+                "Sending claimed block header input response for block hash: {:?}",
                 block_hash
             );
             Ok(response)

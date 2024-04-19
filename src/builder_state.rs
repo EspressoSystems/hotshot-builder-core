@@ -589,7 +589,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             .write_arc()
             .await
             .spawned_builder_states
-            .insert(self.built_from_proposed_block.vid_commitment.clone());
+            .insert(self.built_from_proposed_block.vid_commitment);
 
         self.event_loop();
     }
@@ -649,7 +649,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     }
 
     async fn process_block_request(&mut self, req: RequestMessage) {
-        let requested_vid_commitment = req.requested_vid_commitment.clone();
+        let requested_vid_commitment = req.requested_vid_commitment;
         // If a spawned clone is active then it will handle the request, otherwise the bootstrapped builder will handle it based on flag bootstrap_build_block
         if requested_vid_commitment == self.built_from_proposed_block.vid_commitment
             || (self.built_from_proposed_block.view_number.get_u64()
