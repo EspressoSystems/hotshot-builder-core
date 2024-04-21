@@ -313,7 +313,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         else if da_msg.proposal.data.view_number.get_u64()
             != self.built_from_proposed_block.view_number.get_u64() + 1
         {
-            tracing::info!("View number is not equal to built_from_view + 1, so returning");
+            tracing::debug!("View number is not equal to built_from_view + 1, so returning");
             return;
         }
 
@@ -385,13 +385,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender)
                         .await;
                 } else {
-                    tracing::info!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers");
+                    tracing::debug!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers");
                 }
             } else {
                 e.insert(da_proposal_data);
             }
         } else {
-            tracing::info!("Payload commitment already exists in the da_proposal_payload_commit_to_da_proposal hashmap, so ignoring it");
+            tracing::debug!("Payload commitment already exists in the da_proposal_payload_commit_to_da_proposal hashmap, so ignoring it");
         }
     }
 
@@ -426,7 +426,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 != self.built_from_proposed_block.leaf_commit
                 && !qc_msg.proposal.data.justify_qc.is_genesis)
         {
-            tracing::info!("Either View number {:?} or leaf commit{:?} from justify qc does not match the built-in info {:?}, so returning",
+            tracing::debug!("Either View number {:?} or leaf commit{:?} from justify qc does not match the built-in info {:?}, so returning",
             qc_msg.proposal.data.justify_qc.view_number, qc_msg.proposal.data.justify_qc.get_data().leaf_commit, self.built_from_proposed_block);
             return;
         }
@@ -471,13 +471,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender)
                         .await;
                 } else {
-                    tracing::info!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers");
+                    tracing::debug!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers");
                 }
             } else {
                 e.insert(qc_proposal_data.clone());
             }
         } else {
-            tracing::info!("Payload commitment already exists in the quorum_proposal_payload_commit_to_quorum_proposal hashmap, so ignoring it");
+            tracing::debug!("Payload commitment already exists in the quorum_proposal_payload_commit_to_quorum_proposal hashmap, so ignoring it");
         }
     }
 
@@ -500,9 +500,9 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         if self.built_from_proposed_block.view_number.get_u64()
             == self.bootstrap_view_number.get_u64()
         {
-            if latest_leaf_view_number.get_u64()
-                - self.last_bootstrap_garbage_collected_decided_seen_view_num
-                >= 10
+            if (latest_leaf_view_number.get_u64()
+                - self.last_bootstrap_garbage_collected_decided_seen_view_num)
+                >= 10u64
             {
                 tracing::info!("Bootstrapped builder state, should continue");
                 // split_off returns greater than equal to set, so we want everything after the latest decide event
@@ -556,7 +556,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     latest_leaf_view_number.get_u64();
             }
         } else if self.built_from_proposed_block.view_number.get_u64()
-            <= latest_leaf_view_number.get_u64() - 10
+            <= (latest_leaf_view_number.get_u64() - 10u64)
         {
             tracing::info!("Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
             // convert leaf commitments into buildercommiments
@@ -726,7 +726,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .spawned_builder_states
                         .contains(&requested_vid_commitment)))
         {
-            tracing::debug!(
+            tracing::info!(
                 "REQUEST HANDLED BY BUILDER WITH VIEW {:?}",
                 self.built_from_proposed_block.view_number
             );
@@ -768,14 +768,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                             ),
                         );
 
-                    //self.response_sender.send(response_msg).await.unwrap();
+                    // self.response_sender.send(response_msg).await.unwrap();
                 }
                 None => {
                     tracing::warn!("No response to send");
                 }
             }
         } else {
-            tracing::info!("Builder {:?} Requested Builder commitment does not match the built_from_view, so ignoring it", self.built_from_proposed_block);
+            tracing::info!("Builder {:?} Requested Builder commitment does not match the built_from_view, so ignoring it", self.built_from_proposed_block.view_number);
         }
     }
     #[tracing::instrument(skip_all, name = "event loop", 
@@ -787,7 +787,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 while let Ok(req) = self.req_receiver.try_recv() {
                     tracing::info!(
                         "Received request msg in builder {:?}: {:?}",
-                        self.built_from_proposed_block,
+                        self.built_from_proposed_block.view_number,
                         req
                     );
                     if let MessageType::RequestMessage(req) = req {
@@ -797,7 +797,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
                 futures::select! {
                     req = self.req_receiver.next() => {
-                        tracing::info!("Received request msg in builder {:?}: {:?}", self.built_from_proposed_block, req);
+                        tracing::info!("Received request msg in builder {:?}: {:?}", self.built_from_proposed_block.view_number, req);
                         match req {
                             Some(req) => {
                                 if let MessageType::RequestMessage(req) = req {
@@ -831,7 +831,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match da {
                             Some(da) => {
                                 if let MessageType::DAProposalMessage(rda_msg) = da {
-                                    tracing::info!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_proposed_block, rda_msg.proposal.data.view_number);
+                                    tracing::debug!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_proposed_block, rda_msg.proposal.data.view_number);
                                     self.process_da_proposal(rda_msg).await;
                                 }
                             }
@@ -844,7 +844,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match qc {
                             Some(qc) => {
                                 if let MessageType::QCMessage(rqc_msg) = qc {
-                                    tracing::info!("Received qc msg in builder {:?}:\n {:?} from index", self.built_from_proposed_block, rqc_msg.proposal.data.view_number);
+                                    tracing::debug!("Received qc msg in builder {:?}:\n {:?} from index", self.built_from_proposed_block, rqc_msg.proposal.data.view_number);
                                     self.process_quorum_proposal(rqc_msg).await;
                                 }
                             }
@@ -861,7 +861,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                     let decide_status = self.process_decide_event(rdecide_msg).await;
                                     match decide_status{
                                         Some(Status::ShouldExit) => {
-                                            tracing::debug!("Exiting the builder {:?}", self.built_from_proposed_block);
+                                            tracing::info!("Exiting the builder {:?}", self.built_from_proposed_block);
                                             break;
                                         }
                                         Some(Status::ShouldContinue) => {

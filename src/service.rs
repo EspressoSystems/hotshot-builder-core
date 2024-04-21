@@ -250,7 +250,16 @@ where
         // //         message: "No blocks available".to_string(),
         // //     }),
         // // }
+        // TODO convert later to debug
+        tracing::info!(
+            "Waiting for response for parent {:?}",
+            req_msg.requested_vid_commitment
+        );
         let response_received = self.response_receiver.recv().await;
+        tracing::info!(
+            "Received response for parent {:?}",
+            req_msg.requested_vid_commitment
+        );
         match response_received {
             Ok(response) => {
                 // sign over the block info
