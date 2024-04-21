@@ -67,8 +67,10 @@ pub struct QCMessage<TYPES: NodeType> {
 /// Request Message to be put on the request channel
 #[derive(Clone, Debug, PartialEq)]
 pub struct RequestMessage {
-    pub requested_vid_commitment: VidCommitment,
+    pub requested_vid_commitment: Option<VidCommitment>,
     pub bootstrap_build_block: bool,
+    pub builder_commitment: Option<BuilderCommitment>,
+    pub api_req_num: u64,
 }
 /// Response Message to be put on the response channel
 #[derive(Debug)]
@@ -83,11 +85,20 @@ pub struct BuildBlockInfo<TYPES: NodeType> {
 
 /// Response Message to be put on the response channel
 #[derive(Debug, Clone)]
-pub struct ResponseMessage {
+pub struct ResponseMessage1 {
     pub builder_hash: BuilderCommitment,
     pub block_size: u64,
     pub offered_fee: u64,
 }
+pub struct ResponseMessage2<TYPES: NodeType> {
+    pub block_payload: TYPES::BlockPayload,
+    pub metadata: <TYPES::BlockPayload as BlockPayload>::Metadata,
+}
+pub struct ResponseMessage3 {
+    pub vid_data: Arc<RwLock<WaitAndKeep<(VidCommitment, VidPrecomputeData)>>>,
+    pub offered_fee: u64,
+}
+#[derive(Debug, Clone)]
 /// Enum to hold the status out of the decide event
 pub enum Status {
     ShouldExit,
@@ -128,7 +139,18 @@ pub struct BuilderState<TYPES: NodeType> {
     pub included_txns: HashSet<Commitment<TYPES::Transaction>>,
 
     /// block hash to the block payload
-    pub block_hash_to_block: HashMap<BuilderCommitment, TYPES::BlockPayload>,
+    //pub block_hash_to_block: HashMap<BuilderCommitment, TYPES::BlockPayload>,
+
+    // data store for the blocks
+    pub block_hash_to_block: HashMap<
+        BuilderCommitment,
+        (
+            TYPES::BlockPayload,
+            <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
+            Arc<RwLock<WaitAndKeep<(VidCommitment, VidPrecomputeData)>>>,
+            u64, // Fees
+        ),
+    >,
 
     /// da_proposal_payload_commit to da_proposal
     pub da_proposal_payload_commit_to_da_proposal: HashMap<BuilderCommitment, DAProposal<TYPES>>,
@@ -160,13 +182,13 @@ pub struct BuilderState<TYPES: NodeType> {
     pub global_state: Arc<RwLock<GlobalState<TYPES>>>,
 
     // response sender
-    pub response_sender: UnboundedSender<ResponseMessage>,
+    pub response_sender: UnboundedSender<ResponseMessage<TYPES>>,
 
     // total nodes required for the VID computation as part of block header input response
     pub total_nodes: NonZeroUsize,
 
     // locally spawned builder Commitements
-    pub builder_commitments: Vec<BuilderCommitment>,
+    pub builder_commitments: HashSet<BuilderCommitment>,
 
     // bootstrapped view number
     pub bootstrap_view_number: TYPES::Time,
@@ -220,7 +242,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     /// processing the external i.e private mempool transaction
     fn process_external_transaction(&mut self, tx: TYPES::Transaction) {
         // PRIVATE MEMPOOL TRANSACTION PROCESSING
-        tracing::info!("Processing external transaction");
+        tracing::debug!("Processing external transaction");
         let tx_hash = tx.commit();
         // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
         if self.tx_hash_to_available_txns.contains_key(&tx_hash)
@@ -245,7 +267,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     #[tracing::instrument(skip_all, name = "process hotshot transaction", 
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     fn process_hotshot_transaction(&mut self, tx: TYPES::Transaction) {
-        tracing::info!("Processing hotshot transaction");
+        tracing::debug!("Processing hotshot transaction");
         let tx_hash = tx.commit();
         // HOTSHOT MEMPOOL TRANSACTION PROCESSING
         // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
@@ -502,6 +524,36 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 self.builder_commitments.clone(),
                 true,
             );
+
+            // empty out the builder commitments
+            self.builder_commitments.clear();
+
+            // go throug the da_proposal_payload_commit_to_da_proposal hashmap and update it by removing the entries which are less than the latest_leaf_view_number
+            let mut modified_da_proposal_payload_commit_to_da_proposal = HashMap::new();
+            for (builder_commitment, da_proposal) in
+                self.da_proposal_payload_commit_to_da_proposal.iter()
+            {
+                if da_proposal.view_number > latest_leaf_view_number {
+                    modified_da_proposal_payload_commit_to_da_proposal
+                        .insert(builder_commitment.clone(), da_proposal.clone());
+                }
+            }
+            self.da_proposal_payload_commit_to_da_proposal =
+                modified_da_proposal_payload_commit_to_da_proposal;
+
+            // do the same for quorum_proposal_payload_commit_to_quorum_proposal hashmap
+            let mut modified_quorum_proposal_payload_commit_to_quorum_proposal = HashMap::new();
+            for (builder_commitment, quorum_proposal) in self
+                .quorum_proposal_payload_commit_to_quorum_proposal
+                .iter()
+            {
+                if quorum_proposal.view_number > latest_leaf_view_number {
+                    modified_quorum_proposal_payload_commit_to_quorum_proposal
+                        .insert(builder_commitment.clone(), quorum_proposal.clone());
+                }
+            }
+            self.quorum_proposal_payload_commit_to_quorum_proposal =
+                modified_quorum_proposal_payload_commit_to_quorum_proposal;
             //return Some(Status::ShouldContinue);
         } else if self.built_from_proposed_block.view_number <= latest_leaf_view_number {
             tracing::info!("Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
@@ -513,6 +565,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 self.builder_commitments.clone(),
                 false,
             );
+
+            // clear out the local_block_hash_to_block
             return Some(Status::ShouldExit);
         }
 
@@ -538,6 +592,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
                         // maybe in the future, remove from the included_txns set also
                         // self.included_txns.remove(&tx_hash);
+                        // clear the included txns
+                        self.included_txns.clear();
                     }
                 }
                 None => {
@@ -620,7 +676,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 txn_count
             );
             // add the local builder commitment list
-            self.builder_commitments.push(builder_hash.clone());
+            self.builder_commitments.insert(builder_hash.clone());
 
             let encoded_txns: Vec<u8> = payload.encode().unwrap().collect();
             let block_size: u64 = encoded_txns.len() as u64;
@@ -655,7 +711,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     }
 
     async fn process_block_request(&mut self, req: RequestMessage) {
-        let requested_vid_commitment = req.requested_vid_commitment;
+        let requested_vid_commitment = req.requested_vid_commitment.unwrap();
         // If a spawned clone is active then it will handle the request, otherwise the bootstrapped builder will handle it based on flag bootstrap_build_block
         if requested_vid_commitment == self.built_from_proposed_block.vid_commitment
             || (self.built_from_proposed_block.view_number.get_u64()
@@ -677,29 +733,52 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         req
                     );
 
-                    // form the response message and send it back
-                    let response_msg = ResponseMessage {
-                        builder_hash: response.builder_hash.clone(),
+                    // // form the response message and send it back
+                    // let response_msg = ResponseMessage {
+                    //     builder_hash: response.builder_hash.clone(),
+                    //     block_size: response.block_size,
+                    //     offered_fee: response.offered_fee,
+                    //     // block_payload: response.block_payload,
+                    //     // metadata: response.metadata,
+                    //     // vid_data: Arc::new(RwLock::new(WaitAndKeep::Wait(response.vid_receiver))),
+                    // };
+
+                    self.block_hash_to_block.insert(
+                        response.builder_hash.clone(),
+                        (
+                            response.block_payload,
+                            response.metadata,
+                            Arc::new(RwLock::new(WaitAndKeep::Wait(response.vid_receiver))),
+                            response.offered_fee,
+                        ),
+                    );
+
+                    let response = ResponseMessage1 {
+                        builder_hash: response.builder_hash,
                         block_size: response.block_size,
                         offered_fee: response.offered_fee,
                     };
+                    // form the type 1 response message and send it back
+                    let response_msg = ResponseMessage::ResponseMessage1(response);
 
                     self.response_sender.send(response_msg).await.unwrap();
 
                     // write to global state as well
-                    self.global_state
-                        .write_arc()
-                        .await
-                        .block_hash_to_block
-                        .insert(
-                            response.builder_hash,
-                            (
-                                response.block_payload,
-                                response.metadata,
-                                Arc::new(RwLock::new(WaitAndKeep::Wait(response.vid_receiver))),
-                                response.offered_fee,
-                            ),
-                        );
+                    // self.global_state
+                    //     .write_arc()
+                    //     .await
+                    //     .block_hash_to_block
+                    //     .insert(
+                    //         response.builder_hash,
+                    //         (
+                    //             response.block_payload,
+                    //             response.metadata,
+                    //             Arc::new(RwLock::new(WaitAndKeep::Wait(response.vid_receiver))),
+                    //             response.offered_fee,
+                    //         ),
+                    //     );
+
+                    //self.response_sender.send(response_msg).await.unwrap();
                 }
                 None => {
                     tracing::warn!("No response to send");
@@ -722,7 +801,51 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         req
                     );
                     if let MessageType::RequestMessage(req) = req {
-                        self.process_block_request(req).await;
+                        if req.builder_commitment.is_some() {
+                            // check the api_req_num, if it 1, then make response type 1, else response type 2
+                            if req.api_req_num == 1 {
+                                // get the info from self.block_hash_to_block
+                                let response = ResponseMessage2 {
+                                    block_payload: self
+                                        .block_hash_to_block
+                                        .get(&req.builder_commitment.clone().unwrap())
+                                        .unwrap()
+                                        .0
+                                        .clone(),
+                                    metadata: self
+                                        .block_hash_to_block
+                                        .get(&req.builder_commitment.unwrap())
+                                        .unwrap()
+                                        .1
+                                        .clone(),
+                                };
+
+                                let response_msg = ResponseMessage::ResponseMessage2(response);
+
+                                self.response_sender.send(response_msg).await.unwrap();
+                            } else {
+                                let response = ResponseMessage3 {
+                                    vid_data: self
+                                        .block_hash_to_block
+                                        .get(&req.builder_commitment.clone().unwrap())
+                                        .unwrap()
+                                        .2
+                                        .clone(),
+                                    offered_fee: self
+                                        .block_hash_to_block
+                                        .get(&req.builder_commitment.unwrap())
+                                        .unwrap()
+                                        .3
+                                        .clone(),
+                                };
+
+                                let response_msg = ResponseMessage::ResponseMessage3(response);
+
+                                self.response_sender.send(response_msg).await.unwrap();
+                            }
+                        } else {
+                            self.process_block_request(req).await;
+                        }
                     }
                 }
 
@@ -732,7 +855,51 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match req {
                             Some(req) => {
                                 if let MessageType::RequestMessage(req) = req {
-                                    self.process_block_request(req).await;
+                                    if req.builder_commitment.is_some() {
+                                        // check the api_req_num, if it 1, then make response type 1, else response type 2
+                                        if req.api_req_num == 1 {
+                                            // get the info from self.block_hash_to_block
+                                            let response = ResponseMessage2 {
+                                                block_payload: self
+                                                    .block_hash_to_block
+                                                    .get(&req.builder_commitment.clone().unwrap())
+                                                    .unwrap()
+                                                    .0
+                                                    .clone(),
+                                                metadata: self
+                                                    .block_hash_to_block
+                                                    .get(&req.builder_commitment.unwrap())
+                                                    .unwrap()
+                                                    .1
+                                                    .clone(),
+                                            };
+
+                                            let response_msg = ResponseMessage::ResponseMessage2(response);
+
+                                            self.response_sender.send(response_msg).await.unwrap();
+                                        } else {
+                                            let response = ResponseMessage3 {
+                                                vid_data: self
+                                                    .block_hash_to_block
+                                                    .get(&req.builder_commitment.clone().unwrap())
+                                                    .unwrap()
+                                                    .2
+                                                    .clone(),
+                                                offered_fee: self
+                                                    .block_hash_to_block
+                                                    .get(&req.builder_commitment.unwrap())
+                                                    .unwrap()
+                                                    .3
+                                                    .clone(),
+                                            };
+
+                                            let response_msg = ResponseMessage::ResponseMessage3(response);
+
+                                            self.response_sender.send(response_msg).await.unwrap();
+                                        }
+                                    } else {
+                                        self.process_block_request(req).await;
+                                    }
                                 }
                             }
                             None => {
@@ -826,6 +993,12 @@ pub enum MessageType<TYPES: NodeType> {
     RequestMessage(RequestMessage),
 }
 
+pub enum ResponseMessage<TYPES: NodeType> {
+    ResponseMessage1(ResponseMessage1),
+    ResponseMessage2(ResponseMessage2<TYPES>),
+    ResponseMessage3(ResponseMessage3),
+}
+
 #[allow(clippy::too_many_arguments)]
 impl<TYPES: NodeType> BuilderState<TYPES> {
     pub fn new(
@@ -836,7 +1009,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         qc_receiver: BroadcastReceiver<MessageType<TYPES>>,
         req_receiver: BroadcastReceiver<MessageType<TYPES>>,
         global_state: Arc<RwLock<GlobalState<TYPES>>>,
-        response_sender: UnboundedSender<ResponseMessage>,
+        response_sender: UnboundedSender<ResponseMessage<TYPES>>,
         num_nodes: NonZeroUsize,
         bootstrap_view_number: TYPES::Time,
     ) -> Self {
@@ -855,7 +1028,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             quorum_proposal_payload_commit_to_quorum_proposal: HashMap::new(),
             global_state,
             response_sender,
-            builder_commitments: vec![],
+            builder_commitments: HashSet::new(),
             total_nodes: num_nodes,
             bootstrap_view_number,
             spawned_clones_views_list: Arc::new(RwLock::new(BTreeSet::new())),
