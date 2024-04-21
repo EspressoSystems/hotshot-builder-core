@@ -185,6 +185,9 @@ pub struct BuilderState<TYPES: NodeType> {
 
     // list of views for which we have builder spawned clones
     pub spawned_clones_views_list: Arc<RwLock<BTreeSet<TYPES::Time>>>,
+
+    /// last bootstrap garbage collected decided seen view_num
+    pub last_bootstrap_garbage_collected_decided_seen_view_num: u64,
 }
 
 /// Trait to hold the helper functions for the builder
@@ -490,7 +493,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let _latest_decide_parent_commitment = leaf_chain[0].leaf.get_parent_commitment();
         let _latest_decide_commitment = leaf_chain[0].leaf.commit();
         let latest_leaf_view_number = leaf_chain[0].leaf.get_view_number();
-
         // bootstrapping case
         // handle the case when we hear a decide event before we have atleast one clone, in that case, we might exit the builder
         // and not make any progress; so we need to handle that case
@@ -498,55 +500,63 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         if self.built_from_proposed_block.view_number.get_u64()
             == self.bootstrap_view_number.get_u64()
         {
-            tracing::info!("Bootstrapped builder state, should continue");
-            // split_off returns greater than equal to set, so we want everything after the latest decide event
-            let split_list = self
-                .spawned_clones_views_list
-                .write()
-                .await
-                .split_off(&(latest_leaf_view_number + 1));
-
-            // update the spawned_clones_views_list with the split list now
-            *self.spawned_clones_views_list.write().await = split_list;
-            // remove all the builder commitments
-            self.global_state.write_arc().await.remove_handles(
-                &self.built_from_proposed_block.vid_commitment,
-                self.builder_commitments.clone(),
-                true,
-            );
-
-            // empty out the builder commitments
-            self.builder_commitments.clear();
-
-            // go throug the da_proposal_payload_commit_to_da_proposal hashmap and update it by removing the entries which are less than the latest_leaf_view_number
-            let mut modified_da_proposal_payload_commit_to_da_proposal = HashMap::new();
-            for (builder_commitment, da_proposal) in
-                self.da_proposal_payload_commit_to_da_proposal.iter()
+            if latest_leaf_view_number.get_u64()
+                - self.last_bootstrap_garbage_collected_decided_seen_view_num
+                >= 10
             {
-                if da_proposal.view_number > latest_leaf_view_number {
-                    modified_da_proposal_payload_commit_to_da_proposal
-                        .insert(builder_commitment.clone(), da_proposal.clone());
-                }
-            }
-            self.da_proposal_payload_commit_to_da_proposal =
-                modified_da_proposal_payload_commit_to_da_proposal;
+                tracing::info!("Bootstrapped builder state, should continue");
+                // split_off returns greater than equal to set, so we want everything after the latest decide event
+                let split_list = self
+                    .spawned_clones_views_list
+                    .write()
+                    .await
+                    .split_off(&(latest_leaf_view_number + 1));
 
-            // do the same for quorum_proposal_payload_commit_to_quorum_proposal hashmap
-            let mut modified_quorum_proposal_payload_commit_to_quorum_proposal = HashMap::new();
-            for (builder_commitment, quorum_proposal) in self
-                .quorum_proposal_payload_commit_to_quorum_proposal
-                .iter()
-            {
-                if quorum_proposal.view_number > latest_leaf_view_number {
-                    modified_quorum_proposal_payload_commit_to_quorum_proposal
-                        .insert(builder_commitment.clone(), quorum_proposal.clone());
+                // update the spawned_clones_views_list with the split list now
+                *self.spawned_clones_views_list.write().await = split_list;
+                // remove all the builder commitments
+                self.global_state.write_arc().await.remove_handles(
+                    &self.built_from_proposed_block.vid_commitment,
+                    self.builder_commitments.clone(),
+                    true,
+                );
+
+                // empty out the builder commitments
+                self.builder_commitments.clear();
+
+                // go throug the da_proposal_payload_commit_to_da_proposal hashmap and update it by removing the entries which are less than the latest_leaf_view_number
+                let mut modified_da_proposal_payload_commit_to_da_proposal = HashMap::new();
+                for (builder_commitment, da_proposal) in
+                    self.da_proposal_payload_commit_to_da_proposal.iter()
+                {
+                    if da_proposal.view_number > latest_leaf_view_number {
+                        modified_da_proposal_payload_commit_to_da_proposal
+                            .insert(builder_commitment.clone(), da_proposal.clone());
+                    }
                 }
+                self.da_proposal_payload_commit_to_da_proposal =
+                    modified_da_proposal_payload_commit_to_da_proposal;
+
+                // do the same for quorum_proposal_payload_commit_to_quorum_proposal hashmap
+                let mut modified_quorum_proposal_payload_commit_to_quorum_proposal = HashMap::new();
+                for (builder_commitment, quorum_proposal) in self
+                    .quorum_proposal_payload_commit_to_quorum_proposal
+                    .iter()
+                {
+                    if quorum_proposal.view_number > latest_leaf_view_number {
+                        modified_quorum_proposal_payload_commit_to_quorum_proposal
+                            .insert(builder_commitment.clone(), quorum_proposal.clone());
+                    }
+                }
+                self.quorum_proposal_payload_commit_to_quorum_proposal =
+                    modified_quorum_proposal_payload_commit_to_quorum_proposal;
+                //return Some(Status::ShouldContinue);
+
+                self.last_bootstrap_garbage_collected_decided_seen_view_num =
+                    latest_leaf_view_number.get_u64();
             }
-            self.quorum_proposal_payload_commit_to_quorum_proposal =
-                modified_quorum_proposal_payload_commit_to_quorum_proposal;
-            //return Some(Status::ShouldContinue);
         } else if self.built_from_proposed_block.view_number.get_u64()
-            <= latest_leaf_view_number.get_u64() - 5
+            <= latest_leaf_view_number.get_u64() - 10
         {
             tracing::info!("Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
             // convert leaf commitments into buildercommiments
@@ -912,6 +922,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             total_nodes: num_nodes,
             bootstrap_view_number,
             spawned_clones_views_list: Arc::new(RwLock::new(BTreeSet::new())),
+            last_bootstrap_garbage_collected_decided_seen_view_num: bootstrap_view_number.get_u64(),
         }
     }
 }
