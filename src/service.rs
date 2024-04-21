@@ -43,13 +43,10 @@ use hotshot_events_service::{
     events_source::{BuilderEvent, BuilderEventType},
 };
 use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::{
-    collections::{HashMap, HashSet},
-    ptr::read,
-};
 use tagged_base64::TaggedBase64;
 use tide_disco::method::ReadState;
 
@@ -81,7 +78,7 @@ pub struct GlobalState<Types: NodeType> {
     pub request_sender: BroadcastSender<MessageType<Types>>,
 
     // getting a response from the builder states based on the request sent by the hotshot
-    pub response_receiver: UnboundedReceiver<ResponseMessage<Types>>,
+    pub response_receiver: UnboundedReceiver<ResponseMessage>,
 
     // sending a transaction from the hotshot/private mempool to the builder states
     // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
@@ -98,7 +95,7 @@ impl<Types: NodeType> GlobalState<Types> {
             <<Types as NodeType>::BuilderSignatureKey as BuilderSignatureKey>::BuilderPrivateKey,
         ),
         request_sender: BroadcastSender<MessageType<Types>>,
-        response_receiver: UnboundedReceiver<ResponseMessage<Types>>,
+        response_receiver: UnboundedReceiver<ResponseMessage>,
         tx_sender: BroadcastSender<MessageType<Types>>,
         instance_state: Types::InstanceState,
         bootstrapped_builder_state_id: VidCommitment,
@@ -190,10 +187,8 @@ where
         }
 
         let req_msg = RequestMessage {
-            requested_vid_commitment: Some(*for_parent),
+            requested_vid_commitment: (*for_parent),
             bootstrap_build_block: bootstrapped_state_build_block,
-            builder_commitment: None,
-            api_req_num: 0,
         };
 
         tracing::debug!(
@@ -257,7 +252,7 @@ where
         // // }
         let response_received = self.response_receiver.recv().await;
         match response_received {
-            Ok(ResponseMessage::ResponseMessage1(response)) => {
+            Ok(response) => {
                 // sign over the block info
                 let signature_over_block_info =
                     <Types as NodeType>::BuilderSignatureKey::sign_block_info(
@@ -278,48 +273,18 @@ where
                     _phantom: Default::default(),
                 };
                 tracing::info!(
-                    "sending Initial block info response for parent {:?} with builder hash {:?}",
-                    req_msg.requested_vid_commitment,
-                    initial_block_info.block_hash
+                    "sending Initial block info response for parent {:?}",
+                    req_msg.requested_vid_commitment
                 );
                 Ok(vec![initial_block_info])
             }
-            _ => Err(BuildError::Error {
-                message: "No blocks available".to_string(),
-            }),
+            _ => {
+                tracing::error!("No blocks available");
+                Err(BuildError::Error {
+                    message: "No blocks available".to_string(),
+                })
+            }
         }
-        // match {
-        //     Ok(response) => {
-        //         // sign over the block info
-        //         let signature_over_block_info =
-        //             <Types as NodeType>::BuilderSignatureKey::sign_block_info(
-        //                 &self.builder_keys.1,
-        //                 response.block_size,
-        //                 response.offered_fee,
-        //                 &response.builder_hash,
-        //             )
-        //             .expect("Available block info signing failed");
-
-        //         // insert the block info into local hashmap
-        //         let initial_block_info = AvailableBlockInfo::<Types> {
-        //             block_hash: response.builder_hash,
-        //             block_size: response.block_size,
-        //             offered_fee: response.offered_fee,
-        //             signature: signature_over_block_info,
-        //             sender: self.builder_keys.0.clone(),
-        //             _phantom: Default::default(),
-        //         };
-        //         tracing::info!(
-        //             "sending Initial block info response for parent {:?} with builder hash {:?}",
-        //             req_msg.requested_vid_commitment,
-        //             initial_block_info.block_hash
-        //         );
-        //         Ok(vec![initial_block_info])
-        //     }
-        //     _ => Err(BuildError::Error {
-        //         message: "No blocks available".to_string(),
-        //     }),
-        // }
     }
     async fn claim_block(
         &self,
@@ -338,80 +303,32 @@ where
                 message: "Signature validation failed in claim block".to_string(),
             });
         }
-        // if let Some(block) = self.block_hash_to_block.get(block_hash) {
-        //     // sign over the builder commitment, as the proposer can computer it based on provide block_payload
-        //     // and the metata data
-        //     let response_block_hash = block.0.builder_commitment(&block.1);
-        //     let signature_over_builder_commitment =
-        //         <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
-        //             &self.builder_keys.1,
-        //             response_block_hash.as_ref(),
-        //         )
-        //         .expect("Claim block signing failed");
-        //     let block_data = AvailableBlockData::<Types> {
-        //         block_payload: block.0.clone(),
-        //         metadata: block.1.clone(),
-        //         signature: signature_over_builder_commitment,
-        //         sender: self.builder_keys.0.clone(),
-        //     };
-        //     tracing::debug!(
-        //         "Sending claimed block data for block hash: {:?}",
-        //         block_hash
-        //     );
-        //     Ok(block_data)
-        // } else {
-        //     tracing::error!("Claim Block not found");
-        //     Err(BuildError::Error {
-        //         message: "Block data not found".to_string(),
-        //     })
-        // }
-
-        let req_msg = RequestMessage {
-            requested_vid_commitment: None,
-            bootstrap_build_block: false,
-            builder_commitment: Some(block_hash.clone()),
-            api_req_num: 1,
-        };
-
-        tracing::debug!(
-            "Requesting available blocks for parent {:?}",
-            req_msg.requested_vid_commitment
-        );
-
-        self.request_sender
-            .broadcast(MessageType::RequestMessage(req_msg.clone()))
-            .await
-            .unwrap();
-        let response_received = self.response_receiver.recv().await;
-
-        match response_received {
-            Ok(ResponseMessage::ResponseMessage2(response)) => {
-                // sign over the block info
-                let signature_over_builder_commitment =
-                    <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
-                        &self.builder_keys.1,
-                        block_hash.as_ref(),
-                    )
-                    .expect("Claim block signing failed");
-
-                let block_data = AvailableBlockData::<Types> {
-                    block_payload: response.block_payload,
-                    metadata: response.metadata,
-                    signature: signature_over_builder_commitment,
-                    sender: self.builder_keys.0.clone(),
-                };
-                tracing::debug!(
-                    "Sending claimed block data for block hash: {:?}",
-                    block_hash
-                );
-                Ok(block_data)
-            }
-            _ => {
-                tracing::error!("Claim Block not found");
-                Err(BuildError::Error {
-                    message: "Block data not found".to_string(),
-                })
-            } // TODO: should we remove the block from the hashmap?
+        if let Some(block) = self.block_hash_to_block.get(block_hash) {
+            // sign over the builder commitment, as the proposer can computer it based on provide block_payload
+            // and the metata data
+            let response_block_hash = block.0.builder_commitment(&block.1);
+            let signature_over_builder_commitment =
+                <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
+                    &self.builder_keys.1,
+                    response_block_hash.as_ref(),
+                )
+                .expect("Claim block signing failed");
+            let block_data = AvailableBlockData::<Types> {
+                block_payload: block.0.clone(),
+                metadata: block.1.clone(),
+                signature: signature_over_builder_commitment,
+                sender: self.builder_keys.0.clone(),
+            };
+            tracing::debug!(
+                "Sending claimed block data for block hash: {:?}",
+                block_hash
+            );
+            Ok(block_data)
+        } else {
+            tracing::error!("Claim Block not found");
+            Err(BuildError::Error {
+                message: "Block data not found".to_string(),
+            })
         }
     }
     async fn claim_block_header_input(
@@ -431,100 +348,41 @@ where
                 message: "Signature validation failed in claim block header input".to_string(),
             });
         }
-        // if let Some(block) = self.block_hash_to_block.get(block_hash) {
-        //     tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
-        //     let (vid_commitment, vid_precompute_data) = block.2.write().await.get().await?;
-        //     let signature_over_vid_commitment =
-        //         <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
-        //             &self.builder_keys.1,
-        //             vid_commitment.as_ref(),
-        //         )
-        //         .expect("Claim block header input message signing failed");
-
-        //     let signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
-        //         &self.builder_keys.1,
-        //         block.3,
-        //         block_hash,
-        //         &vid_commitment,
-        //     )
-        //     .expect("Claim block header input fee signing failed");
-
-        //     let response = AvailableBlockHeaderInput::<Types> {
-        //         vid_commitment,
-        //         vid_precompute_data,
-        //         fee_signature: signature_over_fee_info,
-        //         message_signature: signature_over_vid_commitment,
-        //         sender: self.builder_keys.0.clone(),
-        //     };
-        //     tracing::debug!(
-        //         "Sending claimed block header input response for block hash: {:?}",
-        //         block_hash
-        //     );
-        //     Ok(response)
-        // } else {
-        //     tracing::error!("Claim Block Header Input not found");
-        //     Err(BuildError::Error {
-        //         message: "Block Header not found".to_string(),
-        //     })
-        // }
-
-        let req_msg = RequestMessage {
-            requested_vid_commitment: None,
-            bootstrap_build_block: false,
-            builder_commitment: Some(block_hash.clone()),
-            api_req_num: 2,
-        };
-
-        tracing::debug!(
-            "Requesting available blocks for parent {:?}",
-            req_msg.requested_vid_commitment
-        );
-
-        self.request_sender
-            .broadcast(MessageType::RequestMessage(req_msg.clone()))
-            .await
-            .unwrap();
-
-        let response_received = self.response_receiver.recv().await;
-
-        match response_received {
-            Ok(ResponseMessage::ResponseMessage3(response)) => {
-                let (vid_commitment, vid_precompute_data) =
-                    response.vid_data.write().await.get().await?;
-                let signature_over_vid_commitment =
-                    <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
-                        &self.builder_keys.1,
-                        vid_commitment.as_ref(),
-                    )
-                    .expect("Claim block header input message signing failed");
-
-                let signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
+        if let Some(block) = self.block_hash_to_block.get(block_hash) {
+            tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
+            let (vid_commitment, vid_precompute_data) = block.2.write().await.get().await?;
+            let signature_over_vid_commitment =
+                <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
                     &self.builder_keys.1,
-                    response.offered_fee,
-                    block_hash,
-                    &vid_commitment,
+                    vid_commitment.as_ref(),
                 )
-                .expect("Claim block header input fee signing failed");
+                .expect("Claim block header input message signing failed");
 
-                let response = AvailableBlockHeaderInput::<Types> {
-                    vid_commitment,
-                    vid_precompute_data,
-                    fee_signature: signature_over_fee_info,
-                    message_signature: signature_over_vid_commitment,
-                    sender: self.builder_keys.0.clone(),
-                };
-                tracing::debug!(
-                    "Sending claimed block header input response for block hash: {:?}",
-                    block_hash
-                );
-                Ok(response)
-            }
-            _ => {
-                tracing::error!("Claim Block header not found");
-                Err(BuildError::Error {
-                    message: "Block data header not found".to_string(),
-                })
-            }
+            let signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
+                &self.builder_keys.1,
+                block.3,
+                block_hash,
+                &vid_commitment,
+            )
+            .expect("Claim block header input fee signing failed");
+
+            let response = AvailableBlockHeaderInput::<Types> {
+                vid_commitment,
+                vid_precompute_data,
+                fee_signature: signature_over_fee_info,
+                message_signature: signature_over_vid_commitment,
+                sender: self.builder_keys.0.clone(),
+            };
+            tracing::debug!(
+                "Sending claimed block header input response for block hash: {:?}",
+                block_hash
+            );
+            Ok(response)
+        } else {
+            tracing::error!("Claim Block Header Input not found");
+            Err(BuildError::Error {
+                message: "Block Header not found".to_string(),
+            })
         }
     }
     async fn get_builder_address(
