@@ -718,7 +718,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         if requested_vid_commitment == self.built_from_proposed_block.vid_commitment
             || (self.built_from_proposed_block.view_number.get_u64()
                 == self.bootstrap_view_number.get_u64()
-                && req.bootstrap_build_block)
+                && (req.bootstrap_build_block
+                    || !self
+                        .global_state
+                        .read_arc()
+                        .await
+                        .spawned_builder_states
+                        .contains(&requested_vid_commitment)))
         {
             tracing::debug!(
                 "REQUEST HANDLED BY BUILDER WITH VIEW {:?}",
