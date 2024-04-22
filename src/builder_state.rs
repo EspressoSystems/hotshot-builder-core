@@ -565,14 +565,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             quorum_proposal.block_header.builder_commitment();
         let mut leaf = Leaf::from_quorum_proposal(&quorum_proposal);
 
-        // Hack for genesis mishandling in HotShot.
-        // Once the is_genesis field is removed, you can delete this block.
-        if quorum_proposal.justify_qc.is_genesis {
-            // get the instance state from the global state
-            let instance_state = &self.global_state.read_arc().await.instance_state;
-            leaf.set_parent_commitment(Leaf::genesis(instance_state).commit());
-        }
-
         self.built_from_proposed_block.leaf_commit = leaf.commit();
 
         let payload = <TYPES::BlockPayload as BlockPayload>::from_bytes(
