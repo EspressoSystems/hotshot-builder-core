@@ -47,6 +47,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::Duration;
 use tagged_base64::TaggedBase64;
 use tide_disco::method::ReadState;
 
@@ -72,7 +73,7 @@ pub struct GlobalState<Types: NodeType> {
     >,
 
     // registered builer states
-    pub spawned_builder_states: HashSet<VidCommitment>,
+    pub spawned_builder_states: HashMap<VidCommitment, Types::Time>,
 
     // sending a request from the hotshot to the builder states
     pub request_sender: BroadcastSender<MessageType<Types>>,
@@ -86,6 +87,9 @@ pub struct GlobalState<Types: NodeType> {
 
     // Instance state
     pub instance_state: Types::InstanceState,
+
+    // max waiting time to serve first api request
+    pub max_api_waiting_time: Duration,
 }
 
 impl<Types: NodeType> GlobalState<Types> {
@@ -99,9 +103,11 @@ impl<Types: NodeType> GlobalState<Types> {
         tx_sender: BroadcastSender<MessageType<Types>>,
         instance_state: Types::InstanceState,
         bootstrapped_builder_state_id: VidCommitment,
+        bootstrapped_view_num: Types::Time,
+        max_api_waiting_time: Duration,
     ) -> Self {
-        let mut spawned_builder_states = HashSet::new();
-        spawned_builder_states.insert(bootstrapped_builder_state_id);
+        let mut spawned_builder_states = HashMap::new();
+        spawned_builder_states.insert(bootstrapped_builder_state_id, bootstrapped_view_num);
         GlobalState {
             builder_keys,
             block_hash_to_block: Default::default(),
@@ -110,6 +116,7 @@ impl<Types: NodeType> GlobalState<Types> {
             response_receiver,
             tx_sender,
             instance_state,
+            max_api_waiting_time,
         }
     }
 
@@ -117,22 +124,23 @@ impl<Types: NodeType> GlobalState<Types> {
     pub fn remove_handles(
         &mut self,
         builder_vid_commitment: &VidCommitment,
-        block_hashes: HashSet<BuilderCommitment>,
+        block_hashes: HashSet<(Types::Time, BuilderCommitment)>,
         bootstrap: bool,
     ) {
-        tracing::info!(
-            "Removing handles for builder commitment {:?}",
-            builder_vid_commitment
-        );
         // remove the builder commitment from the spawned builder states
         if !bootstrap {
-            self.spawned_builder_states.remove(builder_vid_commitment);
+            let view_num = self.spawned_builder_states.remove(builder_vid_commitment);
+            if view_num.is_some() {
+                tracing::info!(
+                    "Removing handles for builder view num {:?}",
+                    view_num.unwrap()
+                );
+            }
         }
         tracing::debug!("Removing builder commitments: ");
-
-        for block_hash in block_hashes {
+        for (view_num, block_hash) in block_hashes {
             self.block_hash_to_block.remove(&block_hash);
-            tracing::debug!("{:?},", block_hash);
+            tracing::debug!("GC view_num {:?} block_hash {:?},", view_num, block_hash);
         }
         tracing::debug!("]\n");
     }
@@ -182,7 +190,7 @@ where
 
         let mut bootstrapped_state_build_block = false;
         // check in the local spawned builder states, if it doesn't exist, and then let bootstrapped build a block for it
-        if !self.spawned_builder_states.contains(for_parent) {
+        if !self.spawned_builder_states.contains_key(for_parent) {
             bootstrapped_state_build_block = true;
         }
 
@@ -191,7 +199,7 @@ where
             bootstrap_build_block: bootstrapped_state_build_block,
         };
 
-        tracing::debug!(
+        tracing::info!(
             "Requesting available blocks for parent {:?}",
             req_msg.requested_vid_commitment
         );
@@ -201,68 +209,20 @@ where
             .await
             .unwrap();
 
-        // if let ResponseMessage::ResponseMessage1(response_received) =
-        //     self.response_receiver.recv().await;
-        // else{
-
-        // }
-        // Do a non-blocking call instead of a blocking call, and loop undtil we get a response
-        //let response_received = self.response_receiver.try_recv();
-        // while response_received.is_err() {
-        //     response_received = self.response_receiver.try_recv();
-        // }
-        // while let Ok(response) = self.response_receiver.try_recv() {
-        //     //tracing::debug!("Received request message: {:?}", req);
-
-        //     // sign over the block info
-        //     let signature_over_block_info =
-        //         <Types as NodeType>::BuilderSignatureKey::sign_block_info(
-        //             &self.builder_keys.1,
-        //             response.block_size,
-        //             response.offered_fee,
-        //             &response.builder_hash,
-        //         )
-        //         .expect("Available block info signing failed");
-
-        //     // insert the block info into local hashmap
-        //     let initial_block_info = AvailableBlockInfo::<Types> {
-        //         block_hash: response.builder_hash,
-        //         block_size: response.block_size,
-        //         offered_fee: response.offered_fee,
-        //         signature: signature_over_block_info,
-        //         sender: self.builder_keys.0.clone(),
-        //         _phantom: Default::default(),
-        //     };
-        //     tracing::info!(
-        //         "sending Initial block info response for parent {:?} with builder hash {:?}",
-        //         req_msg.requested_vid_commitment,
-        //         initial_block_info.block_hash
-        //     );
-        //     return Ok(vec![initial_block_info]);
-        // }
-        // let err = Err(BuildError::Error {
-        //     message: "No blocks available".to_string(),
-        // });
-
-        // return err;
-        // // else {
-        // //     _ => Err(BuildError::Error {
-        // //         message: "No blocks available".to_string(),
-        // //     }),
-        // // }
-        // TODO convert later to debug
-        tracing::info!(
+        tracing::debug!(
             "Waiting for response for parent {:?}",
             req_msg.requested_vid_commitment
         );
-        let response_received = self.response_receiver.recv().await;
-        tracing::info!(
-            "Received response for parent {:?}",
-            req_msg.requested_vid_commitment
-        );
+
+        let response_received = async_compatibility_layer::art::async_timeout(
+            self.max_api_waiting_time,
+            self.response_receiver.recv(),
+        )
+        .await;
+
         match response_received {
-            Ok(response) => {
-                // sign over the block info
+            // We got available blocks
+            Ok(Ok(response)) => {
                 let signature_over_block_info =
                     <Types as NodeType>::BuilderSignatureKey::sign_block_info(
                         &self.builder_keys.1,
@@ -274,7 +234,7 @@ where
 
                 // insert the block info into local hashmap
                 let initial_block_info = AvailableBlockInfo::<Types> {
-                    block_hash: response.builder_hash,
+                    block_hash: response.builder_hash.clone(),
                     block_size: response.block_size,
                     offered_fee: response.offered_fee,
                     signature: signature_over_block_info,
@@ -282,13 +242,24 @@ where
                     _phantom: Default::default(),
                 };
                 tracing::info!(
-                    "sending Initial block info response for parent {:?}",
-                    req_msg.requested_vid_commitment
+                    "sending Initial block info response for parent {:?} with block hash {:?}",
+                    req_msg.requested_vid_commitment,
+                    response.builder_hash
                 );
                 Ok(vec![initial_block_info])
             }
-            _ => {
-                tracing::error!("No blocks available");
+
+            // We failed to get available blocks
+            Ok(Err(err)) => {
+                tracing::error!(%err, "Couldn't get available blocks in time");
+                Err(BuildError::Error {
+                    message: "No blocks available".to_string(),
+                })
+            }
+
+            // We timed out while getting available blocks
+            Err(err) => {
+                tracing::error!(%err, "Time out while getting available blocks in time");
                 Err(BuildError::Error {
                     message: "No blocks available".to_string(),
                 })
@@ -301,7 +272,7 @@ where
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockData<Types>, BuildError> {
-        tracing::debug!(
+        tracing::info!(
             "Received request for claiming block for block hash: {:?}",
             block_hash
         );
@@ -328,7 +299,7 @@ where
                 signature: signature_over_builder_commitment,
                 sender: self.builder_keys.0.clone(),
             };
-            tracing::debug!(
+            tracing::info!(
                 "Sending claimed block data for block hash: {:?}",
                 block_hash
             );
@@ -346,7 +317,7 @@ where
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
-        tracing::debug!(
+        tracing::info!(
             "Received request for claiming block header input for block hash: {:?}",
             block_hash
         );
@@ -382,7 +353,7 @@ where
                 message_signature: signature_over_vid_commitment,
                 sender: self.builder_keys.0.clone(),
             };
-            tracing::debug!(
+            tracing::info!(
                 "Sending claimed block header input response for block hash: {:?}",
                 block_hash
             );

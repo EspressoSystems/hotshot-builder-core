@@ -108,11 +108,7 @@ pub struct BuiltFromProposedBlock<TYPES: NodeType> {
 // implement display for the derived info
 impl<TYPES: NodeType> std::fmt::Display for BuiltFromProposedBlock<TYPES> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "View Number: {:?}, Builder Commitment: {:?}",
-            self.view_number, self.builder_commitment
-        )
+        write!(f, "View Number: {:?}", self.view_number)
     }
 }
 
@@ -129,20 +125,6 @@ pub struct BuilderState<TYPES: NodeType> {
 
     /// Included txs set while building blocks
     pub included_txns: HashSet<Commitment<TYPES::Transaction>>,
-
-    /// block hash to the block payload
-    //pub block_hash_to_block: HashMap<BuilderCommitment, TYPES::BlockPayload>,
-
-    // data store for the blocks
-    pub block_hash_to_block: HashMap<
-        BuilderCommitment,
-        (
-            TYPES::BlockPayload,
-            <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
-            Arc<RwLock<WaitAndKeep<(VidCommitment, VidPrecomputeData)>>>,
-            u64, // Fees
-        ),
-    >,
 
     /// da_proposal_payload_commit to da_proposal
     pub da_proposal_payload_commit_to_da_proposal: HashMap<BuilderCommitment, DAProposal<TYPES>>,
@@ -180,7 +162,7 @@ pub struct BuilderState<TYPES: NodeType> {
     pub total_nodes: NonZeroUsize,
 
     // locally spawned builder Commitements
-    pub builder_commitments: HashSet<BuilderCommitment>,
+    pub builder_commitments: HashSet<(TYPES::Time, BuilderCommitment)>,
 
     // bootstrapped view number
     pub bootstrap_view_number: TYPES::Time,
@@ -189,7 +171,7 @@ pub struct BuilderState<TYPES: NodeType> {
     pub spawned_clones_views_list: Arc<RwLock<BTreeSet<TYPES::Time>>>,
 
     /// last bootstrap garbage collected decided seen view_num
-    pub last_bootstrap_garbage_collected_decided_seen_view_num: u64,
+    pub last_bootstrap_garbage_collected_decided_seen_view_num: TYPES::Time,
 }
 
 /// Trait to hold the helper functions for the builder
@@ -495,71 +477,78 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let _latest_decide_parent_commitment = leaf_chain[0].leaf.get_parent_commitment();
         let _latest_decide_commitment = leaf_chain[0].leaf.commit();
         let latest_leaf_view_number = leaf_chain[0].leaf.get_view_number();
-        // bootstrapping case
-        // handle the case when we hear a decide event before we have atleast one clone, in that case, we might exit the builder
-        // and not make any progress; so we need to handle that case
-        // Adhoc logic: if the number of subscrived receivers are more than 1, it means that there exists a clone and we can safely exit
         let built_from_view_as_i64 = self.built_from_proposed_block.view_number.get_u64() as i64;
         let latest_leaf_view_number_as_i64 = latest_leaf_view_number.get_u64() as i64;
+
+        // Garbage collection
+        // Keep the builder states stay active till their built in view + BUFFER_VIEW_NUM
         if self.built_from_proposed_block.view_number.get_u64()
             == self.bootstrap_view_number.get_u64()
         {
-            let last_bootstrap_garbage_collected_as_i64 =
-                self.last_bootstrap_garbage_collected_decided_seen_view_num as i64;
+            // required to convert to prevent underflow on u64's
+            let last_bootstrap_garbage_collected_as_i64 = self
+                .last_bootstrap_garbage_collected_decided_seen_view_num
+                .get_u64() as i64;
 
             if (latest_leaf_view_number_as_i64 - last_bootstrap_garbage_collected_as_i64)
-                >= BUFFER_VIEW_NUM as i64
+                >= 2 * BUFFER_VIEW_NUM as i64
             {
-                tracing::info!("Bootstrapped builder state, should continue");
+                tracing::info!(
+                    "Bootstrapped builder state garbage collected for view number {:?}",
+                    latest_leaf_view_number.get_u64()
+                );
+
+                let to_be_garbage_collected_view_num =
+                    <<TYPES as NodeType>::Time as ConsensusTime>::new(
+                        self.last_bootstrap_garbage_collected_decided_seen_view_num
+                            .get_u64()
+                            + BUFFER_VIEW_NUM as u64,
+                    );
+
                 // split_off returns greater than equal to set, so we want everything after the latest decide event
                 let split_list = self
                     .spawned_clones_views_list
                     .write()
                     .await
-                    .split_off(&(latest_leaf_view_number + 1));
+                    .split_off(&(to_be_garbage_collected_view_num));
 
                 // update the spawned_clones_views_list with the split list now
                 *self.spawned_clones_views_list.write().await = split_list;
-                // remove all the builder commitments
+
+                let to_garbage_collect: HashSet<(TYPES::Time, BuilderCommitment)> = self
+                    .builder_commitments
+                    .iter()
+                    .filter(|&(view_number, _)| (*view_number) <= to_be_garbage_collected_view_num)
+                    .cloned()
+                    .collect();
+
                 self.global_state.write_arc().await.remove_handles(
                     &self.built_from_proposed_block.vid_commitment,
-                    self.builder_commitments.clone(),
+                    to_garbage_collect,
                     true,
                 );
 
-                // empty out the builder commitments
-                self.builder_commitments.clear();
+                // Remove builder commitments for older views
+                self.builder_commitments
+                    .retain(|(view_number, _)| (*view_number) > to_be_garbage_collected_view_num);
 
-                // go throug the da_proposal_payload_commit_to_da_proposal hashmap and update it by removing the entries which are less than the latest_leaf_view_number
-                let mut modified_da_proposal_payload_commit_to_da_proposal = HashMap::new();
-                for (builder_commitment, da_proposal) in
-                    self.da_proposal_payload_commit_to_da_proposal.iter()
-                {
-                    if da_proposal.view_number > latest_leaf_view_number {
-                        modified_da_proposal_payload_commit_to_da_proposal
-                            .insert(builder_commitment.clone(), da_proposal.clone());
-                    }
-                }
-                self.da_proposal_payload_commit_to_da_proposal =
-                    modified_da_proposal_payload_commit_to_da_proposal;
+                self.da_proposal_payload_commit_to_da_proposal.retain(
+                    |_builder_commitment, da_proposal| {
+                        da_proposal.view_number > to_be_garbage_collected_view_num
+                    },
+                );
 
-                // do the same for quorum_proposal_payload_commit_to_quorum_proposal hashmap
-                let mut modified_quorum_proposal_payload_commit_to_quorum_proposal = HashMap::new();
-                for (builder_commitment, quorum_proposal) in self
-                    .quorum_proposal_payload_commit_to_quorum_proposal
-                    .iter()
-                {
-                    if quorum_proposal.view_number > latest_leaf_view_number {
-                        modified_quorum_proposal_payload_commit_to_quorum_proposal
-                            .insert(builder_commitment.clone(), quorum_proposal.clone());
-                    }
-                }
-                self.quorum_proposal_payload_commit_to_quorum_proposal =
-                    modified_quorum_proposal_payload_commit_to_quorum_proposal;
-                //return Some(Status::ShouldContinue);
+                self.quorum_proposal_payload_commit_to_quorum_proposal
+                    .retain(|_builder_commitment, quorum_proposal| {
+                        quorum_proposal.view_number > to_be_garbage_collected_view_num
+                    });
 
+                // update the last_bootstrap_garbage_collected_decided_seen_view_num
                 self.last_bootstrap_garbage_collected_decided_seen_view_num =
-                    latest_leaf_view_number.get_u64();
+                    to_be_garbage_collected_view_num;
+
+                // Not return from here, needs leaf cleaning also
+                //return Some(Status::ShouldContinue);
             }
         } else if built_from_view_as_i64
             <= (latest_leaf_view_number_as_i64 - BUFFER_VIEW_NUM as i64)
@@ -576,6 +565,9 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
             // clear out the local_block_hash_to_block
             return Some(Status::ShouldExit);
+        } else if built_from_view_as_i64 > (latest_leaf_view_number_as_i64 - BUFFER_VIEW_NUM as i64)
+        {
+            return Some(Status::ShouldContinue);
         }
 
         // go through all the leaves
@@ -659,7 +651,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             .write_arc()
             .await
             .spawned_builder_states
-            .insert(self.built_from_proposed_block.vid_commitment);
+            .insert(
+                self.built_from_proposed_block.vid_commitment,
+                self.built_from_proposed_block.view_number,
+            );
 
         self.event_loop();
     }
@@ -667,7 +662,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     // build a block
     #[tracing::instrument(skip_all, name = "build block", 
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
-    async fn build_block(&mut self, _matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>> {
+    async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>> {
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
             self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
                 self.tx_hash_to_available_txns
@@ -678,14 +673,27 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             let builder_hash = payload.builder_commitment(&metadata);
             // count the number of txns
             let txn_count = payload.num_transactions(&metadata);
-            tracing::info!(
-                "Builder {:?} Building block with {:?} txns",
-                self.built_from_proposed_block,
-                txn_count
-            );
-            // add the local builder commitment list
-            self.builder_commitments.insert(builder_hash.clone());
 
+            // insert the view number and builder commitment in the builder_commitments set
+            // get the view number from the global state for bootstrapped is building for non-existing builder states
+            if self.built_from_proposed_block.view_number.get_u64()
+                == self.bootstrap_view_number.get_u64()
+            {
+                let view_number = *self
+                    .global_state
+                    .read_arc()
+                    .await
+                    .spawned_builder_states
+                    .get(&matching_vid)
+                    .unwrap_or(&self.last_bootstrap_garbage_collected_decided_seen_view_num);
+                self.builder_commitments
+                    .insert((view_number, builder_hash.clone()));
+            } else {
+                self.builder_commitments.insert((
+                    self.built_from_proposed_block.view_number,
+                    builder_hash.clone(),
+                ));
+            }
             let encoded_txns: Vec<u8> = payload.encode().unwrap().collect();
             let block_size: u64 = encoded_txns.len() as u64;
             let offered_fee: u64 = 0;
@@ -703,6 +711,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     precompute_vid_commitment(&encoded_txns, vid_num_nodes);
                 unbounded_sender.send((vidc, pre_compute_data)).await;
             });
+
+            tracing::info!(
+                "Builder view num {:?}, building block with {:?} txns, with builder hash {:?}",
+                self.built_from_proposed_block.view_number,
+                txn_count,
+                builder_hash
+            );
 
             Some(BuildBlockInfo {
                 builder_hash,
@@ -730,7 +745,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .read_arc()
                         .await
                         .spawned_builder_states
-                        .contains(&requested_vid_commitment)))
+                        .contains_key(&requested_vid_commitment)))
         {
             tracing::info!(
                 "REQUEST HANDLED BY BUILDER WITH VIEW {:?}",
@@ -741,10 +756,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             match response {
                 Some(response) => {
                     tracing::info!(
-                        "Builder {:?} Sending response {:?} to the request{:?}",
-                        self.built_from_proposed_block,
-                        response.builder_hash,
-                        req
+                        "Builder {:?} Sending response to the request{:?} with builder hash {:?}",
+                        self.built_from_proposed_block.view_number,
+                        req,
+                        response.builder_hash
                     );
 
                     // // form the response message and send it back
@@ -752,27 +767,34 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         builder_hash: response.builder_hash.clone(),
                         block_size: response.block_size,
                         offered_fee: response.offered_fee,
-                        // block_payload: response.block_payload,
-                        // metadata: response.metadata,
-                        // vid_data: Arc::new(RwLock::new(WaitAndKeep::Wait(response.vid_receiver))),
                     };
 
                     self.response_sender.send(response_msg).await.unwrap();
 
                     // write to global state as well
-                    self.global_state
-                        .write_arc()
+                    // only write if the entry does not exist
+                    if self
+                        .global_state
+                        .read_arc()
                         .await
                         .block_hash_to_block
-                        .insert(
-                            response.builder_hash,
-                            (
-                                response.block_payload,
-                                response.metadata,
-                                Arc::new(RwLock::new(WaitAndKeep::Wait(response.vid_receiver))),
-                                response.offered_fee,
-                            ),
-                        );
+                        .get(&response.builder_hash)
+                        .is_none()
+                    {
+                        self.global_state
+                            .write_arc()
+                            .await
+                            .block_hash_to_block
+                            .entry(response.builder_hash)
+                            .or_insert_with(|| {
+                                (
+                                    response.block_payload,
+                                    response.metadata,
+                                    Arc::new(RwLock::new(WaitAndKeep::Wait(response.vid_receiver))),
+                                    response.offered_fee,
+                                )
+                            });
+                    }
 
                     // self.response_sender.send(response_msg).await.unwrap();
                 }
@@ -781,7 +803,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 }
             }
         } else {
-            tracing::info!("Builder {:?} Requested Builder commitment does not match the built_from_view, so ignoring it", self.built_from_proposed_block.view_number);
+            tracing::debug!("Builder {:?} Requested Builder commitment does not match the built_from_view, so ignoring it", self.built_from_proposed_block.view_number);
         }
     }
     #[tracing::instrument(skip_all, name = "event loop", 
@@ -791,7 +813,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             loop {
                 tracing::debug!("Builder event loop");
                 while let Ok(req) = self.req_receiver.try_recv() {
-                    tracing::info!(
+                    tracing::debug!(
                         "Received request msg in builder {:?}: {:?}",
                         self.built_from_proposed_block.view_number,
                         req
@@ -803,10 +825,15 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
                 futures::select! {
                     req = self.req_receiver.next() => {
-                        tracing::info!("Received request msg in builder {:?}: {:?}", self.built_from_proposed_block.view_number, req);
+                        tracing::debug!("Received request msg in builder {:?}: {:?}", self.built_from_proposed_block.view_number, req);
                         match req {
                             Some(req) => {
                                 if let MessageType::RequestMessage(req) = req {
+                                    tracing::debug!(
+                                        "Received request msg in builder {:?}: {:?}",
+                                        self.built_from_proposed_block.view_number,
+                                        req
+                                    );
                                     self.process_block_request(req).await;
                                 }
                             }
@@ -919,7 +946,6 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             timestamp_to_tx: BTreeMap::new(),
             tx_hash_to_available_txns: HashMap::new(),
             included_txns: HashSet::new(),
-            block_hash_to_block: HashMap::new(),
             built_from_proposed_block,
             tx_receiver,
             decide_receiver,
@@ -934,7 +960,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             total_nodes: num_nodes,
             bootstrap_view_number,
             spawned_clones_views_list: Arc::new(RwLock::new(BTreeSet::new())),
-            last_bootstrap_garbage_collected_decided_seen_view_num: bootstrap_view_number.get_u64(),
+            last_bootstrap_garbage_collected_decided_seen_view_num: bootstrap_view_number,
         }
     }
 }
