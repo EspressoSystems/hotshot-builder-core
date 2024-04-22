@@ -409,7 +409,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             != self.built_from_proposed_block.view_number
             || (qc_msg.proposal.data.justify_qc.get_data().leaf_commit
                 != self.built_from_proposed_block.leaf_commit
-                && !qc_msg.proposal.data.justify_qc.is_genesis)
+               )
         {
             tracing::info!("Either View number {:?} or leaf commit{:?} from justify qc does not match the built-in info {:?}, so returning",
             qc_msg.proposal.data.justify_qc.view_number, qc_msg.proposal.data.justify_qc.get_data().leaf_commit, self.built_from_proposed_block);
