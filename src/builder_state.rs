@@ -691,15 +691,15 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .write_arc()
                         .await
                         .block_hash_to_block
-                        .insert(
-                            response.builder_hash,
+                        .entry(response.builder_hash)
+                        .or_insert_with(|| {
                             (
                                 response.block_payload,
                                 response.metadata,
                                 Arc::new(RwLock::new(WaitAndKeep::Wait(response.vid_receiver))),
                                 response.offered_fee,
-                            ),
-                        );
+                            )
+                        });
                 }
                 None => {
                     tracing::warn!("No response to send");
