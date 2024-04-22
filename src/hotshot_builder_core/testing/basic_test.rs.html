@@ -393,9 +393,6 @@
 <a href="#391" id="391">391</a>
 <a href="#392" id="392">392</a>
 <a href="#393" id="393">393</a>
-<a href="#394" id="394">394</a>
-<a href="#395" id="395">395</a>
-<a href="#396" id="396">396</a>
 </pre></div><pre class="rust"><code><span class="kw">pub use </span>hotshot::traits::election::static_committee::{
     GeneralStaticCommittee, StaticElectionConfig,
 };
@@ -446,14 +443,9 @@
     <span class="kw">use </span>committable::{Commitment, CommitmentBoundsArkless, Committable};
     <span class="kw">use </span>sha2::{Digest, Sha256};
     <span class="kw">use </span>std::sync::Arc;
+    <span class="kw">use </span>std::time::Duration;
 
-    <span class="comment">// #[derive(Debug, Clone)]
-    // pub struct CustomError {
-    //     pub index: usize,
-    //     pub error: TryRecvError,
-    // }
-
-    </span><span class="kw">use </span>serde::{Deserialize, Serialize};
+    <span class="kw">use </span>serde::{Deserialize, Serialize};
     <span class="doccomment">/// This test simulates multiple builder states receiving messages from the channels and processing them
     </span><span class="attr">#[async_std::test]
     </span><span class="comment">//#[instrument]
@@ -517,6 +509,8 @@
             tx_sender.clone(),
             TestInstanceState {},
             vid_commitment(<span class="kw-2">&amp;</span><span class="macro">vec!</span>[], <span class="number">8</span>),
+            ViewNumber::new(<span class="number">0</span>),
+            Duration::from_millis(<span class="number">10</span>),
         );
 
         <span class="comment">// to store all the sent messages

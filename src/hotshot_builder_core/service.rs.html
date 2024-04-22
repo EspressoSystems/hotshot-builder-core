@@ -684,6 +684,46 @@
 <a href="#682" id="682">682</a>
 <a href="#683" id="683">683</a>
 <a href="#684" id="684">684</a>
+<a href="#685" id="685">685</a>
+<a href="#686" id="686">686</a>
+<a href="#687" id="687">687</a>
+<a href="#688" id="688">688</a>
+<a href="#689" id="689">689</a>
+<a href="#690" id="690">690</a>
+<a href="#691" id="691">691</a>
+<a href="#692" id="692">692</a>
+<a href="#693" id="693">693</a>
+<a href="#694" id="694">694</a>
+<a href="#695" id="695">695</a>
+<a href="#696" id="696">696</a>
+<a href="#697" id="697">697</a>
+<a href="#698" id="698">698</a>
+<a href="#699" id="699">699</a>
+<a href="#700" id="700">700</a>
+<a href="#701" id="701">701</a>
+<a href="#702" id="702">702</a>
+<a href="#703" id="703">703</a>
+<a href="#704" id="704">704</a>
+<a href="#705" id="705">705</a>
+<a href="#706" id="706">706</a>
+<a href="#707" id="707">707</a>
+<a href="#708" id="708">708</a>
+<a href="#709" id="709">709</a>
+<a href="#710" id="710">710</a>
+<a href="#711" id="711">711</a>
+<a href="#712" id="712">712</a>
+<a href="#713" id="713">713</a>
+<a href="#714" id="714">714</a>
+<a href="#715" id="715">715</a>
+<a href="#716" id="716">716</a>
+<a href="#717" id="717">717</a>
+<a href="#718" id="718">718</a>
+<a href="#719" id="719">719</a>
+<a href="#720" id="720">720</a>
+<a href="#721" id="721">721</a>
+<a href="#722" id="722">722</a>
+<a href="#723" id="723">723</a>
+<a href="#724" id="724">724</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{
         election::static_committee::{GeneralStaticCommittee, StaticElectionConfig},
@@ -733,6 +773,7 @@
 <span class="kw">use </span>std::fmt::Display;
 <span class="kw">use </span>std::num::NonZeroUsize;
 <span class="kw">use </span>std::sync::Arc;
+<span class="kw">use </span>std::time::Duration;
 <span class="kw">use </span>tagged_base64::TaggedBase64;
 <span class="kw">use </span>tide_disco::method::ReadState;
 
@@ -758,7 +799,7 @@
     &gt;,
 
     <span class="comment">// registered builer states
-    </span><span class="kw">pub </span>spawned_builder_states: HashSet&lt;VidCommitment&gt;,
+    </span><span class="kw">pub </span>spawned_builder_states: HashMap&lt;VidCommitment, Types::Time&gt;,
 
     <span class="comment">// sending a request from the hotshot to the builder states
     </span><span class="kw">pub </span>request_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
@@ -772,10 +813,14 @@
 
     <span class="comment">// Instance state
     </span><span class="kw">pub </span>instance_state: Types::InstanceState,
+
+    <span class="comment">// max waiting time to serve first api request
+    </span><span class="kw">pub </span>max_api_waiting_time: Duration,
 }
 
 <span class="kw">impl</span>&lt;Types: NodeType&gt; GlobalState&lt;Types&gt; {
-    <span class="kw">pub fn </span>new(
+    <span class="attr">#[allow(clippy::too_many_arguments)]
+    </span><span class="kw">pub fn </span>new(
         builder_keys: (
             Types::BuilderSignatureKey,
             &lt;&lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey <span class="kw">as </span>BuilderSignatureKey&gt;::BuilderPrivateKey,
@@ -785,9 +830,11 @@
         tx_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
         instance_state: Types::InstanceState,
         bootstrapped_builder_state_id: VidCommitment,
+        bootstrapped_view_num: Types::Time,
+        max_api_waiting_time: Duration,
     ) -&gt; <span class="self">Self </span>{
-        <span class="kw">let </span><span class="kw-2">mut </span>spawned_builder_states = HashSet::new();
-        spawned_builder_states.insert(bootstrapped_builder_state_id);
+        <span class="kw">let </span><span class="kw-2">mut </span>spawned_builder_states = HashMap::new();
+        spawned_builder_states.insert(bootstrapped_builder_state_id, bootstrapped_view_num);
         GlobalState {
             builder_keys,
             block_hash_to_block: Default::default(),
@@ -796,6 +843,7 @@
             response_receiver,
             tx_sender,
             instance_state,
+            max_api_waiting_time,
         }
     }
 
@@ -803,20 +851,25 @@
     </span><span class="kw">pub fn </span>remove_handles(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         builder_vid_commitment: <span class="kw-2">&amp;</span>VidCommitment,
-        block_hashes: Vec&lt;BuilderCommitment&gt;,
+        block_hashes: HashSet&lt;(Types::Time, BuilderCommitment)&gt;,
         bootstrap: bool,
     ) {
-        <span class="macro">tracing::info!</span>(
-            <span class="string">"Removing handles for builder commitment {:?}"</span>,
-            builder_vid_commitment
-        );
         <span class="comment">// remove the builder commitment from the spawned builder states
         </span><span class="kw">if </span>!bootstrap {
-            <span class="self">self</span>.spawned_builder_states.remove(builder_vid_commitment);
+            <span class="kw">let </span>view_num = <span class="self">self</span>.spawned_builder_states.remove(builder_vid_commitment);
+            <span class="kw">if </span>view_num.is_some() {
+                <span class="macro">tracing::info!</span>(
+                    <span class="string">"Removing handles for builder view num {:?}"</span>,
+                    view_num.unwrap()
+                );
+            }
         }
-        <span class="kw">for </span>block_hash <span class="kw">in </span>block_hashes {
+        <span class="macro">tracing::debug!</span>(<span class="string">"Removing builder commitments: "</span>);
+        <span class="kw">for </span>(view_num, block_hash) <span class="kw">in </span>block_hashes {
             <span class="self">self</span>.block_hash_to_block.remove(<span class="kw-2">&amp;</span>block_hash);
+            <span class="macro">tracing::debug!</span>(<span class="string">"GC view_num {:?} block_hash {:?},"</span>, view_num, block_hash);
         }
+        <span class="macro">tracing::debug!</span>(<span class="string">"]\n"</span>);
     }
     <span class="comment">// private mempool submit txn
     // Currently, we don't differentiate between the transactions from the hotshot and the private mempool
@@ -864,7 +917,7 @@ Handling Builder API responses
 
         <span class="kw">let </span><span class="kw-2">mut </span>bootstrapped_state_build_block = <span class="bool-val">false</span>;
         <span class="comment">// check in the local spawned builder states, if it doesn't exist, and then let bootstrapped build a block for it
-        </span><span class="kw">if </span>!<span class="self">self</span>.spawned_builder_states.contains(for_parent) {
+        </span><span class="kw">if </span>!<span class="self">self</span>.spawned_builder_states.contains_key(for_parent) {
             bootstrapped_state_build_block = <span class="bool-val">true</span>;
         }
 
@@ -873,7 +926,7 @@ Handling Builder API responses
             bootstrap_build_block: bootstrapped_state_build_block,
         };
 
-        <span class="macro">tracing::debug!</span>(
+        <span class="macro">tracing::info!</span>(
             <span class="string">"Requesting available blocks for parent {:?}"</span>,
             req_msg.requested_vid_commitment
         );
@@ -883,11 +936,21 @@ Handling Builder API responses
             .<span class="kw">await
             </span>.unwrap();
 
-        <span class="kw">let </span>response_received = <span class="self">self</span>.response_receiver.recv().<span class="kw">await</span>;
+        <span class="macro">tracing::debug!</span>(
+            <span class="string">"Waiting for response for parent {:?}"</span>,
+            req_msg.requested_vid_commitment
+        );
+
+        <span class="kw">let </span>response_received = async_compatibility_layer::art::async_timeout(
+            <span class="self">self</span>.max_api_waiting_time,
+            <span class="self">self</span>.response_receiver.recv(),
+        )
+        .<span class="kw">await</span>;
+
         <span class="kw">match </span>response_received {
-            <span class="prelude-val">Ok</span>(response) =&gt; {
-                <span class="comment">// sign over the block info
-                </span><span class="kw">let </span>signature_over_block_info =
+            <span class="comment">// We got available blocks
+            </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Ok</span>(response)) =&gt; {
+                <span class="kw">let </span>signature_over_block_info =
                     &lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey::sign_block_info(
                         <span class="kw-2">&amp;</span><span class="self">self</span>.builder_keys.<span class="number">1</span>,
                         response.block_size,
@@ -898,7 +961,7 @@ Handling Builder API responses
 
                 <span class="comment">// insert the block info into local hashmap
                 </span><span class="kw">let </span>initial_block_info = AvailableBlockInfo::&lt;Types&gt; {
-                    block_hash: response.builder_hash,
+                    block_hash: response.builder_hash.clone(),
                     block_size: response.block_size,
                     offered_fee: response.offered_fee,
                     signature: signature_over_block_info,
@@ -906,14 +969,28 @@ Handling Builder API responses
                     _phantom: Default::default(),
                 };
                 <span class="macro">tracing::info!</span>(
-                    <span class="string">"sending Initial block info response for parent {:?}"</span>,
-                    req_msg.requested_vid_commitment
+                    <span class="string">"sending Initial block info response for parent {:?} with block hash {:?}"</span>,
+                    req_msg.requested_vid_commitment,
+                    response.builder_hash
                 );
                 <span class="prelude-val">Ok</span>(<span class="macro">vec!</span>[initial_block_info])
             }
-            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(BuildError::Error {
-                message: <span class="string">"No blocks available"</span>.to_string(),
-            }),
+
+            <span class="comment">// We failed to get available blocks
+            </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Err</span>(err)) =&gt; {
+                <span class="macro">tracing::error!</span>(%err, <span class="string">"Couldn't get available blocks in time"</span>);
+                <span class="prelude-val">Err</span>(BuildError::Error {
+                    message: <span class="string">"No blocks available"</span>.to_string(),
+                })
+            }
+
+            <span class="comment">// We timed out while getting available blocks
+            </span><span class="prelude-val">Err</span>(err) =&gt; {
+                <span class="macro">tracing::error!</span>(%err, <span class="string">"Time out while getting available blocks in time"</span>);
+                <span class="prelude-val">Err</span>(BuildError::Error {
+                    message: <span class="string">"No blocks available"</span>.to_string(),
+                })
+            }
         }
     }
     <span class="kw">async fn </span>claim_block(
@@ -922,12 +999,13 @@ Handling Builder API responses
         sender: Types::SignatureKey,
         signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;AvailableBlockData&lt;Types&gt;, BuildError&gt; {
-        <span class="macro">tracing::debug!</span>(
+        <span class="macro">tracing::info!</span>(
             <span class="string">"Received request for claiming block for block hash: {:?}"</span>,
             block_hash
         );
         <span class="comment">// verify the signature
         </span><span class="kw">if </span>!sender.validate(signature, block_hash.as_ref()) {
+            <span class="macro">tracing::error!</span>(<span class="string">"Signature validation failed in claim block"</span>);
             <span class="kw">return </span><span class="prelude-val">Err</span>(BuildError::Error {
                 message: <span class="string">"Signature validation failed in claim block"</span>.to_string(),
             });
@@ -954,24 +1032,25 @@ Handling Builder API responses
             );
             <span class="prelude-val">Ok</span>(block_data)
         } <span class="kw">else </span>{
+            <span class="macro">tracing::error!</span>(<span class="string">"Claim Block not found"</span>);
             <span class="prelude-val">Err</span>(BuildError::Error {
-                message: <span class="string">"Block not found"</span>.to_string(),
+                message: <span class="string">"Block data not found"</span>.to_string(),
             })
         }
-        <span class="comment">// TODO: should we remove the block from the hashmap?
-    </span>}
+    }
     <span class="kw">async fn </span>claim_block_header_input(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         block_hash: <span class="kw-2">&amp;</span>BuilderCommitment,
         sender: Types::SignatureKey,
         signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;AvailableBlockHeaderInput&lt;Types&gt;, BuildError&gt; {
-        <span class="macro">tracing::debug!</span>(
+        <span class="macro">tracing::info!</span>(
             <span class="string">"Received request for claiming block header input for block hash: {:?}"</span>,
             block_hash
         );
         <span class="comment">// verify the signature
         </span><span class="kw">if </span>!sender.validate(signature, block_hash.as_ref()) {
+            <span class="macro">tracing::error!</span>(<span class="string">"Signature validation failed in claim block header input"</span>);
             <span class="kw">return </span><span class="prelude-val">Err</span>(BuildError::Error {
                 message: <span class="string">"Signature validation failed in claim block header input"</span>.to_string(),
             });
@@ -1007,8 +1086,9 @@ Handling Builder API responses
             );
             <span class="prelude-val">Ok</span>(response)
         } <span class="kw">else </span>{
+            <span class="macro">tracing::error!</span>(<span class="string">"Claim Block Header Input not found"</span>);
             <span class="prelude-val">Err</span>(BuildError::Error {
-                message: <span class="string">"Block not found"</span>.to_string(),
+                message: <span class="string">"Block Header not found"</span>.to_string(),
             })
         }
     }
@@ -1026,7 +1106,7 @@ Handling Builder API responses
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), BuildError&gt; {
         <span class="macro">tracing::debug!</span>(<span class="string">"Submitting transaction to the builder states{:?}"</span>, txn);
         <span class="kw">let </span>response = <span class="self">self</span>.submit_client_txn(txn).<span class="kw">await</span>;
-        <span class="macro">tracing::info!</span>(
+        <span class="macro">tracing::debug!</span>(
             <span class="string">"Transaction submitted to the builder states, sending response: {:?}"</span>,
             response
         );
