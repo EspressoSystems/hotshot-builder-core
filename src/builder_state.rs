@@ -30,6 +30,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use std::{cmp::PartialEq, num::NonZeroUsize};
 
+const BUFFER_VIEW_NUM: usize = 10;
+
 pub type TxTimeStamp = u128;
 
 /// Enum to hold the different sources of the transaction
@@ -497,12 +499,16 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // handle the case when we hear a decide event before we have atleast one clone, in that case, we might exit the builder
         // and not make any progress; so we need to handle that case
         // Adhoc logic: if the number of subscrived receivers are more than 1, it means that there exists a clone and we can safely exit
+        let built_from_view_as_i64 = self.built_from_proposed_block.view_number.get_u64() as i64;
+        let latest_leaf_view_number_as_i64 = latest_leaf_view_number.get_u64() as i64;
         if self.built_from_proposed_block.view_number.get_u64()
             == self.bootstrap_view_number.get_u64()
         {
-            if (latest_leaf_view_number.get_u64()
-                - self.last_bootstrap_garbage_collected_decided_seen_view_num)
-                >= 10u64
+            let last_bootstrap_garbage_collected_as_i64 =
+                self.last_bootstrap_garbage_collected_decided_seen_view_num as i64;
+
+            if (latest_leaf_view_number_as_i64 - last_bootstrap_garbage_collected_as_i64)
+                >= BUFFER_VIEW_NUM as i64
             {
                 tracing::info!("Bootstrapped builder state, should continue");
                 // split_off returns greater than equal to set, so we want everything after the latest decide event
@@ -555,8 +561,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 self.last_bootstrap_garbage_collected_decided_seen_view_num =
                     latest_leaf_view_number.get_u64();
             }
-        } else if self.built_from_proposed_block.view_number.get_u64()
-            <= (latest_leaf_view_number.get_u64() - 10u64)
+        } else if built_from_view_as_i64
+            <= (latest_leaf_view_number_as_i64 - BUFFER_VIEW_NUM as i64)
         {
             tracing::info!("Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
             // convert leaf commitments into buildercommiments
