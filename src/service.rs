@@ -304,10 +304,6 @@ where
                 "Sending claimed block data for block hash: {:?}",
                 block_hash
             );
-            tracing::info!(
-                "Sending claimed block data for block hash: {:?}",
-                block_hash
-            );
             Ok(block_data)
         } else {
             tracing::error!("Claim Block not found");

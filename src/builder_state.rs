@@ -214,7 +214,6 @@ pub trait BuilderProgress<TYPES: NodeType> {
 }
 
 #[async_trait]
-//#[tracing::instrument(skip_all)]
 impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     /// processing the external i.e private mempool transaction
     fn process_external_transaction(&mut self, tx: TYPES::Transaction) {
