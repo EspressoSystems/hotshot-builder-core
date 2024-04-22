@@ -48,12 +48,7 @@ mod tests {
     use committable::{Commitment, CommitmentBoundsArkless, Committable};
     use sha2::{Digest, Sha256};
     use std::sync::Arc;
-
-    // #[derive(Debug, Clone)]
-    // pub struct CustomError {
-    //     pub index: usize,
-    //     pub error: TryRecvError,
-    // }
+    use std::time::Duration;
 
     use serde::{Deserialize, Serialize};
     /// This test simulates multiple builder states receiving messages from the channels and processing them
@@ -119,6 +114,8 @@ mod tests {
             tx_sender.clone(),
             TestInstanceState {},
             vid_commitment(&vec![], 8),
+            ViewNumber::new(0),
+            Duration::from_millis(10),
         );
 
         // to store all the sent messages
