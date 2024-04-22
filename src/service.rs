@@ -93,6 +93,7 @@ pub struct GlobalState<Types: NodeType> {
 }
 
 impl<Types: NodeType> GlobalState<Types> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         builder_keys: (
             Types::BuilderSignatureKey,
@@ -178,7 +179,6 @@ where
     async fn get_available_blocks(
         &self,
         for_parent: &VidCommitment,
-        for_parent: &VidCommitment,
         sender: Types::SignatureKey,
         signature: &<Types::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<Vec<AvailableBlockInfo<Types>>, BuildError> {
@@ -196,7 +196,6 @@ where
         }
 
         let req_msg = RequestMessage {
-            requested_vid_commitment: (*for_parent),
             requested_vid_commitment: (*for_parent),
             bootstrap_build_block: bootstrapped_state_build_block,
         };
@@ -360,7 +359,6 @@ where
                 sender: self.builder_keys.0.clone(),
             };
             tracing::info!(
-                "Sending claimed block header input response for block hash: {:?}",
                 "Sending claimed block header input response for block hash: {:?}",
                 block_hash
             );
