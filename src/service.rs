@@ -213,13 +213,27 @@ where
             .await
             .unwrap();
 
-        let response_received = self
-            .global_state
-            .read_arc()
-            .await
-            .response_receiver
-            .recv()
-            .await;
+        let response_received = loop {
+            let recv_attempt = self
+                .global_state
+                .read_arc()
+                .await
+                .response_receiver
+                .try_recv();
+            if recv_attempt.is_ok() {
+                break recv_attempt.map_err(|_| BuildError::Missing);
+            } else {
+                let e = recv_attempt.unwrap_err();
+                if e.is_empty() {
+                    async_compatibility_layer::art::async_yield_now().await;
+                    continue;
+                } else {
+                    break Err(BuildError::Error {
+                        message: "channel unexpectedly closed".to_string(),
+                    });
+                }
+            }
+        };
         match response_received {
             Ok(response) => {
                 let (pub_key, sign_key) = self.global_state.read_arc().await.builder_keys.clone();

@@ -677,16 +677,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         req
                     );
 
-                    // form the response message and send it back
+                    // form the response message
                     let response_msg = ResponseMessage {
                         builder_hash: response.builder_hash.clone(),
                         block_size: response.block_size,
                         offered_fee: response.offered_fee,
                     };
 
-                    self.response_sender.send(response_msg).await.unwrap();
-
-                    // write to global state as well
+                    // write to global state for collection
                     self.global_state
                         .write_arc()
                         .await
@@ -700,6 +698,9 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                 response.offered_fee,
                             )
                         });
+
+                    // ... and finally, send the response
+                    self.response_sender.send(response_msg).await.unwrap();
                 }
                 None => {
                     tracing::warn!("No response to send");
