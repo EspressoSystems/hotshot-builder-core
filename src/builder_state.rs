@@ -811,6 +811,25 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let _builder_handle = async_spawn(async move {
             loop {
                 tracing::debug!("Builder event loop");
+
+                // read all the available txns from the channel and process them
+                while let Ok(tx) = self.tx_receiver.try_recv() {
+                    if let MessageType::TransactionMessage(rtx_msg) = tx {
+                        tracing::debug!(
+                            "Received tx msg in builder {:?}:\n {:?}",
+                            self.built_from_proposed_block,
+                            rtx_msg.tx.commit()
+                        );
+                        if rtx_msg.tx_type == TransactionSource::HotShot {
+                            self.process_hotshot_transaction(rtx_msg.tx);
+                        } else {
+                            self.process_external_transaction(rtx_msg.tx);
+                        }
+                        tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
+                    }
+                }
+
+                // read all the available requests from the channel and process them
                 while let Ok(req) = self.req_receiver.try_recv() {
                     tracing::debug!(
                         "Received request msg in builder {:?}: {:?}",
