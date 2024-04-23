@@ -43,7 +43,6 @@ use hotshot_events_service::{
     events_source::{BuilderEvent, BuilderEventType},
 };
 use sha2::{Digest, Sha256};
-use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -51,6 +50,7 @@ use std::{
     collections::{HashMap, HashSet},
     ops::Deref,
 };
+use std::{fmt::Display, time::Instant};
 use tagged_base64::TaggedBase64;
 use tide_disco::method::ReadState;
 
@@ -243,14 +243,38 @@ where
             req_msg.requested_vid_commitment
         );
 
-        let response_received = async_compatibility_layer::art::async_timeout(
-            self.max_api_waiting_time,
-            self.global_state.read_arc().await.response_receiver.recv(),
-        )
-        .await;
+        let timeout_after = Instant::now() + self.max_api_waiting_time;
+        let response_received = loop {
+            let recv_attempt = self
+                .global_state
+                .read_arc()
+                .await
+                .response_receiver
+                .try_recv();
+            if recv_attempt.is_ok() {
+                break recv_attempt.map_err(|_| BuildError::Missing);
+            } else {
+                let e = recv_attempt.unwrap_err();
+                if e.is_empty() {
+                    if Instant::now() >= timeout_after {
+                        tracing::error!(%e, "Couldn't get available blocks in time for parent {:?}",  req_msg.requested_vid_commitment);
+                        break Err(BuildError::Error {
+                            message: "No blocks available".to_string(),
+                        });
+                    }
+                    async_compatibility_layer::art::async_yield_now().await;
+                    continue;
+                } else {
+                    tracing::error!(%e, "Channel closed while getting available blocks for parent {:?}", req_msg.requested_vid_commitment);
+                    break Err(BuildError::Error {
+                        message: "channel unexpectedly closed".to_string(),
+                    });
+                }
+            }
+        };
 
         match response_received {
-            Ok(Ok(response)) => {
+            Ok(response) => {
                 let (pub_key, sign_key) = self.builder_keys.clone();
                 // sign over the block info
                 let signature_over_block_info =
@@ -280,20 +304,7 @@ where
             }
 
             // We failed to get available blocks
-            Ok(Err(err)) => {
-                tracing::error!(%err, "Couldn't get available blocks in time for parent {:?}",  req_msg.requested_vid_commitment);
-                Err(BuildError::Error {
-                    message: "No blocks available".to_string(),
-                })
-            }
-
-            // We timed out while getting available blocks
-            Err(err) => {
-                tracing::error!(%err, "Time out while getting available blocks for parent {:?} in time", req_msg.requested_vid_commitment);
-                Err(BuildError::Error {
-                    message: "No blocks available".to_string(),
-                })
-            }
+            Err(e) => Err(e),
         }
     }
     async fn claim_block(
