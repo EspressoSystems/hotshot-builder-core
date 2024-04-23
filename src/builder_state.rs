@@ -772,13 +772,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
                     // write to global state as well
                     // only write if the entry does not exist
-                    if self
+                    if !self
                         .global_state
                         .read_arc()
                         .await
                         .block_hash_to_block
-                        .get(&response.builder_hash)
-                        .is_none()
+                        .contains_key(&response.builder_hash)
                     {
                         self.global_state
                             .write_arc()
