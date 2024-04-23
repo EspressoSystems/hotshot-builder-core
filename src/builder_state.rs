@@ -30,8 +30,6 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use std::{cmp::PartialEq, num::NonZeroUsize};
 
-const BUFFER_VIEW_NUM: usize = 10;
-
 pub type TxTimeStamp = u128;
 
 /// Enum to hold the different sources of the transaction
@@ -172,6 +170,9 @@ pub struct BuilderState<TYPES: NodeType> {
 
     /// last bootstrap garbage collected decided seen view_num
     pub last_bootstrap_garbage_collected_decided_seen_view_num: TYPES::Time,
+
+    /// number of view to buffer before garbage collect
+    pub buffer_view_num_count: usize,
 }
 
 /// Trait to hold the helper functions for the builder
@@ -490,7 +491,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 .get_u64() as i64;
 
             if (latest_leaf_view_number_as_i64 - last_bootstrap_garbage_collected_as_i64)
-                >= 2 * BUFFER_VIEW_NUM as i64
+                >= 2 * self.buffer_view_num_count as i64
             {
                 tracing::info!(
                     "Bootstrapped builder state garbage collected for view number {:?}",
@@ -501,7 +502,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     <<TYPES as NodeType>::Time as ConsensusTime>::new(
                         self.last_bootstrap_garbage_collected_decided_seen_view_num
                             .get_u64()
-                            + BUFFER_VIEW_NUM as u64,
+                            + self.buffer_view_num_count as u64,
                     );
 
                 // split_off returns greater than equal to set, so we want everything after the latest decide event
@@ -550,7 +551,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 //return Some(Status::ShouldContinue);
             }
         } else if built_from_view_as_i64
-            <= (latest_leaf_view_number_as_i64 - BUFFER_VIEW_NUM as i64)
+            <= (latest_leaf_view_number_as_i64 - self.buffer_view_num_count as i64)
         {
             tracing::info!("Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
             // convert leaf commitments into buildercommiments
@@ -564,7 +565,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
             // clear out the local_block_hash_to_block
             return Some(Status::ShouldExit);
-        } else if built_from_view_as_i64 > (latest_leaf_view_number_as_i64 - BUFFER_VIEW_NUM as i64)
+        } else if built_from_view_as_i64
+            > (latest_leaf_view_number_as_i64 - self.buffer_view_num_count as i64)
         {
             return Some(Status::ShouldContinue);
         }
@@ -747,7 +749,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .contains_key(&requested_vid_commitment)))
         {
             tracing::info!(
-                "REQUEST HANDLED BY BUILDER WITH VIEW {:?}",
+                "Request handled by builder with view {:?}",
                 self.built_from_proposed_block.view_number
             );
             let response = self.build_block(requested_vid_commitment).await;
@@ -939,6 +941,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         response_sender: UnboundedSender<ResponseMessage>,
         num_nodes: NonZeroUsize,
         bootstrap_view_number: TYPES::Time,
+        buffer_view_num_count: usize,
     ) -> Self {
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
@@ -959,6 +962,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             bootstrap_view_number,
             spawned_clones_views_list: Arc::new(RwLock::new(BTreeSet::new())),
             last_bootstrap_garbage_collected_decided_seen_view_num: bootstrap_view_number,
+            buffer_view_num_count,
         }
     }
 }

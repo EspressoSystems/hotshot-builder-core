@@ -272,7 +272,7 @@ where
                     _phantom: Default::default(),
                 };
                 tracing::info!(
-                    "sending Initial block info response for parent {:?} with block hash {:?}",
+                    "Sending  Available Block info response for parent {:?} with block hash {:?}",
                     req_msg.requested_vid_commitment,
                     response.builder_hash
                 );
@@ -281,7 +281,7 @@ where
 
             // We failed to get available blocks
             Ok(Err(err)) => {
-                tracing::error!(%err, "Couldn't get available blocks in time");
+                tracing::error!(%err, "Couldn't get available blocks in time for parent {:?}",  req_msg.requested_vid_commitment);
                 Err(BuildError::Error {
                     message: "No blocks available".to_string(),
                 })
@@ -289,7 +289,7 @@ where
 
             // We timed out while getting available blocks
             Err(err) => {
-                tracing::error!(%err, "Time out while getting available blocks in time");
+                tracing::error!(%err, "Time out while getting available blocks for parent {:?} in time", req_msg.requested_vid_commitment);
                 Err(BuildError::Error {
                     message: "No blocks available".to_string(),
                 })
@@ -336,10 +336,7 @@ where
                 signature: signature_over_builder_commitment,
                 sender: pub_key.clone(),
             };
-            tracing::info!(
-                "Sending claimed block data for block hash: {:?}",
-                block_hash
-            );
+            tracing::info!("Sending Claim Block data for block hash: {:?}", block_hash);
             Ok(block_data)
         } else {
             tracing::error!("Claim Block not found");
@@ -398,7 +395,7 @@ where
                 sender: pub_key.clone(),
             };
             tracing::info!(
-                "Sending claimed block header input response for block hash: {:?}",
+                "Sending Claim Block Header Input response for block hash: {:?}",
                 block_hash
             );
             Ok(response)
