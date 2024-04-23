@@ -46,6 +46,7 @@ use sha2::{Digest, Sha256};
 use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::Duration;
 use std::{
     collections::{HashMap, HashSet},
     ops::Deref,
@@ -56,13 +57,6 @@ use tide_disco::method::ReadState;
 #[allow(clippy::type_complexity)]
 #[derive(Debug)]
 pub struct GlobalState<Types: NodeType> {
-    // identity keys for the builder
-    // May be ideal place as GlobalState interacts with hotshot apis
-    // and then can sign on responders as desired
-    pub builder_keys: (
-        Types::BuilderSignatureKey, // pub key
-        <<Types as NodeType>::BuilderSignatureKey as BuilderSignatureKey>::BuilderPrivateKey, // private key
-    ),
     // data store for the blocks
     pub block_hash_to_block: HashMap<
         BuilderCommitment,
@@ -75,7 +69,7 @@ pub struct GlobalState<Types: NodeType> {
     >,
 
     // registered builer states
-    pub spawned_builder_states: HashSet<VidCommitment>,
+    pub spawned_builder_states: HashMap<VidCommitment, Types::Time>,
 
     // sending a request from the hotshot to the builder states
     pub request_sender: BroadcastSender<MessageType<Types>>,
@@ -92,21 +86,18 @@ pub struct GlobalState<Types: NodeType> {
 }
 
 impl<Types: NodeType> GlobalState<Types> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        builder_keys: (
-            Types::BuilderSignatureKey,
-            <<Types as NodeType>::BuilderSignatureKey as BuilderSignatureKey>::BuilderPrivateKey,
-        ),
         request_sender: BroadcastSender<MessageType<Types>>,
         response_receiver: UnboundedReceiver<ResponseMessage>,
         tx_sender: BroadcastSender<MessageType<Types>>,
         instance_state: Types::InstanceState,
         bootstrapped_builder_state_id: VidCommitment,
+        bootstrapped_view_num: Types::Time,
     ) -> Self {
-        let mut spawned_builder_states = HashSet::new();
-        spawned_builder_states.insert(bootstrapped_builder_state_id);
+        let mut spawned_builder_states = HashMap::new();
+        spawned_builder_states.insert(bootstrapped_builder_state_id, bootstrapped_view_num);
         GlobalState {
-            builder_keys,
             block_hash_to_block: Default::default(),
             spawned_builder_states,
             request_sender,
@@ -120,20 +111,25 @@ impl<Types: NodeType> GlobalState<Types> {
     pub fn remove_handles(
         &mut self,
         builder_vid_commitment: &VidCommitment,
-        block_hashes: Vec<BuilderCommitment>,
+        block_hashes: HashSet<(Types::Time, BuilderCommitment)>,
         bootstrap: bool,
     ) {
-        tracing::info!(
-            "Removing handles for builder commitment {:?}",
-            builder_vid_commitment
-        );
         // remove the builder commitment from the spawned builder states
         if !bootstrap {
-            self.spawned_builder_states.remove(builder_vid_commitment);
+            let view_num = self.spawned_builder_states.remove(builder_vid_commitment);
+            if view_num.is_some() {
+                tracing::info!(
+                    "Removing handles for builder view num {:?}",
+                    view_num.unwrap()
+                );
+            }
         }
-        for block_hash in block_hashes {
+        tracing::debug!("Removing builder commitments: ");
+        for (view_num, block_hash) in block_hashes {
             self.block_hash_to_block.remove(&block_hash);
+            tracing::debug!("GC view_num {:?} block_hash {:?},", view_num, block_hash);
         }
+        tracing::debug!("]\n");
     }
     // private mempool submit txn
     // Currently, we don't differentiate between the transactions from the hotshot and the private mempool
@@ -156,7 +152,36 @@ impl<Types: NodeType> GlobalState<Types> {
 }
 
 pub struct ProxyGlobalState<Types: NodeType> {
-    pub global_state: Arc<RwLock<GlobalState<Types>>>,
+    // global state
+    global_state: Arc<RwLock<GlobalState<Types>>>,
+
+    // identity keys for the builder
+    // May be ideal place as GlobalState interacts with hotshot apis
+    // and then can sign on responders as desired
+    builder_keys: (
+        Types::BuilderSignatureKey, // pub key
+        <<Types as NodeType>::BuilderSignatureKey as BuilderSignatureKey>::BuilderPrivateKey, // private key
+    ),
+
+    // max waiting time to serve first api request
+    max_api_waiting_time: Duration,
+}
+
+impl<Types: NodeType> ProxyGlobalState<Types> {
+    pub fn new(
+        global_state: Arc<RwLock<GlobalState<Types>>>,
+        builder_keys: (
+            Types::BuilderSignatureKey,
+            <<Types as NodeType>::BuilderSignatureKey as BuilderSignatureKey>::BuilderPrivateKey,
+        ),
+        max_api_waiting_time: Duration,
+    ) -> Self {
+        ProxyGlobalState {
+            global_state,
+            builder_keys,
+            max_api_waiting_time,
+        }
+    }
 }
 
 /*
@@ -190,7 +215,7 @@ where
             .read_arc()
             .await
             .spawned_builder_states
-            .contains(for_parent)
+            .contains_key(for_parent)
         {
             bootstrapped_state_build_block = true;
         }
@@ -200,7 +225,7 @@ where
             bootstrap_build_block: bootstrapped_state_build_block,
         };
 
-        tracing::debug!(
+        tracing::info!(
             "Requesting available blocks for parent {:?}",
             req_msg.requested_vid_commitment
         );
@@ -213,30 +238,20 @@ where
             .await
             .unwrap();
 
-        let response_received = loop {
-            let recv_attempt = self
-                .global_state
-                .read_arc()
-                .await
-                .response_receiver
-                .try_recv();
-            if recv_attempt.is_ok() {
-                break recv_attempt.map_err(|_| BuildError::Missing);
-            } else {
-                let e = recv_attempt.unwrap_err();
-                if e.is_empty() {
-                    async_compatibility_layer::art::async_yield_now().await;
-                    continue;
-                } else {
-                    break Err(BuildError::Error {
-                        message: "channel unexpectedly closed".to_string(),
-                    });
-                }
-            }
-        };
+        tracing::debug!(
+            "Waiting for response for parent {:?}",
+            req_msg.requested_vid_commitment
+        );
+
+        let response_received = async_compatibility_layer::art::async_timeout(
+            self.max_api_waiting_time,
+            self.global_state.read_arc().await.response_receiver.recv(),
+        )
+        .await;
+
         match response_received {
-            Ok(response) => {
-                let (pub_key, sign_key) = self.global_state.read_arc().await.builder_keys.clone();
+            Ok(Ok(response)) => {
+                let (pub_key, sign_key) = self.builder_keys.clone();
                 // sign over the block info
                 let signature_over_block_info =
                     <Types as NodeType>::BuilderSignatureKey::sign_block_info(
@@ -249,7 +264,7 @@ where
 
                 // insert the block info into local hashmap
                 let initial_block_info = AvailableBlockInfo::<Types> {
-                    block_hash: response.builder_hash,
+                    block_hash: response.builder_hash.clone(),
                     block_size: response.block_size,
                     offered_fee: response.offered_fee,
                     signature: signature_over_block_info,
@@ -257,14 +272,28 @@ where
                     _phantom: Default::default(),
                 };
                 tracing::info!(
-                    "sending Initial block info response for parent {:?}",
-                    req_msg.requested_vid_commitment
+                    "sending Initial block info response for parent {:?} with block hash {:?}",
+                    req_msg.requested_vid_commitment,
+                    response.builder_hash
                 );
                 Ok(vec![initial_block_info])
             }
-            _ => Err(BuildError::Error {
-                message: "No blocks available".to_string(),
-            }),
+
+            // We failed to get available blocks
+            Ok(Err(err)) => {
+                tracing::error!(%err, "Couldn't get available blocks in time");
+                Err(BuildError::Error {
+                    message: "No blocks available".to_string(),
+                })
+            }
+
+            // We timed out while getting available blocks
+            Err(err) => {
+                tracing::error!(%err, "Time out while getting available blocks in time");
+                Err(BuildError::Error {
+                    message: "No blocks available".to_string(),
+                })
+            }
         }
     }
     async fn claim_block(
@@ -273,17 +302,18 @@ where
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockData<Types>, BuildError> {
-        tracing::debug!(
+        tracing::info!(
             "Received request for claiming block for block hash: {:?}",
             block_hash
         );
         // verify the signature
         if !sender.validate(signature, block_hash.as_ref()) {
+            tracing::error!("Signature validation failed in claim block");
             return Err(BuildError::Error {
                 message: "Signature validation failed in claim block".to_string(),
             });
         }
-        let (pub_key, sign_key) = self.global_state.read_arc().await.builder_keys.clone();
+        let (pub_key, sign_key) = self.builder_keys.clone();
         if let Some(block) = self
             .global_state
             .read_arc()
@@ -312,11 +342,11 @@ where
             );
             Ok(block_data)
         } else {
+            tracing::error!("Claim Block not found");
             Err(BuildError::Error {
-                message: "Block not found".to_string(),
+                message: "Block data not found".to_string(),
             })
         }
-        // TODO: should we remove the block from the hashmap?
     }
     async fn claim_block_header_input(
         &self,
@@ -324,17 +354,18 @@ where
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
-        tracing::debug!(
+        tracing::info!(
             "Received request for claiming block header input for block hash: {:?}",
             block_hash
         );
         // verify the signature
         if !sender.validate(signature, block_hash.as_ref()) {
+            tracing::error!("Signature validation failed in claim block header input");
             return Err(BuildError::Error {
                 message: "Signature validation failed in claim block header input".to_string(),
             });
         }
-        let (pub_key, sign_key) = self.global_state.read_arc().await.builder_keys.clone();
+        let (pub_key, sign_key) = self.builder_keys.clone();
         if let Some(block) = self
             .global_state
             .read_arc()
@@ -372,15 +403,16 @@ where
             );
             Ok(response)
         } else {
+            tracing::error!("Claim Block Header Input not found");
             Err(BuildError::Error {
-                message: "Block not found".to_string(),
+                message: "Block Header not found".to_string(),
             })
         }
     }
     async fn get_builder_address(
         &self,
     ) -> Result<<Types as NodeType>::BuilderSignatureKey, BuildError> {
-        Ok(self.global_state.read_arc().await.builder_keys.0.clone())
+        Ok(self.builder_keys.0.clone())
     }
 }
 #[async_trait]
