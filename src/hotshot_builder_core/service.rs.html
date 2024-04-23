@@ -769,9 +769,6 @@
 <a href="#767" id="767">767</a>
 <a href="#768" id="768">768</a>
 <a href="#769" id="769">769</a>
-<a href="#770" id="770">770</a>
-<a href="#771" id="771">771</a>
-<a href="#772" id="772">772</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{
         election::static_committee::{GeneralStaticCommittee, StaticElectionConfig},
@@ -1046,7 +1043,7 @@ Handling Builder API responses
                     _phantom: Default::default(),
                 };
                 <span class="macro">tracing::info!</span>(
-                    <span class="string">"sending Initial block info response for parent {:?} with block hash {:?}"</span>,
+                    <span class="string">"Sending  Available Block info response for parent {:?} with block hash {:?}"</span>,
                     req_msg.requested_vid_commitment,
                     response.builder_hash
                 );
@@ -1055,7 +1052,7 @@ Handling Builder API responses
 
             <span class="comment">// We failed to get available blocks
             </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Err</span>(err)) =&gt; {
-                <span class="macro">tracing::error!</span>(%err, <span class="string">"Couldn't get available blocks in time"</span>);
+                <span class="macro">tracing::error!</span>(%err, <span class="string">"Couldn't get available blocks in time for parent {:?}"</span>,  req_msg.requested_vid_commitment);
                 <span class="prelude-val">Err</span>(BuildError::Error {
                     message: <span class="string">"No blocks available"</span>.to_string(),
                 })
@@ -1063,7 +1060,7 @@ Handling Builder API responses
 
             <span class="comment">// We timed out while getting available blocks
             </span><span class="prelude-val">Err</span>(err) =&gt; {
-                <span class="macro">tracing::error!</span>(%err, <span class="string">"Time out while getting available blocks in time"</span>);
+                <span class="macro">tracing::error!</span>(%err, <span class="string">"Time out while getting available blocks for parent {:?} in time"</span>, req_msg.requested_vid_commitment);
                 <span class="prelude-val">Err</span>(BuildError::Error {
                     message: <span class="string">"No blocks available"</span>.to_string(),
                 })
@@ -1110,10 +1107,7 @@ Handling Builder API responses
                 signature: signature_over_builder_commitment,
                 sender: pub_key.clone(),
             };
-            <span class="macro">tracing::info!</span>(
-                <span class="string">"Sending claimed block data for block hash: {:?}"</span>,
-                block_hash
-            );
+            <span class="macro">tracing::info!</span>(<span class="string">"Sending Claim Block data for block hash: {:?}"</span>, block_hash);
             <span class="prelude-val">Ok</span>(block_data)
         } <span class="kw">else </span>{
             <span class="macro">tracing::error!</span>(<span class="string">"Claim Block not found"</span>);
@@ -1172,7 +1166,7 @@ Handling Builder API responses
                 sender: pub_key.clone(),
             };
             <span class="macro">tracing::info!</span>(
-                <span class="string">"Sending claimed block header input response for block hash: {:?}"</span>,
+                <span class="string">"Sending Claim Block Header Input response for block hash: {:?}"</span>,
                 block_hash
             );
             <span class="prelude-val">Ok</span>(response)

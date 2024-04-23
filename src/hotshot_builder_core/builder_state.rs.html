@@ -964,6 +964,10 @@
 <a href="#962" id="962">962</a>
 <a href="#963" id="963">963</a>
 <a href="#964" id="964">964</a>
+<a href="#965" id="965">965</a>
+<a href="#966" id="966">966</a>
+<a href="#967" id="967">967</a>
+<a href="#968" id="968">968</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
     event::{LeafChain, LeafInfo},
@@ -995,8 +999,6 @@
 <span class="kw">use </span>std::sync::Arc;
 <span class="kw">use </span>std::time::SystemTime;
 <span class="kw">use </span>std::{cmp::PartialEq, num::NonZeroUsize};
-
-<span class="kw">const </span>BUFFER_VIEW_NUM: usize = <span class="number">10</span>;
 
 <span class="kw">pub type </span>TxTimeStamp = u128;
 
@@ -1138,6 +1140,9 @@
 
     <span class="doccomment">/// last bootstrap garbage collected decided seen view_num
     </span><span class="kw">pub </span>last_bootstrap_garbage_collected_decided_seen_view_num: TYPES::Time,
+
+    <span class="doccomment">/// number of view to buffer before garbage collect
+    </span><span class="kw">pub </span>buffer_view_num_count: usize,
 }
 
 <span class="doccomment">/// Trait to hold the helper functions for the builder
@@ -1456,7 +1461,7 @@
                 .get_u64() <span class="kw">as </span>i64;
 
             <span class="kw">if </span>(latest_leaf_view_number_as_i64 - last_bootstrap_garbage_collected_as_i64)
-                &gt;= <span class="number">2 </span>* BUFFER_VIEW_NUM <span class="kw">as </span>i64
+                &gt;= <span class="number">2 </span>* <span class="self">self</span>.buffer_view_num_count <span class="kw">as </span>i64
             {
                 <span class="macro">tracing::info!</span>(
                     <span class="string">"Bootstrapped builder state garbage collected for view number {:?}"</span>,
@@ -1467,7 +1472,7 @@
                     &lt;&lt;TYPES <span class="kw">as </span>NodeType&gt;::Time <span class="kw">as </span>ConsensusTime&gt;::new(
                         <span class="self">self</span>.last_bootstrap_garbage_collected_decided_seen_view_num
                             .get_u64()
-                            + BUFFER_VIEW_NUM <span class="kw">as </span>u64,
+                            + <span class="self">self</span>.buffer_view_num_count <span class="kw">as </span>u64,
                     );
 
                 <span class="comment">// split_off returns greater than equal to set, so we want everything after the latest decide event
@@ -1516,7 +1521,7 @@
                 //return Some(Status::ShouldContinue);
             </span>}
         } <span class="kw">else if </span>built_from_view_as_i64
-            &lt;= (latest_leaf_view_number_as_i64 - BUFFER_VIEW_NUM <span class="kw">as </span>i64)
+            &lt;= (latest_leaf_view_number_as_i64 - <span class="self">self</span>.buffer_view_num_count <span class="kw">as </span>i64)
         {
             <span class="macro">tracing::info!</span>(<span class="string">"Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}"</span>, latest_leaf_view_number.get_u64(), <span class="self">self</span>.built_from_proposed_block.view_number.get_u64());
             <span class="comment">// convert leaf commitments into buildercommiments
@@ -1530,7 +1535,8 @@
 
             <span class="comment">// clear out the local_block_hash_to_block
             </span><span class="kw">return </span><span class="prelude-val">Some</span>(Status::ShouldExit);
-        } <span class="kw">else if </span>built_from_view_as_i64 &gt; (latest_leaf_view_number_as_i64 - BUFFER_VIEW_NUM <span class="kw">as </span>i64)
+        } <span class="kw">else if </span>built_from_view_as_i64
+            &gt; (latest_leaf_view_number_as_i64 - <span class="self">self</span>.buffer_view_num_count <span class="kw">as </span>i64)
         {
             <span class="kw">return </span><span class="prelude-val">Some</span>(Status::ShouldContinue);
         }
@@ -1713,7 +1719,7 @@
                         .contains_key(<span class="kw-2">&amp;</span>requested_vid_commitment)))
         {
             <span class="macro">tracing::info!</span>(
-                <span class="string">"REQUEST HANDLED BY BUILDER WITH VIEW {:?}"</span>,
+                <span class="string">"Request handled by builder with view {:?}"</span>,
                 <span class="self">self</span>.built_from_proposed_block.view_number
             );
             <span class="kw">let </span>response = <span class="self">self</span>.build_block(requested_vid_commitment).<span class="kw">await</span>;
@@ -1905,6 +1911,7 @@
         response_sender: UnboundedSender&lt;ResponseMessage&gt;,
         num_nodes: NonZeroUsize,
         bootstrap_view_number: TYPES::Time,
+        buffer_view_num_count: usize,
     ) -&gt; <span class="self">Self </span>{
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
@@ -1925,6 +1932,7 @@
             bootstrap_view_number,
             spawned_clones_views_list: Arc::new(RwLock::new(BTreeSet::new())),
             last_bootstrap_garbage_collected_decided_seen_view_num: bootstrap_view_number,
+            buffer_view_num_count,
         }
     }
 }
