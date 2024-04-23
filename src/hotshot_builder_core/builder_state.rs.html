@@ -964,7 +964,6 @@
 <a href="#962" id="962">962</a>
 <a href="#963" id="963">963</a>
 <a href="#964" id="964">964</a>
-<a href="#965" id="965">965</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
     event::{LeafChain, LeafInfo},
@@ -1728,14 +1727,12 @@
                         response.builder_hash
                     );
 
-                    <span class="comment">// // form the response message and send it back
+                    <span class="comment">// form the response message
                     </span><span class="kw">let </span>response_msg = ResponseMessage {
                         builder_hash: response.builder_hash.clone(),
                         block_size: response.block_size,
                         offered_fee: response.offered_fee,
                     };
-
-                    <span class="self">self</span>.response_sender.send(response_msg).<span class="kw">await</span>.unwrap();
 
                     <span class="comment">// write to global state as well
                     // only write if the entry does not exist
@@ -1762,8 +1759,9 @@
                             });
                     }
 
-                    <span class="comment">// self.response_sender.send(response_msg).await.unwrap();
-                </span>}
+                    <span class="comment">// ... and finally, send the response
+                    </span><span class="self">self</span>.response_sender.send(response_msg).<span class="kw">await</span>.unwrap();
+                }
                 <span class="prelude-val">None </span>=&gt; {
                     <span class="macro">tracing::warn!</span>(<span class="string">"No response to send"</span>);
                 }
