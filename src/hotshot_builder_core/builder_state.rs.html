@@ -967,7 +967,6 @@
 <a href="#965" id="965">965</a>
 <a href="#966" id="966">966</a>
 <a href="#967" id="967">967</a>
-<a href="#968" id="968">968</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
     event::{LeafChain, LeafInfo},
@@ -1742,13 +1741,12 @@
 
                     <span class="comment">// write to global state as well
                     // only write if the entry does not exist
-                    </span><span class="kw">if </span><span class="self">self
+                    </span><span class="kw">if </span>!<span class="self">self
                         </span>.global_state
                         .read_arc()
                         .<span class="kw">await
                         </span>.block_hash_to_block
-                        .get(<span class="kw-2">&amp;</span>response.builder_hash)
-                        .is_none()
+                        .contains_key(<span class="kw-2">&amp;</span>response.builder_hash)
                     {
                         <span class="self">self</span>.global_state
                             .write_arc()
