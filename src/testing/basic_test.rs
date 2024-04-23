@@ -48,7 +48,6 @@ mod tests {
     use committable::{Commitment, CommitmentBoundsArkless, Committable};
     use sha2::{Digest, Sha256};
     use std::sync::Arc;
-    use std::time::Duration;
 
     use serde::{Deserialize, Serialize};
     /// This test simulates multiple builder states receiving messages from the channels and processing them
@@ -104,18 +103,16 @@ mod tests {
 
         // generate the keys for the buidler
         let seed = [201_u8; 32];
-        let (builder_pub_key, builder_private_key) =
+        let (_builder_pub_key, _builder_private_key) =
             BLSPubKey::generated_from_seed_indexed(seed, 2011_u64);
         // instantiate the global state also
         let global_state = GlobalState::<TestTypes>::new(
-            (builder_pub_key, builder_private_key),
             req_sender,
             res_receiver,
             tx_sender.clone(),
             TestInstanceState {},
             vid_commitment(&vec![], 8),
             ViewNumber::new(0),
-            Duration::from_millis(10),
         );
 
         // to store all the sent messages
