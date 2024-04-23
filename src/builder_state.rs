@@ -823,6 +823,22 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     }
                 }
 
+                while let Ok(tx) = self.tx_receiver.try_recv() {
+                    if let MessageType::TransactionMessage(rtx_msg) = tx {
+                        tracing::debug!(
+                            "Received tx msg in builder {:?}:\n {:?}",
+                            self.built_from_proposed_block,
+                            rtx_msg.tx.commit()
+                        );
+                        if rtx_msg.tx_type == TransactionSource::HotShot {
+                            self.process_hotshot_transaction(rtx_msg.tx);
+                        } else {
+                            self.process_external_transaction(rtx_msg.tx);
+                        }
+                        tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
+                    }
+                }
+
                 futures::select! {
                     req = self.req_receiver.next() => {
                         tracing::debug!("Received request msg in builder {:?}: {:?}", self.built_from_proposed_block.view_number, req);
