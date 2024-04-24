@@ -241,7 +241,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     }
 
     /// processing the hotshot i.e public mempool transaction
-    #[tracing::instrument(skip_all, name = "process hotshot transaction", 
+    #[tracing::instrument(skip_all, name = "process hotshot transaction",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     fn process_hotshot_transaction(&mut self, tx: TYPES::Transaction) {
         tracing::debug!("Processing hotshot transaction");
@@ -381,7 +381,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
     /// processing the quorum proposal
     //#[tracing::instrument(skip_all, name = "Process Quorum Proposal")]
-    #[tracing::instrument(skip_all, name = "process quorum proposal", 
+    #[tracing::instrument(skip_all, name = "process quorum proposal",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>) {
         tracing::debug!(
@@ -407,8 +407,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         } else if qc_msg.proposal.data.justify_qc.view_number
             != self.built_from_proposed_block.view_number
             || (qc_msg.proposal.data.justify_qc.get_data().leaf_commit
-                != self.built_from_proposed_block.leaf_commit
-                && !qc_msg.proposal.data.justify_qc.is_genesis)
+                != self.built_from_proposed_block.leaf_commit)
         {
             tracing::debug!("Either View number {:?} or leaf commit{:?} from justify qc does not match the built-in info {:?}, so returning",
             qc_msg.proposal.data.justify_qc.view_number, qc_msg.proposal.data.justify_qc.get_data().leaf_commit, self.built_from_proposed_block);
@@ -466,7 +465,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     }
 
     /// processing the decide event
-    #[tracing::instrument(skip_all, name = "process decide event", 
+    #[tracing::instrument(skip_all, name = "process decide event",
                                    fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn process_decide_event(&mut self, decide_msg: DecideMessage<TYPES>) -> Option<Status> {
         // special clone already launched the clone, then exit
@@ -607,7 +606,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     }
 
     // spawn a clone of the builder state
-    #[tracing::instrument(skip_all, name = "spawn_clone", 
+    #[tracing::instrument(skip_all, name = "spawn_clone",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn spawn_clone(
         mut self,
@@ -620,15 +619,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             quorum_proposal.block_header.payload_commitment();
         self.built_from_proposed_block.builder_commitment =
             quorum_proposal.block_header.builder_commitment();
-        let mut leaf = Leaf::from_quorum_proposal(&quorum_proposal);
-
-        // Hack for genesis mishandling in HotShot.
-        // Once the is_genesis field is removed, you can delete this block.
-        if quorum_proposal.justify_qc.is_genesis {
-            // get the instance state from the global state
-            let instance_state = &self.global_state.read_arc().await.instance_state;
-            leaf.set_parent_commitment(Leaf::genesis(instance_state).commit());
-        }
+        let leaf = Leaf::from_quorum_proposal(&quorum_proposal);
 
         self.built_from_proposed_block.leaf_commit = leaf.commit();
 
@@ -661,7 +652,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     }
 
     // build a block
-    #[tracing::instrument(skip_all, name = "build block", 
+    #[tracing::instrument(skip_all, name = "build block",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>> {
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
@@ -805,7 +796,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             tracing::debug!("Builder {:?} Requested Builder commitment does not match the built_from_view, so ignoring it", self.built_from_proposed_block.view_number);
         }
     }
-    #[tracing::instrument(skip_all, name = "event loop", 
+    #[tracing::instrument(skip_all, name = "event loop",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     fn event_loop(mut self) {
         let _builder_handle = async_spawn(async move {
