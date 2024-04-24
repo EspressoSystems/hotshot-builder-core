@@ -12,8 +12,6 @@ pub use hotshot_types::{
     },
 };
 
-use hotshot_example_types::block_types::TestMetadata;
-
 pub use crate::builder_state::{BuilderProgress, BuilderState, MessageType, ResponseMessage};
 pub use async_broadcast::{
     broadcast, Receiver as BroadcastReceiver, RecvError, Sender as BroadcastSender, TryRecvError,
@@ -36,7 +34,7 @@ mod tests {
     };
 
     use hotshot_example_types::{
-        block_types::{TestBlockHeader, TestBlockPayload, TestTransaction},
+        block_types::{TestBlockHeader, TestBlockPayload, TestMetadata, TestTransaction},
         state_types::{TestInstanceState, TestValidatedState},
     };
 
@@ -113,7 +111,7 @@ mod tests {
             res_receiver,
             tx_sender.clone(),
             TestInstanceState {},
-            vid_commitment(&vec![], 8),
+            vid_commitment(&[], 8),
             ViewNumber::new(0),
         );
 
@@ -140,7 +138,7 @@ mod tests {
 
             // Prepare the DA proposal message
             let da_proposal = DAProposal {
-                encoded_transactions: encoded_transactions.into(),
+                encoded_transactions: encoded_transactions.clone().into(),
                 metadata: TestMetadata,
                 view_number: ViewNumber::new(i as u64),
             };
@@ -329,7 +327,7 @@ mod tests {
         let handle = async_spawn(async move {
             let built_from_info = BuiltFromProposedBlock {
                 view_number: ViewNumber::new(0),
-                vid_commitment: vid_commitment(&vec![], 8),
+                vid_commitment: vid_commitment(&[], 8),
                 leaf_commit: Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage(),
                 builder_commitment: BuilderCommitment::from_bytes([]),
             };

@@ -43,6 +43,7 @@ use hotshot_events_service::{
     events_source::{BuilderEvent, BuilderEventType},
 };
 use sha2::{Digest, Sha256};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{
@@ -50,7 +51,6 @@ use std::{
     ops::Deref,
 };
 use std::{fmt::Display, time::Instant};
-use std::{hash::Hash, num::NonZeroUsize};
 use tagged_base64::TaggedBase64;
 use tide_disco::method::ReadState;
 
@@ -144,11 +144,10 @@ impl<Types: NodeType> GlobalState<Types> {
         self.tx_sender
             .broadcast(MessageType::TransactionMessage(tx_msg))
             .await
-            .map(|_a| ())
+            .map(|_a| txn.commit())
             .map_err(|_e| BuildError::Error {
                 message: "failed to send txn".to_string(),
-            });
-        Ok(txn.commit())
+            })
     }
 }
 
@@ -433,11 +432,19 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
             .await
             .submit_client_txn(txn)
             .await;
+
         tracing::info!(
             "Transaction submitted to the builder states, sending response: {:?}",
             response
         );
-        response
+
+        if response.is_err() {
+            return Err(BuildError::Error {
+                message: "Failed to submit transaction".to_string(),
+            });
+        }
+
+        Ok(())
     }
 }
 #[async_trait]
