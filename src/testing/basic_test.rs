@@ -34,7 +34,7 @@ mod tests {
     };
 
     use hotshot_example_types::{
-        block_types::{TestBlockHeader, TestBlockPayload, TestTransaction},
+        block_types::{TestBlockHeader, TestBlockPayload, TestMetadata, TestTransaction},
         state_types::{TestInstanceState, TestValidatedState},
     };
 
@@ -111,7 +111,7 @@ mod tests {
             res_receiver,
             tx_sender.clone(),
             TestInstanceState {},
-            vid_commitment(&vec![], 8),
+            vid_commitment(&[], 8),
             ViewNumber::new(0),
         );
 
@@ -129,7 +129,7 @@ mod tests {
         for i in 0..num_test_messages as u32 {
             // Prepare the transaction message
             let tx = TestTransaction(vec![i as u8]);
-            let encoded_transactions = TestTransaction::encode(vec![tx.clone()]).unwrap();
+            let encoded_transactions = TestTransaction::encode(&[tx.clone()]).unwrap();
 
             let stx_msg = TransactionMessage::<TestTypes> {
                 tx: tx.clone(),
@@ -138,8 +138,8 @@ mod tests {
 
             // Prepare the DA proposal message
             let da_proposal = DAProposal {
-                encoded_transactions: encoded_transactions.clone(),
-                metadata: (),
+                encoded_transactions: encoded_transactions.clone().into(),
+                metadata: TestMetadata,
                 view_number: ViewNumber::new(i as u64),
             };
             let encoded_transactions_hash = Sha256::digest(&encoded_transactions);
@@ -191,7 +191,7 @@ mod tests {
             };
 
             let justify_qc = match i {
-                0 => QuorumCertificate::<TestTypes>::genesis(),
+                0 => QuorumCertificate::<TestTypes>::genesis(&TestInstanceState {}),
                 _ => {
                     let previous_justify_qc =
                         sqc_msgs[(i - 1) as usize].proposal.data.justify_qc.clone();
@@ -224,7 +224,6 @@ mod tests {
                         vote_commitment: q_data.commit(),
                         view_number,
                         signatures: previous_justify_qc.signatures.clone(),
-                        is_genesis: false,
                         _pd: PhantomData,
                     }
                 }
@@ -268,7 +267,7 @@ mod tests {
                 0 => Leaf::genesis(&TestInstanceState {}),
                 _ => {
                     let block_payload = BlockPayload::from_bytes(
-                        encoded_transactions.clone().into_iter(),
+                        &encoded_transactions,
                         <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
                             &qc_proposal.block_header,
                         ),
@@ -328,7 +327,7 @@ mod tests {
         let handle = async_spawn(async move {
             let built_from_info = BuiltFromProposedBlock {
                 view_number: ViewNumber::new(0),
-                vid_commitment: vid_commitment(&vec![], 8),
+                vid_commitment: vid_commitment(&[], 8),
                 leaf_commit: Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage(),
                 builder_commitment: BuilderCommitment::from_bytes([]),
             };

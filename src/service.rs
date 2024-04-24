@@ -35,7 +35,7 @@ pub use async_broadcast::{broadcast, RecvError, TryRecvError};
 use async_compatibility_layer::channel::UnboundedReceiver;
 use async_lock::RwLock;
 use async_trait::async_trait;
-use committable::Committable;
+use committable::{Commitment, Committable};
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use hotshot_events_service::{
@@ -136,15 +136,15 @@ impl<Types: NodeType> GlobalState<Types> {
     pub async fn submit_client_txn(
         &self,
         txn: <Types as NodeType>::Transaction,
-    ) -> Result<(), BuildError> {
+    ) -> Result<Commitment<<Types as NodeType>::Transaction>, BuildError> {
         let tx_msg = TransactionMessage::<Types> {
-            tx: txn,
+            tx: txn.clone(),
             tx_type: TransactionSource::External,
         };
         self.tx_sender
             .broadcast(MessageType::TransactionMessage(tx_msg))
             .await
-            .map(|_a| ())
+            .map(|_a| txn.commit())
             .map_err(|_e| BuildError::Error {
                 message: "failed to send txn".to_string(),
             })
@@ -390,13 +390,9 @@ where
                 )
                 .expect("Claim block header input message signing failed");
 
-            let signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
-                &sign_key,
-                block.3,
-                block_hash,
-                &vid_commitment,
-            )
-            .expect("Claim block header input fee signing failed");
+            let signature_over_fee_info =
+                Types::BuilderSignatureKey::sign_fee(&sign_key, block.3, &block.1, &vid_commitment)
+                    .expect("Claim block header input fee signing failed");
 
             let response = AvailableBlockHeaderInput::<Types> {
                 vid_commitment,
@@ -436,11 +432,19 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
             .await
             .submit_client_txn(txn)
             .await;
+
         tracing::info!(
             "Transaction submitted to the builder states, sending response: {:?}",
             response
         );
-        response
+
+        if response.is_err() {
+            return Err(BuildError::Error {
+                message: "Failed to submit transaction".to_string(),
+            });
+        }
+
+        Ok(())
     }
 }
 #[async_trait]
