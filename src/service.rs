@@ -35,7 +35,7 @@ pub use async_broadcast::{broadcast, RecvError, TryRecvError};
 use async_compatibility_layer::channel::UnboundedReceiver;
 use async_lock::RwLock;
 use async_trait::async_trait;
-use committable::Committable;
+use committable::{Commitment, Committable};
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use hotshot_events_service::{
@@ -43,7 +43,6 @@ use hotshot_events_service::{
     events_source::{BuilderEvent, BuilderEventType},
 };
 use sha2::{Digest, Sha256};
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{
@@ -51,6 +50,7 @@ use std::{
     ops::Deref,
 };
 use std::{fmt::Display, time::Instant};
+use std::{hash::Hash, num::NonZeroUsize};
 use tagged_base64::TaggedBase64;
 use tide_disco::method::ReadState;
 
@@ -136,9 +136,9 @@ impl<Types: NodeType> GlobalState<Types> {
     pub async fn submit_client_txn(
         &self,
         txn: <Types as NodeType>::Transaction,
-    ) -> Result<(), BuildError> {
+    ) -> Result<Commitment<<Types as NodeType>::Transaction>, BuildError> {
         let tx_msg = TransactionMessage::<Types> {
-            tx: txn,
+            tx: txn.clone(),
             tx_type: TransactionSource::External,
         };
         self.tx_sender
@@ -147,7 +147,8 @@ impl<Types: NodeType> GlobalState<Types> {
             .map(|_a| ())
             .map_err(|_e| BuildError::Error {
                 message: "failed to send txn".to_string(),
-            })
+            });
+        Ok(txn.commit())
     }
 }
 
