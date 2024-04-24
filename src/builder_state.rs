@@ -811,17 +811,17 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     }
                 }
 
-                // read all the available requests from the channel and process them
-                while let Ok(req) = self.req_receiver.try_recv() {
-                    tracing::debug!(
-                        "Received request msg in builder {:?}: {:?}",
-                        self.built_from_proposed_block.view_number,
-                        req
-                    );
-                    if let MessageType::RequestMessage(req) = req {
-                        self.process_block_request(req).await;
-                    }
-                }
+                // // read all the available requests from the channel and process them
+                // while let Ok(req) = self.req_receiver.try_recv() {
+                //     tracing::debug!(
+                //         "Received request msg in builder {:?}: {:?}",
+                //         self.built_from_proposed_block.view_number,
+                //         req
+                //     );
+                //     if let MessageType::RequestMessage(req) = req {
+                //         self.process_block_request(req).await;
+                //     }
+                // }
 
                 futures::select! {
                     req = self.req_receiver.next() => {
