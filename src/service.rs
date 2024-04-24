@@ -607,7 +607,7 @@ async fn handle_qc_event<Types: NodeType>(
     qc_proposal: Proposal<Types, QuorumProposal<Types>>,
     sender: <Types as NodeType>::SignatureKey,
     leader: <Types as NodeType>::SignatureKey,
-    instance_state: &Types::InstanceState,
+    _instance_state: &Types::InstanceState,
 ) {
     tracing::debug!(
         "QCProposal: Leader: {:?} for the view: {:?}",
@@ -615,7 +615,7 @@ async fn handle_qc_event<Types: NodeType>(
         qc_proposal.data.view_number
     );
 
-    let mut leaf = Leaf::from_quorum_proposal(&qc_proposal.data);
+    let leaf = Leaf::from_quorum_proposal(&qc_proposal.data);
 
     // check if the sender is the leader and the signature is valid; if yes, broadcast the QC proposal
     if sender == leader && sender.validate(&qc_proposal.signature, leaf.commit().as_ref()) {
