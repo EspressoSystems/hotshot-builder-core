@@ -474,7 +474,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let _latest_decide_parent_commitment = leaf_chain[0].leaf.get_parent_commitment();
         let _latest_decide_commitment = leaf_chain[0].leaf.commit();
         let latest_leaf_view_number = leaf_chain[0].leaf.get_view_number();
-        let built_from_view_as_i64 = self.built_from_proposed_block.view_number.get_u64() as i64;
         let latest_leaf_view_number_as_i64 = latest_leaf_view_number.get_u64() as i64;
 
         // Garbage collection
@@ -547,9 +546,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 // Not return from here, needs leaf cleaning also
                 //return Some(Status::ShouldContinue);
             }
-        } else if built_from_view_as_i64
-            <= (latest_leaf_view_number_as_i64 - self.buffer_view_num_count as i64)
-        {
+        } else if self.built_from_proposed_block.view_number <= latest_leaf_view_number {
             tracing::info!("Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
             // convert leaf commitments into buildercommiments
             // remove the handles from the global state
@@ -562,10 +559,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
             // clear out the local_block_hash_to_block
             return Some(Status::ShouldExit);
-        } else if built_from_view_as_i64
-            > (latest_leaf_view_number_as_i64 - self.buffer_view_num_count as i64)
-        {
-            return Some(Status::ShouldContinue);
         }
 
         // go through all the leaves

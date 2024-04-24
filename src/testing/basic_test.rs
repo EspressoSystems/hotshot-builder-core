@@ -113,6 +113,8 @@ mod tests {
             TestInstanceState {},
             vid_commitment(&[], 8),
             ViewNumber::new(0),
+            ViewNumber::new(0),
+            10,
         );
 
         // to store all the sent messages

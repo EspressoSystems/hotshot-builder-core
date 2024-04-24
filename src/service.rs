@@ -18,7 +18,7 @@ use hotshot_types::{
         block_contents::BlockPayload,
         consensus_api::ConsensusApi,
         election::Membership,
-        node_implementation::NodeType,
+        node_implementation::{ConsensusTime, NodeType},
         signature_key::{BuilderSignatureKey, SignatureKey},
     },
     utils::BuilderCommitment,
@@ -83,6 +83,12 @@ pub struct GlobalState<Types: NodeType> {
 
     // Instance state
     pub instance_state: Types::InstanceState,
+
+    // last garbage collected view number
+    pub last_garbage_collected_view_num: Types::Time,
+
+    /// number of view to buffer before garbage collect
+    pub buffer_view_num_count: usize,
 }
 
 impl<Types: NodeType> GlobalState<Types> {
@@ -94,6 +100,8 @@ impl<Types: NodeType> GlobalState<Types> {
         instance_state: Types::InstanceState,
         bootstrapped_builder_state_id: VidCommitment,
         bootstrapped_view_num: Types::Time,
+        last_garbage_collected_view_num: Types::Time,
+        buffer_view_num_count: usize,
     ) -> Self {
         let mut spawned_builder_states = HashMap::new();
         spawned_builder_states.insert(bootstrapped_builder_state_id, bootstrapped_view_num);
@@ -104,6 +112,8 @@ impl<Types: NodeType> GlobalState<Types> {
             response_receiver,
             tx_sender,
             instance_state,
+            last_garbage_collected_view_num,
+            buffer_view_num_count,
         }
     }
 
@@ -114,22 +124,50 @@ impl<Types: NodeType> GlobalState<Types> {
         block_hashes: HashSet<(Types::Time, BuilderCommitment)>,
         bootstrap: bool,
     ) {
-        // remove the builder commitment from the spawned builder states
-        if !bootstrap {
-            let view_num = self.spawned_builder_states.remove(builder_vid_commitment);
-            if view_num.is_some() {
-                tracing::info!(
-                    "Removing handles for builder view num {:?}",
-                    view_num.unwrap()
-                );
+        // GC strategy: remove the builder state related stuff if
+        // builder states views are less than highest view seen - buffer_view_num_count
+
+        let max_view_num_in_block_hashed = block_hashes
+            .iter()
+            .map(|(view_num, _)| view_num)
+            .max()
+            .unwrap_or(&self.last_garbage_collected_view_num);
+
+        let garbage_collected_till_view_num = std::cmp::max(
+            max_view_num_in_block_hashed.get_u64() as i64 - self.buffer_view_num_count as i64,
+            self.last_garbage_collected_view_num.get_u64() as i64,
+        );
+
+        let garbage_collected_till_view_num = <<Types as NodeType>::Time as ConsensusTime>::new(
+            garbage_collected_till_view_num as u64,
+        );
+
+        let builder_state_view_num = self.spawned_builder_states.get(builder_vid_commitment);
+
+        if builder_state_view_num.is_some()
+            && builder_state_view_num.unwrap() <= &garbage_collected_till_view_num
+        {
+            tracing::debug!(
+                "Removing builder commitments for view {:?} ",
+                builder_state_view_num.unwrap()
+            );
+            for (view_num, block_hash) in block_hashes {
+                self.block_hash_to_block.remove(&block_hash);
+                tracing::debug!("GC view_num {:?} block_hash {:?},", view_num, block_hash);
             }
+            tracing::debug!("]\n");
         }
-        tracing::debug!("Removing builder commitments: ");
-        for (view_num, block_hash) in block_hashes {
-            self.block_hash_to_block.remove(&block_hash);
-            tracing::debug!("GC view_num {:?} block_hash {:?},", view_num, block_hash);
+
+        if !bootstrap {
+            self.spawned_builder_states.retain(
+                |_builder_state_vid_commitment, builder_state_view_num| {
+                    *builder_state_view_num >= garbage_collected_till_view_num
+                },
+            );
         }
-        tracing::debug!("]\n");
+
+        // update the last garbage collected view number
+        self.last_garbage_collected_view_num = garbage_collected_till_view_num;
     }
     // private mempool submit txn
     // Currently, we don't differentiate between the transactions from the hotshot and the private mempool
