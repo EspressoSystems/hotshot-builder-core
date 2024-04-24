@@ -30,6 +30,7 @@ mod tests {
         signature_key::BuilderKey,
         simple_vote::QuorumData,
         traits::block_contents::{vid_commitment, BlockHeader},
+        utils::BuilderCommitment,
     };
 
     use hotshot_example_types::{
@@ -38,8 +39,8 @@ mod tests {
     };
 
     use crate::builder_state::{
-        DAProposalMessage, DecideMessage, QCMessage, RequestMessage, TransactionMessage,
-        TransactionSource,
+        BuiltFromProposedBlock, DAProposalMessage, DecideMessage, QCMessage, RequestMessage,
+        TransactionMessage, TransactionSource,
     };
     use crate::service::GlobalState;
     use async_lock::RwLock;
@@ -47,12 +48,6 @@ mod tests {
     use committable::{Commitment, CommitmentBoundsArkless, Committable};
     use sha2::{Digest, Sha256};
     use std::sync::Arc;
-
-    // #[derive(Debug, Clone)]
-    // pub struct CustomError {
-    //     pub index: usize,
-    //     pub error: TryRecvError,
-    // }
 
     use serde::{Deserialize, Serialize};
     /// This test simulates multiple builder states receiving messages from the channels and processing them
@@ -106,18 +101,18 @@ mod tests {
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
         let (res_sender, res_receiver) = unbounded();
 
-        //let global_state_clone = global_state.clone();
         // generate the keys for the buidler
         let seed = [201_u8; 32];
-        let (builder_pub_key, builder_private_key) =
+        let (_builder_pub_key, _builder_private_key) =
             BLSPubKey::generated_from_seed_indexed(seed, 2011_u64);
         // instantiate the global state also
         let global_state = GlobalState::<TestTypes>::new(
-            (builder_pub_key, builder_private_key),
             req_sender,
             res_receiver,
             tx_sender.clone(),
             TestInstanceState {},
+            vid_commitment(&vec![], 8),
+            ViewNumber::new(0),
         );
 
         // to store all the sent messages
@@ -167,35 +162,31 @@ mod tests {
                 total_nodes: TEST_NUM_NODES_IN_VID_COMPUTATION,
             };
 
-            // calculate the vid commitment over the encoded_transactions
-            tracing::debug!(
-                "Encoded transactions: {:?}\n Num nodes:{}",
-                encoded_transactions,
-                TEST_NUM_NODES_IN_VID_COMPUTATION
-            );
-            let encoded_txns_vid_commitment =
-                vid_commitment(&encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION);
-            tracing::debug!(
-                "Encoded transactions vid commitment: {:?}",
-                encoded_txns_vid_commitment
-            );
             // Prepare the QC proposal message
             // calculate the vid commitment over the encoded_transactions
+
+            let (block_payload, metadata) =
+                <TestBlockPayload as BlockPayload>::from_transactions(vec![tx.clone()]).unwrap();
+
             tracing::debug!(
                 "Encoded transactions: {:?} Num nodes:{}",
                 encoded_transactions,
                 TEST_NUM_NODES_IN_VID_COMPUTATION
             );
-            let encoded_txns_vid_commitment =
+            let block_payload_commitment =
                 vid_commitment(&encoded_transactions, TEST_NUM_NODES_IN_VID_COMPUTATION);
+
             tracing::debug!(
-                "Encoded transactions vid commitment: {:?}",
-                encoded_txns_vid_commitment
+                "Block Payload vid commitment: {:?}",
+                block_payload_commitment
             );
+
+            let builder_commitment = block_payload.builder_commitment(&metadata);
 
             let block_header = TestBlockHeader {
                 block_number: i as u64,
-                payload_commitment: encoded_txns_vid_commitment,
+                payload_commitment: block_payload_commitment,
+                builder_commitment,
                 timestamp: i as u64,
             };
 
@@ -248,14 +239,18 @@ mod tests {
                 proposal_certificate: None,
             };
 
-            let payload_commitment =
+            let payload_vid_commitment =
                 <TestBlockHeader as BlockHeader<TestTypes>>::payload_commitment(
+                    &qc_proposal.block_header,
+                );
+            let payload_builder_commitment =
+                <TestBlockHeader as BlockHeader<TestTypes>>::builder_commitment(
                     &qc_proposal.block_header,
                 );
 
             let qc_signature = <TestTypes as hotshot_types::traits::node_implementation::NodeType>::SignatureKey::sign(
                         &private_key,
-                        payload_commitment.as_ref(),
+                        payload_vid_commitment.as_ref(),
                         ).expect("Failed to sign payload commitment while preparing QC proposal");
 
             let sqc_msg = QCMessage::<TestTypes> {
@@ -313,9 +308,11 @@ mod tests {
                 .unwrap();
 
             // send decide and request messages later
-            let requested_vid_commitment = payload_commitment;
+            let _requested_builder_commitment = payload_builder_commitment;
+            let requested_vid_commitment = payload_vid_commitment;
             let request_message = MessageType::<TestTypes>::RequestMessage(RequestMessage {
                 requested_vid_commitment,
+                bootstrap_build_block: false,
             });
 
             stx_msgs.push(stx_msg);
@@ -329,12 +326,14 @@ mod tests {
         let arc_rwlock_global_state = Arc::new(RwLock::new(global_state));
         let arc_rwlock_global_state_clone = arc_rwlock_global_state.clone();
         let handle = async_spawn(async move {
+            let built_from_info = BuiltFromProposedBlock {
+                view_number: ViewNumber::new(0),
+                vid_commitment: vid_commitment(&vec![], 8),
+                leaf_commit: Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage(),
+                builder_commitment: BuilderCommitment::from_bytes([]),
+            };
             let builder_state = BuilderState::<TestTypes>::new(
-                (
-                    ViewNumber::new(0),
-                    vid_commitment(&vec![], 8),
-                    Commitment::<Leaf<TestTypes>>::default_commitment_no_preimage(),
-                ),
+                built_from_info,
                 tx_receiver,
                 decide_receiver,
                 da_receiver,
@@ -344,6 +343,7 @@ mod tests {
                 res_sender,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
                 ViewNumber::new(0),
+                10,
             );
 
             //builder_state.event_loop().await;
