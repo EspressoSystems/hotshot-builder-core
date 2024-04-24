@@ -390,7 +390,6 @@
 <a href="#388" id="388">388</a>
 <a href="#389" id="389">389</a>
 <a href="#390" id="390">390</a>
-<a href="#391" id="391">391</a>
 </pre></div><pre class="rust"><code><span class="kw">pub use </span>hotshot::traits::election::static_committee::{
     GeneralStaticCommittee, StaticElectionConfig,
 };
@@ -427,7 +426,7 @@
     };
 
     <span class="kw">use </span>hotshot_example_types::{
-        block_types::{TestBlockHeader, TestBlockPayload, TestTransaction},
+        block_types::{TestBlockHeader, TestBlockPayload, TestMetadata, TestTransaction},
         state_types::{TestInstanceState, TestValidatedState},
     };
 
@@ -504,7 +503,7 @@
             res_receiver,
             tx_sender.clone(),
             TestInstanceState {},
-            vid_commitment(<span class="kw-2">&amp;</span><span class="macro">vec!</span>[], <span class="number">8</span>),
+            vid_commitment(<span class="kw-2">&amp;</span>[], <span class="number">8</span>),
             ViewNumber::new(<span class="number">0</span>),
         );
 
@@ -522,7 +521,7 @@
         </span><span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..num_test_messages <span class="kw">as </span>u32 {
             <span class="comment">// Prepare the transaction message
             </span><span class="kw">let </span>tx = TestTransaction(<span class="macro">vec!</span>[i <span class="kw">as </span>u8]);
-            <span class="kw">let </span>encoded_transactions = TestTransaction::encode(<span class="macro">vec!</span>[tx.clone()]).unwrap();
+            <span class="kw">let </span>encoded_transactions = TestTransaction::encode(<span class="kw-2">&amp;</span>[tx.clone()]).unwrap();
 
             <span class="kw">let </span>stx_msg = TransactionMessage::&lt;TestTypes&gt; {
                 tx: tx.clone(),
@@ -531,8 +530,8 @@
 
             <span class="comment">// Prepare the DA proposal message
             </span><span class="kw">let </span>da_proposal = DAProposal {
-                encoded_transactions: encoded_transactions.clone(),
-                metadata: (),
+                encoded_transactions: encoded_transactions.clone().into(),
+                metadata: TestMetadata,
                 view_number: ViewNumber::new(i <span class="kw">as </span>u64),
             };
             <span class="kw">let </span>encoded_transactions_hash = Sha256::digest(<span class="kw-2">&amp;</span>encoded_transactions);
@@ -584,7 +583,7 @@
             };
 
             <span class="kw">let </span>justify_qc = <span class="kw">match </span>i {
-                <span class="number">0 </span>=&gt; QuorumCertificate::&lt;TestTypes&gt;::genesis(),
+                <span class="number">0 </span>=&gt; QuorumCertificate::&lt;TestTypes&gt;::genesis(<span class="kw-2">&amp;</span>TestInstanceState {}),
                 <span class="kw">_ </span>=&gt; {
                     <span class="kw">let </span>previous_justify_qc =
                         sqc_msgs[(i - <span class="number">1</span>) <span class="kw">as </span>usize].proposal.data.justify_qc.clone();
@@ -617,7 +616,6 @@
                         vote_commitment: q_data.commit(),
                         view_number,
                         signatures: previous_justify_qc.signatures.clone(),
-                        is_genesis: <span class="bool-val">false</span>,
                         _pd: PhantomData,
                     }
                 }
@@ -661,7 +659,7 @@
                 <span class="number">0 </span>=&gt; Leaf::genesis(<span class="kw-2">&amp;</span>TestInstanceState {}),
                 <span class="kw">_ </span>=&gt; {
                     <span class="kw">let </span>block_payload = BlockPayload::from_bytes(
-                        encoded_transactions.clone().into_iter(),
+                        <span class="kw-2">&amp;</span>encoded_transactions,
                         &lt;TestBlockHeader <span class="kw">as </span>BlockHeader&lt;TestTypes&gt;&gt;::metadata(
                             <span class="kw-2">&amp;</span>qc_proposal.block_header,
                         ),
@@ -721,7 +719,7 @@
         <span class="kw">let </span>handle = async_spawn(<span class="kw">async move </span>{
             <span class="kw">let </span>built_from_info = BuiltFromProposedBlock {
                 view_number: ViewNumber::new(<span class="number">0</span>),
-                vid_commitment: vid_commitment(<span class="kw-2">&amp;</span><span class="macro">vec!</span>[], <span class="number">8</span>),
+                vid_commitment: vid_commitment(<span class="kw-2">&amp;</span>[], <span class="number">8</span>),
                 leaf_commit: Commitment::&lt;Leaf&lt;TestTypes&gt;&gt;::default_commitment_no_preimage(),
                 builder_commitment: BuilderCommitment::from_bytes([]),
             };

@@ -774,6 +774,10 @@
 <a href="#772" id="772">772</a>
 <a href="#773" id="773">773</a>
 <a href="#774" id="774">774</a>
+<a href="#775" id="775">775</a>
+<a href="#776" id="776">776</a>
+<a href="#777" id="777">777</a>
+<a href="#778" id="778">778</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{
         election::static_committee::{GeneralStaticCommittee, StaticElectionConfig},
@@ -811,7 +815,7 @@
 <span class="kw">use </span>async_compatibility_layer::channel::UnboundedReceiver;
 <span class="kw">use </span>async_lock::RwLock;
 <span class="kw">use </span>async_trait::async_trait;
-<span class="kw">use </span>committable::Committable;
+<span class="kw">use </span>committable::{Commitment, Committable};
 <span class="kw">use </span>futures::future::BoxFuture;
 <span class="kw">use </span>futures::stream::StreamExt;
 <span class="kw">use </span>hotshot_events_service::{
@@ -912,15 +916,15 @@
     </span><span class="kw">pub async fn </span>submit_client_txn(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         txn: &lt;Types <span class="kw">as </span>NodeType&gt;::Transaction,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), BuildError&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Commitment&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Transaction&gt;, BuildError&gt; {
         <span class="kw">let </span>tx_msg = TransactionMessage::&lt;Types&gt; {
-            tx: txn,
+            tx: txn.clone(),
             tx_type: TransactionSource::External,
         };
         <span class="self">self</span>.tx_sender
             .broadcast(MessageType::TransactionMessage(tx_msg))
             .<span class="kw">await
-            </span>.map(|_a| ())
+            </span>.map(|_a| txn.commit())
             .map_err(|_e| BuildError::Error {
                 message: <span class="string">"failed to send txn"</span>.to_string(),
             })
@@ -1166,13 +1170,9 @@ Handling Builder API responses
                 )
                 .expect(<span class="string">"Claim block header input message signing failed"</span>);
 
-            <span class="kw">let </span>signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
-                <span class="kw-2">&amp;</span>sign_key,
-                block.<span class="number">3</span>,
-                block_hash,
-                <span class="kw-2">&amp;</span>vid_commitment,
-            )
-            .expect(<span class="string">"Claim block header input fee signing failed"</span>);
+            <span class="kw">let </span>signature_over_fee_info =
+                Types::BuilderSignatureKey::sign_fee(<span class="kw-2">&amp;</span>sign_key, block.<span class="number">3</span>, <span class="kw-2">&amp;</span>block.<span class="number">1</span>, <span class="kw-2">&amp;</span>vid_commitment)
+                    .expect(<span class="string">"Claim block header input fee signing failed"</span>);
 
             <span class="kw">let </span>response = AvailableBlockHeaderInput::&lt;Types&gt; {
                 vid_commitment,
@@ -1212,11 +1212,19 @@ Handling Builder API responses
             .<span class="kw">await
             </span>.submit_client_txn(txn)
             .<span class="kw">await</span>;
+
         <span class="macro">tracing::info!</span>(
             <span class="string">"Transaction submitted to the builder states, sending response: {:?}"</span>,
             response
         );
-        response
+
+        <span class="kw">if </span>response.is_err() {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(BuildError::Error {
+                message: <span class="string">"Failed to submit transaction"</span>.to_string(),
+            });
+        }
+
+        <span class="prelude-val">Ok</span>(())
     }
 }
 <span class="attr">#[async_trait]
