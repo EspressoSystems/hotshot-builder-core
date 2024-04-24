@@ -129,7 +129,7 @@ mod tests {
         for i in 0..num_test_messages as u32 {
             // Prepare the transaction message
             let tx = TestTransaction(vec![i as u8]);
-            let encoded_transactions = TestTransaction::encode(vec![tx.clone()]).unwrap();
+            let encoded_transactions = TestTransaction::encode(&[tx.clone()]).unwrap();
 
             let stx_msg = TransactionMessage::<TestTypes> {
                 tx: tx.clone(),
@@ -224,7 +224,6 @@ mod tests {
                         vote_commitment: q_data.commit(),
                         view_number,
                         signatures: previous_justify_qc.signatures.clone(),
-                        is_genesis: false,
                         _pd: PhantomData,
                     }
                 }
@@ -268,7 +267,7 @@ mod tests {
                 0 => Leaf::genesis(&TestInstanceState {}),
                 _ => {
                     let block_payload = BlockPayload::from_bytes(
-                        encoded_transactions.clone().into_iter(),
+                        &encoded_transactions,
                         <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
                             &qc_proposal.block_header,
                         ),

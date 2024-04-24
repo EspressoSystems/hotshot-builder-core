@@ -318,10 +318,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         self.total_nodes = NonZeroUsize::new(total_nodes).unwrap();
 
         // form a block payload from the encoded transactions
-        let block_payload = <TYPES::BlockPayload as BlockPayload>::from_bytes(
-            encoded_txns.clone().into_iter(),
-            &metadata,
-        );
+        let block_payload =
+            <TYPES::BlockPayload as BlockPayload>::from_bytes(&encoded_txns, &metadata);
         // get the builder commitment from the block payload
         let payload_builder_commitment = block_payload.builder_commitment(&metadata);
 
@@ -624,7 +622,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         self.built_from_proposed_block.leaf_commit = leaf.commit();
 
         let payload = <TYPES::BlockPayload as BlockPayload>::from_bytes(
-            da_proposal.encoded_transactions.clone().into_iter(),
+            &da_proposal.encoded_transactions,
             quorum_proposal.block_header.metadata(),
         );
         payload
@@ -686,7 +684,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     builder_hash.clone(),
                 ));
             }
-            let encoded_txns: Vec<u8> = payload.encode().unwrap().collect();
+            let encoded_txns: Vec<u8> = payload.encode().unwrap().to_vec();
             let block_size: u64 = encoded_txns.len() as u64;
             let offered_fee: u64 = 0;
 
