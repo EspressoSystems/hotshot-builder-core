@@ -391,13 +391,9 @@ where
                 )
                 .expect("Claim block header input message signing failed");
 
-            let signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
-                &sign_key,
-                block.3,
-                block_hash,
-                &vid_commitment,
-            )
-            .expect("Claim block header input fee signing failed");
+            let signature_over_fee_info =
+                Types::BuilderSignatureKey::sign_fee(&sign_key, block.3, &block.1, &vid_commitment)
+                    .expect("Claim block header input fee signing failed");
 
             let response = AvailableBlockHeaderInput::<Types> {
                 vid_commitment,

@@ -12,6 +12,8 @@ pub use hotshot_types::{
     },
 };
 
+use hotshot_example_types::block_types::TestMetadata;
+
 pub use crate::builder_state::{BuilderProgress, BuilderState, MessageType, ResponseMessage};
 pub use async_broadcast::{
     broadcast, Receiver as BroadcastReceiver, RecvError, Sender as BroadcastSender, TryRecvError,
@@ -138,8 +140,8 @@ mod tests {
 
             // Prepare the DA proposal message
             let da_proposal = DAProposal {
-                encoded_transactions: encoded_transactions.clone(),
-                metadata: (),
+                encoded_transactions: encoded_transactions.into(),
+                metadata: TestMetadata,
                 view_number: ViewNumber::new(i as u64),
             };
             let encoded_transactions_hash = Sha256::digest(&encoded_transactions);
@@ -191,7 +193,7 @@ mod tests {
             };
 
             let justify_qc = match i {
-                0 => QuorumCertificate::<TestTypes>::genesis(),
+                0 => QuorumCertificate::<TestTypes>::genesis(&TestInstanceState {}),
                 _ => {
                     let previous_justify_qc =
                         sqc_msgs[(i - 1) as usize].proposal.data.justify_qc.clone();
