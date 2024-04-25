@@ -171,7 +171,7 @@ pub struct BuilderState<TYPES: NodeType> {
     pub last_bootstrap_garbage_collected_decided_seen_view_num: TYPES::Time,
 
     /// number of view to buffer before garbage collect
-    pub buffer_view_num_count: usize,
+    pub buffer_view_num_count: u64,
 }
 
 /// Trait to hold the helper functions for the builder
@@ -291,6 +291,9 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     .contains(&(da_msg.proposal.data.view_number - 1)))
         {
             tracing::info!("DA Proposal handled by bootstrapped builder state");
+
+            // if we are bootstraping and we spwan a clone, we can assume in the healty version of we can just zero out
+            // da_proposal to filter out the bootstraping state and zero out the case
         }
         // Do the validation check
         else if da_msg.proposal.data.view_number.get_u64()
@@ -443,10 +446,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         "Spawning a clone from process QC proposal for view number: {:?}",
                         view_number
                     );
+
                     self.spawned_clones_views_list
                         .write()
                         .await
                         .insert(da_proposal_data.view_number);
+
                     self.clone()
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender)
                         .await;
@@ -520,6 +525,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 self.global_state.write_arc().await.remove_handles(
                     &self.built_from_proposed_block.vid_commitment,
                     to_garbage_collect,
+                    latest_leaf_view_number,
                     true,
                 );
 
@@ -545,51 +551,20 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 // Not return from here, needs leaf cleaning also
                 //return Some(Status::ShouldContinue);
             }
-        } else if self.built_from_proposed_block.view_number <= latest_leaf_view_number {
-            tracing::info!("Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
+        } else if self.built_from_proposed_block.view_number < latest_leaf_view_number {
+            tracing::info!("Task view is less than the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
             // convert leaf commitments into buildercommiments
             // remove the handles from the global state
             // TODO: Does it make sense to remove it here or should we remove in api responses?
             self.global_state.write_arc().await.remove_handles(
                 &self.built_from_proposed_block.vid_commitment,
                 self.builder_commitments.clone(),
+                latest_leaf_view_number,
                 false,
             );
 
             // clear out the local_block_hash_to_block
             return Some(Status::ShouldExit);
-        }
-
-        // go through all the leaves
-        for LeafInfo { leaf, .. } in leaf_chain.iter() {
-            let block_payload = leaf.get_block_payload();
-            match block_payload {
-                Some(block_payload) => {
-                    tracing::debug!("Block payload in decide event {:?}", block_payload);
-                    let metadata = leaf_chain[0].leaf.get_block_header().metadata();
-                    let transactions_commitments = block_payload.transaction_commitments(metadata);
-                    // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx
-                    for tx_hash in transactions_commitments.iter() {
-                        // remove the transaction from the timestamp_to_tx map
-                        if let Some((timestamp, _, _)) = self.tx_hash_to_available_txns.get(tx_hash)
-                        {
-                            if self.timestamp_to_tx.contains_key(timestamp) {
-                                tracing::debug!("Removing transaction from timestamp_to_tx map");
-                                self.timestamp_to_tx.remove(timestamp);
-                            }
-                            self.tx_hash_to_available_txns.remove(tx_hash);
-                        }
-
-                        // maybe in the future, remove from the included_txns set also
-                        // self.included_txns.remove(&tx_hash);
-                        // clear the included txns
-                        self.included_txns.clear();
-                    }
-                }
-                None => {
-                    tracing::warn!("Block payload is none");
-                }
-            }
         }
 
         return Some(Status::ShouldContinue);
@@ -874,7 +849,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                     match decide_status{
                                         Some(Status::ShouldExit) => {
                                             tracing::info!("Exiting the builder {:?}", self.built_from_proposed_block);
-                                            break;
+                                            return;
                                         }
                                         Some(Status::ShouldContinue) => {
                                             tracing::debug!("continue the builder {:?}", self.built_from_proposed_block);
@@ -920,7 +895,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         response_sender: UnboundedSender<ResponseMessage>,
         num_nodes: NonZeroUsize,
         bootstrap_view_number: TYPES::Time,
-        buffer_view_num_count: usize,
+        buffer_view_num_count: u64,
     ) -> Self {
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
