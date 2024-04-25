@@ -173,6 +173,9 @@ pub struct BuilderState<TYPES: NodeType> {
 
     /// number of view to buffer before garbage collect
     pub buffer_view_num_count: usize,
+
+    /// constant fee that the builder will offer per byte of data sequenced
+    base_fee: u64,
 }
 
 /// Trait to hold the helper functions for the builder
@@ -686,7 +689,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             }
             let encoded_txns: Vec<u8> = payload.encode().unwrap().to_vec();
             let block_size: u64 = encoded_txns.len() as u64;
-            let offered_fee: u64 = 0;
+            let offered_fee: u64 = self.base_fee * block_size;
 
             // get the total nodes from the builder state.
             // stored while processing the DA Proposal
@@ -949,6 +952,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         num_nodes: NonZeroUsize,
         bootstrap_view_number: TYPES::Time,
         buffer_view_num_count: usize,
+        base_fee: u64,
     ) -> Self {
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
@@ -970,6 +974,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             spawned_clones_views_list: Arc::new(RwLock::new(BTreeSet::new())),
             last_bootstrap_garbage_collected_decided_seen_view_num: bootstrap_view_number,
             buffer_view_num_count,
+            base_fee,
         }
     }
 }

@@ -342,7 +342,8 @@ mod tests {
                 res_sender,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
                 ViewNumber::new(0),
-                10,
+                10, // buffer view count
+                0,  // base fee
             );
 
             //builder_state.event_loop().await;
