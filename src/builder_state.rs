@@ -641,30 +641,32 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>> {
         // provide atleast 1 txn inside the block process the transactions
         // ideally this should be a threshold should a configurable value, if it gets non-zero before time return, otherwise return after timeout
-        let timeout_after = Instant::now() + self.maximize_txn_capture_timeout;
-        while let Ok(tx) = self.tx_receiver.try_recv() {
-            if let MessageType::TransactionMessage(rtx_msg) = tx {
-                tracing::debug!(
-                    "Received tx msg in builder {:?}:\n {:?}",
-                    self.built_from_proposed_block,
-                    rtx_msg.tx.commit()
-                );
-                if rtx_msg.tx_type == TransactionSource::HotShot {
-                    self.process_hotshot_transaction(rtx_msg.tx);
-                } else {
-                    self.process_external_transaction(rtx_msg.tx);
+        if self.timestamp_to_tx.is_empty() {
+            let timeout_after = Instant::now() + self.maximize_txn_capture_timeout;
+            while let Ok(tx) = self.tx_receiver.try_recv() {
+                if let MessageType::TransactionMessage(rtx_msg) = tx {
+                    tracing::debug!(
+                        "Received tx msg in builder {:?}:\n {:?}",
+                        self.built_from_proposed_block,
+                        rtx_msg.tx.commit()
+                    );
+                    if rtx_msg.tx_type == TransactionSource::HotShot {
+                        self.process_hotshot_transaction(rtx_msg.tx);
+                    } else {
+                        self.process_external_transaction(rtx_msg.tx);
+                    }
+                    tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
                 }
-                tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
+                // return if non-zero txns are available
+                if !self.timestamp_to_tx.is_empty() {
+                    break;
+                }
+                // if timeout, return
+                if Instant::now() >= timeout_after {
+                    break;
+                }
             }
-            // return if non-zero txns are available
-            if !self.timestamp_to_tx.is_empty() {
-                break;
-            }
-            // if timeout, return
-            if Instant::now() >= timeout_after {
-                break;
-            }
-        }
+        };
 
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
             self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
