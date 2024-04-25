@@ -1,6 +1,5 @@
 use hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
-    event::{LeafChain, LeafInfo},
     message::Proposal,
     traits::block_contents::{BlockHeader, BlockPayload},
     traits::{
@@ -15,7 +14,6 @@ use hotshot_types::{
 use committable::{Commitment, Committable};
 
 use crate::service::GlobalState;
-use crate::WaitAndKeep;
 use async_broadcast::Receiver as BroadcastReceiver;
 use async_compatibility_layer::channel::{unbounded, UnboundedSender};
 use async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
@@ -23,12 +21,16 @@ use async_lock::RwLock;
 use async_trait::async_trait;
 use core::panic;
 use futures::StreamExt;
-use std::collections::{hash_map::Entry, BTreeSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Instant;
 use std::time::SystemTime;
 use std::{cmp::PartialEq, num::NonZeroUsize};
+use std::{
+    collections::{hash_map::Entry, BTreeSet},
+    time::Duration,
+};
 
 pub type TxTimeStamp = u128;
 
@@ -48,7 +50,7 @@ pub struct TransactionMessage<TYPES: NodeType> {
 /// Decide Message to be put on the decide channel
 #[derive(Clone, Debug)]
 pub struct DecideMessage<TYPES: NodeType> {
-    pub leaf_chain: Arc<LeafChain<TYPES>>,
+    pub latest_decide_view_number: TYPES::Time,
     pub block_size: Option<u64>,
 }
 /// DA Proposal Message to be put on the da proposal channel
@@ -112,10 +114,10 @@ impl<TYPES: NodeType> std::fmt::Display for BuiltFromProposedBlock<TYPES> {
 
 #[derive(Debug, Clone)]
 pub struct BuilderState<TYPES: NodeType> {
-    // timestamp to tx hash, used for ordering for the transactions
+    /// timestamp to tx hash, used for ordering for the transactions
     pub timestamp_to_tx: BTreeMap<TxTimeStamp, Commitment<TYPES::Transaction>>,
 
-    // transaction hash to available transaction data
+    /// transaction hash to available transaction data
     pub tx_hash_to_available_txns: HashMap<
         Commitment<TYPES::Transaction>,
         (TxTimeStamp, TYPES::Transaction, TransactionSource),
@@ -147,35 +149,38 @@ pub struct BuilderState<TYPES: NodeType> {
     /// quorum proposal receiver
     pub qc_receiver: BroadcastReceiver<MessageType<TYPES>>,
 
-    // channel receiver for the block requests
+    /// channel receiver for the block requests
     pub req_receiver: BroadcastReceiver<MessageType<TYPES>>,
 
-    // global state handle, defined in the service.rs
+    /// global state handle, defined in the service.rs
     pub global_state: Arc<RwLock<GlobalState<TYPES>>>,
 
-    // response sender
+    /// response sender
     pub response_sender: UnboundedSender<ResponseMessage>,
 
-    // total nodes required for the VID computation as part of block header input response
+    /// total nodes required for the VID computation as part of block header input response
     pub total_nodes: NonZeroUsize,
 
-    // locally spawned builder Commitements
+    /// locally spawned builder Commitements
     pub builder_commitments: HashSet<(TYPES::Time, BuilderCommitment)>,
 
-    // bootstrapped view number
+    /// bootstrapped view number
     pub bootstrap_view_number: TYPES::Time,
 
-    // list of views for which we have builder spawned clones
+    /// list of views for which we have builder spawned clones
     pub spawned_clones_views_list: Arc<RwLock<BTreeSet<TYPES::Time>>>,
 
     /// last bootstrap garbage collected decided seen view_num
     pub last_bootstrap_garbage_collected_decided_seen_view_num: TYPES::Time,
 
     /// number of view to buffer before garbage collect
-    pub buffer_view_num_count: usize,
+    pub buffer_view_num_count: u64,
+
+    /// timeout for maximising the txns in the block
+    pub maximize_txn_capture_timeout: Duration,
 
     /// constant fee that the builder will offer per byte of data sequenced
-    base_fee: u64,
+    pub base_fee: u64,
 }
 
 /// Trait to hold the helper functions for the builder
@@ -279,6 +284,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             da_msg.proposal.data.view_number
         );
 
+        let mut handled_by_bootstrap = false;
         // Two cases to handle:
         // Case 1: Bootstrapping phase
         // Case 2: No intended builder state exist
@@ -295,6 +301,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     .contains(&(da_msg.proposal.data.view_number - 1)))
         {
             tracing::info!("DA Proposal handled by bootstrapped builder state");
+
+            // if we are bootstraping and we spwan a clone, we can assume in the healty version of we can just zero out
+            // da_proposal to filter out the bootstraping state and zero out the case
+            handled_by_bootstrap = true;
         }
         // Do the validation check
         else if da_msg.proposal.data.view_number.get_u64()
@@ -365,7 +375,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .write()
                         .await
                         .insert(qc_proposal_data.view_number);
-
+                    // if bootstrap in spawning it, then empty out its txns (part of GC)
+                    if handled_by_bootstrap {
+                        self.tx_hash_to_available_txns.clear();
+                        self.timestamp_to_tx.clear();
+                    }
                     self.clone()
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender)
                         .await;
@@ -389,6 +403,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             "Builder Received QC Message for view {:?}",
             qc_msg.proposal.data.view_number
         );
+
+        let mut handled_by_bootstrap = false;
         // Two cases to handle:
         // Case 1: Bootstrapping phase
         // Case 2: No intended builder state exist
@@ -405,6 +421,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     .contains(&(qc_msg.proposal.data.view_number - 1)))
         {
             tracing::info!("QC Proposal handled by bootstrapped builder state");
+            handled_by_bootstrap = true;
         } else if qc_msg.proposal.data.justify_qc.view_number
             != self.built_from_proposed_block.view_number
             || (qc_msg.proposal.data.justify_qc.get_data().leaf_commit
@@ -447,10 +464,16 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         "Spawning a clone from process QC proposal for view number: {:?}",
                         view_number
                     );
+
                     self.spawned_clones_views_list
                         .write()
                         .await
                         .insert(da_proposal_data.view_number);
+                    // if handled by bootstrap, then empty out its txns (part of GC)
+                    if handled_by_bootstrap {
+                        self.tx_hash_to_available_txns.clear();
+                        self.timestamp_to_tx.clear();
+                    }
                     self.clone()
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender)
                         .await;
@@ -472,12 +495,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // special clone already launched the clone, then exit
         // if you haven't launched the clone, then you don't exit, you need atleast one clone to function properly
         // the special value can be 0 itself, or a view number 0 is also right answer
-        let leaf_chain = decide_msg.leaf_chain;
         let _block_size = decide_msg.block_size;
-        let _latest_decide_parent_commitment = leaf_chain[0].leaf.get_parent_commitment();
-        let _latest_decide_commitment = leaf_chain[0].leaf.commit();
-        let latest_leaf_view_number = leaf_chain[0].leaf.get_view_number();
-        let built_from_view_as_i64 = self.built_from_proposed_block.view_number.get_u64() as i64;
+        let latest_leaf_view_number = decide_msg.latest_decide_view_number;
         let latest_leaf_view_number_as_i64 = latest_leaf_view_number.get_u64() as i64;
 
         // Garbage collection
@@ -502,7 +521,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     <<TYPES as NodeType>::Time as ConsensusTime>::new(
                         self.last_bootstrap_garbage_collected_decided_seen_view_num
                             .get_u64()
-                            + self.buffer_view_num_count as u64,
+                            + self.buffer_view_num_count,
                     );
 
                 // split_off returns greater than equal to set, so we want everything after the latest decide event
@@ -525,6 +544,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 self.global_state.write_arc().await.remove_handles(
                     &self.built_from_proposed_block.vid_commitment,
                     to_garbage_collect,
+                    latest_leaf_view_number,
                     true,
                 );
 
@@ -550,57 +570,20 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 // Not return from here, needs leaf cleaning also
                 //return Some(Status::ShouldContinue);
             }
-        } else if built_from_view_as_i64
-            <= (latest_leaf_view_number_as_i64 - self.buffer_view_num_count as i64)
-        {
-            tracing::info!("Task view is less than or equal to the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
+        } else if self.built_from_proposed_block.view_number < latest_leaf_view_number {
+            tracing::info!("Task view is less than the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
             // convert leaf commitments into buildercommiments
             // remove the handles from the global state
             // TODO: Does it make sense to remove it here or should we remove in api responses?
             self.global_state.write_arc().await.remove_handles(
                 &self.built_from_proposed_block.vid_commitment,
                 self.builder_commitments.clone(),
+                latest_leaf_view_number,
                 false,
             );
 
             // clear out the local_block_hash_to_block
             return Some(Status::ShouldExit);
-        } else if built_from_view_as_i64
-            > (latest_leaf_view_number_as_i64 - self.buffer_view_num_count as i64)
-        {
-            return Some(Status::ShouldContinue);
-        }
-
-        // go through all the leaves
-        for LeafInfo { leaf, .. } in leaf_chain.iter() {
-            let block_payload = leaf.get_block_payload();
-            match block_payload {
-                Some(block_payload) => {
-                    tracing::debug!("Block payload in decide event {:?}", block_payload);
-                    let metadata = leaf_chain[0].leaf.get_block_header().metadata();
-                    let transactions_commitments = block_payload.transaction_commitments(metadata);
-                    // iterate over the transactions and remove them from tx_hash_to_tx and timestamp_to_tx
-                    for tx_hash in transactions_commitments.iter() {
-                        // remove the transaction from the timestamp_to_tx map
-                        if let Some((timestamp, _, _)) = self.tx_hash_to_available_txns.get(tx_hash)
-                        {
-                            if self.timestamp_to_tx.contains_key(timestamp) {
-                                tracing::debug!("Removing transaction from timestamp_to_tx map");
-                                self.timestamp_to_tx.remove(timestamp);
-                            }
-                            self.tx_hash_to_available_txns.remove(tx_hash);
-                        }
-
-                        // maybe in the future, remove from the included_txns set also
-                        // self.included_txns.remove(&tx_hash);
-                        // clear the included txns
-                        self.included_txns.clear();
-                    }
-                }
-                None => {
-                    tracing::warn!("Block payload is none");
-                }
-            }
         }
 
         return Some(Status::ShouldContinue);
@@ -656,6 +639,35 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     #[tracing::instrument(skip_all, name = "build block",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>> {
+        // try to provide atleast one txn inside the block, ideally this should be a threshold through configurable value,
+        // if it gets non-zero before timeout return, otherwise return after timeout
+        if self.timestamp_to_tx.is_empty() {
+            let timeout_after = Instant::now() + self.maximize_txn_capture_timeout;
+            while let Ok(tx) = self.tx_receiver.try_recv() {
+                if let MessageType::TransactionMessage(rtx_msg) = tx {
+                    tracing::debug!(
+                        "Received tx msg in builder {:?}:\n {:?}",
+                        self.built_from_proposed_block,
+                        rtx_msg.tx.commit()
+                    );
+                    if rtx_msg.tx_type == TransactionSource::HotShot {
+                        self.process_hotshot_transaction(rtx_msg.tx);
+                    } else {
+                        self.process_external_transaction(rtx_msg.tx);
+                    }
+                    tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
+                }
+                // return if non-zero txns are available
+                if !self.timestamp_to_tx.is_empty() {
+                    break;
+                }
+                // if timeout, return
+                if Instant::now() >= timeout_after {
+                    break;
+                }
+            }
+        };
+
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
             self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
                 self.tx_hash_to_available_txns
@@ -771,19 +783,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .block_hash_to_block
                         .contains_key(&response.builder_hash)
                     {
-                        self.global_state
-                            .write_arc()
-                            .await
-                            .block_hash_to_block
-                            .entry(response.builder_hash)
-                            .or_insert_with(|| {
-                                (
-                                    response.block_payload,
-                                    response.metadata,
-                                    Arc::new(RwLock::new(WaitAndKeep::Wait(response.vid_receiver))),
-                                    response.offered_fee,
-                                )
-                            });
+                        self.global_state.write_arc().await.update_global_state(
+                            response,
+                            self.built_from_proposed_block.vid_commitment,
+                            response_msg.clone(),
+                        )
                     }
 
                     // ... and finally, send the response
@@ -818,18 +822,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                             self.process_external_transaction(rtx_msg.tx);
                         }
                         tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
-                    }
-                }
-
-                // read all the available requests from the channel and process them
-                while let Ok(req) = self.req_receiver.try_recv() {
-                    tracing::debug!(
-                        "Received request msg in builder {:?}: {:?}",
-                        self.built_from_proposed_block.view_number,
-                        req
-                    );
-                    if let MessageType::RequestMessage(req) = req {
-                        self.process_block_request(req).await;
                     }
                 }
 
@@ -905,7 +897,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                     match decide_status{
                                         Some(Status::ShouldExit) => {
                                             tracing::info!("Exiting the builder {:?}", self.built_from_proposed_block);
-                                            break;
+                                            return;
                                         }
                                         Some(Status::ShouldContinue) => {
                                             tracing::debug!("continue the builder {:?}", self.built_from_proposed_block);
@@ -951,7 +943,8 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         response_sender: UnboundedSender<ResponseMessage>,
         num_nodes: NonZeroUsize,
         bootstrap_view_number: TYPES::Time,
-        buffer_view_num_count: usize,
+        buffer_view_num_count: u64,
+        maximize_txn_capture_timeout: Duration,
         base_fee: u64,
     ) -> Self {
         BuilderState {
@@ -974,6 +967,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             spawned_clones_views_list: Arc::new(RwLock::new(BTreeSet::new())),
             last_bootstrap_garbage_collected_decided_seen_view_num: bootstrap_view_number,
             buffer_view_num_count,
+            maximize_txn_capture_timeout,
             base_fee,
         }
     }
