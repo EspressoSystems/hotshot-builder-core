@@ -975,6 +975,11 @@
 <a href="#973" id="973">973</a>
 <a href="#974" id="974">974</a>
 <a href="#975" id="975">975</a>
+<a href="#976" id="976">976</a>
+<a href="#977" id="977">977</a>
+<a href="#978" id="978">978</a>
+<a href="#979" id="979">979</a>
+<a href="#980" id="980">980</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
     event::{LeafChain, LeafInfo},
@@ -1150,6 +1155,9 @@
 
     <span class="doccomment">/// number of view to buffer before garbage collect
     </span><span class="kw">pub </span>buffer_view_num_count: usize,
+
+    <span class="doccomment">/// constant fee that the builder will offer per byte of data sequenced
+    </span>base_fee: u64,
 }
 
 <span class="doccomment">/// Trait to hold the helper functions for the builder
@@ -1663,7 +1671,7 @@
             }
             <span class="kw">let </span>encoded_txns: Vec&lt;u8&gt; = payload.encode().unwrap().to_vec();
             <span class="kw">let </span>block_size: u64 = encoded_txns.len() <span class="kw">as </span>u64;
-            <span class="kw">let </span>offered_fee: u64 = <span class="number">0</span>;
+            <span class="kw">let </span>offered_fee: u64 = <span class="self">self</span>.base_fee * block_size;
 
             <span class="comment">// get the total nodes from the builder state.
             // stored while processing the DA Proposal
@@ -1926,6 +1934,7 @@
         num_nodes: NonZeroUsize,
         bootstrap_view_number: TYPES::Time,
         buffer_view_num_count: usize,
+        base_fee: u64,
     ) -&gt; <span class="self">Self </span>{
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
@@ -1947,6 +1956,7 @@
             spawned_clones_views_list: Arc::new(RwLock::new(BTreeSet::new())),
             last_bootstrap_garbage_collected_decided_seen_view_num: bootstrap_view_number,
             buffer_view_num_count,
+            base_fee,
         }
     }
 }
