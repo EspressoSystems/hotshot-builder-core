@@ -171,14 +171,14 @@ impl<Types: NodeType> GlobalState<Types> {
             }
         }
         {
-            let cleanup_after_view = on_decide_view + self.buffer_view_num_count.into();
+            let cleanup_after_view = on_decide_view + self.buffer_view_num_count;
             tracing::debug!("Removing builder commitments: [");
 
             let edit = self
                 .view_to_cleanup_targets
                 .entry(cleanup_after_view)
                 .or_insert((Default::default(), Default::default()));
-            edit.0.push(builder_vid_commitment.clone());
+            edit.0.push(*builder_vid_commitment);
 
             for (view_num, block_hash) in block_hashes {
                 edit.1.push(block_hash.clone());
@@ -195,7 +195,7 @@ impl<Types: NodeType> GlobalState<Types> {
         self.view_to_cleanup_targets
             .retain(|view_num, (vids, block_hashes)| {
                 if view_num > &on_decide_view {
-                    return true;
+                    true
                 } else {
                     // go through the vids and remove from the builder_state_to_last_built_block
                     // and block_hashes and remove the block_hashes from the block_hash_to_block
@@ -205,7 +205,7 @@ impl<Types: NodeType> GlobalState<Types> {
                     block_hashes.iter().for_each(|block_hash| {
                         self.block_hash_to_block.remove(block_hash);
                     });
-                    return false;
+                    false
                 }
             });
     }

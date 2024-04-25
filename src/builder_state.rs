@@ -1,6 +1,6 @@
 use hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
-    event::{LeafChain, LeafInfo},
+    event::LeafChain,
     message::Proposal,
     traits::block_contents::{BlockHeader, BlockPayload},
     traits::{
@@ -275,6 +275,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             da_msg.proposal.data.view_number
         );
 
+        let mut handled_by_bootstrap = false;
         // Two cases to handle:
         // Case 1: Bootstrapping phase
         // Case 2: No intended builder state exist
@@ -294,6 +295,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
             // if we are bootstraping and we spwan a clone, we can assume in the healty version of we can just zero out
             // da_proposal to filter out the bootstraping state and zero out the case
+            handled_by_bootstrap = true;
         }
         // Do the validation check
         else if da_msg.proposal.data.view_number.get_u64()
@@ -364,7 +366,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .write()
                         .await
                         .insert(qc_proposal_data.view_number);
-
+                    // if bootstrap in spawning it, then empty out its txns (part of GC)
+                    if handled_by_bootstrap {
+                        self.tx_hash_to_available_txns.clear();
+                        self.timestamp_to_tx.clear();
+                    }
                     self.clone()
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender)
                         .await;
@@ -388,6 +394,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             "Builder Received QC Message for view {:?}",
             qc_msg.proposal.data.view_number
         );
+
+        let mut handled_by_bootstrap = false;
         // Two cases to handle:
         // Case 1: Bootstrapping phase
         // Case 2: No intended builder state exist
@@ -404,6 +412,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     .contains(&(qc_msg.proposal.data.view_number - 1)))
         {
             tracing::info!("QC Proposal handled by bootstrapped builder state");
+            handled_by_bootstrap = true;
         } else if qc_msg.proposal.data.justify_qc.view_number
             != self.built_from_proposed_block.view_number
             || (qc_msg.proposal.data.justify_qc.get_data().leaf_commit
@@ -451,7 +460,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .write()
                         .await
                         .insert(da_proposal_data.view_number);
-
+                    // if handled by bootstrap, then empty out its txns (part of GC)
+                    if handled_by_bootstrap {
+                        self.tx_hash_to_available_txns.clear();
+                        self.timestamp_to_tx.clear();
+                    }
                     self.clone()
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender)
                         .await;
@@ -502,7 +515,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     <<TYPES as NodeType>::Time as ConsensusTime>::new(
                         self.last_bootstrap_garbage_collected_decided_seen_view_num
                             .get_u64()
-                            + self.buffer_view_num_count as u64,
+                            + self.buffer_view_num_count,
                     );
 
                 // split_off returns greater than equal to set, so we want everything after the latest decide event
