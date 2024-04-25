@@ -754,7 +754,9 @@ pub async fn run_permissioned_standalone_builder_service<
                         block_size,
                         ..
                     } => {
-                        handle_decide_event(&decide_sender, leaf_chain, block_size).await;
+                        let latest_decide_view_number = leaf_chain[0].leaf.get_view_number();
+                        handle_decide_event(&decide_sender, latest_decide_view_number, block_size)
+                            .await;
                     }
                     // DA proposal event
                     EventType::DAProposal { proposal, sender } => {
@@ -855,17 +857,16 @@ async fn handle_qc_event<Types: NodeType>(
 
 async fn handle_decide_event<Types: NodeType>(
     decide_channel_sender: &BroadcastSender<MessageType<Types>>,
-    leaf_chain: Arc<Vec<LeafInfo<Types>>>,
+    latest_decide_view_number: Types::Time,
     block_size: Option<u64>,
 ) {
     let decide_msg: DecideMessage<Types> = DecideMessage::<Types> {
-        leaf_chain,
+        latest_decide_view_number,
         block_size,
     };
-    let latest_leaf_view_num = decide_msg.leaf_chain[0].leaf.get_view_number();
     tracing::debug!(
         "Sending Decide event to the builder states for view {:?}",
-        latest_leaf_view_num
+        latest_decide_view_number
     );
     decide_channel_sender
         .broadcast(MessageType::DecideMessage(decide_msg))

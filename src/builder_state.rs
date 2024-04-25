@@ -1,6 +1,5 @@
 use hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
-    event::LeafChain,
     message::Proposal,
     traits::block_contents::{BlockHeader, BlockPayload},
     traits::{
@@ -51,7 +50,7 @@ pub struct TransactionMessage<TYPES: NodeType> {
 /// Decide Message to be put on the decide channel
 #[derive(Clone, Debug)]
 pub struct DecideMessage<TYPES: NodeType> {
-    pub leaf_chain: Arc<LeafChain<TYPES>>,
+    pub latest_decide_view_number: TYPES::Time,
     pub block_size: Option<u64>,
 }
 /// DA Proposal Message to be put on the da proposal channel
@@ -493,11 +492,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // special clone already launched the clone, then exit
         // if you haven't launched the clone, then you don't exit, you need atleast one clone to function properly
         // the special value can be 0 itself, or a view number 0 is also right answer
-        let leaf_chain = decide_msg.leaf_chain;
         let _block_size = decide_msg.block_size;
-        let _latest_decide_parent_commitment = leaf_chain[0].leaf.get_parent_commitment();
-        let _latest_decide_commitment = leaf_chain[0].leaf.commit();
-        let latest_leaf_view_number = leaf_chain[0].leaf.get_view_number();
+        let latest_leaf_view_number = decide_msg.latest_decide_view_number;
         let latest_leaf_view_number_as_i64 = latest_leaf_view_number.get_u64() as i64;
 
         // Garbage collection
