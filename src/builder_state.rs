@@ -15,7 +15,6 @@ use hotshot_types::{
 use committable::{Commitment, Committable};
 
 use crate::service::GlobalState;
-use crate::WaitAndKeep;
 use async_broadcast::Receiver as BroadcastReceiver;
 use async_compatibility_layer::channel::{unbounded, UnboundedSender};
 use async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
@@ -761,19 +760,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .block_hash_to_block
                         .contains_key(&response.builder_hash)
                     {
-                        self.global_state
-                            .write_arc()
-                            .await
-                            .block_hash_to_block
-                            .entry(response.builder_hash)
-                            .or_insert_with(|| {
-                                (
-                                    response.block_payload,
-                                    response.metadata,
-                                    Arc::new(RwLock::new(WaitAndKeep::Wait(response.vid_receiver))),
-                                    response.offered_fee,
-                                )
-                            });
+                        self.global_state.write_arc().await.update_global_state(
+                            response,
+                            self.built_from_proposed_block.vid_commitment,
+                            response_msg.clone(),
+                        )
                     }
 
                     // ... and finally, send the response
@@ -810,18 +801,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
                     }
                 }
-
-                // // read all the available requests from the channel and process them
-                // while let Ok(req) = self.req_receiver.try_recv() {
-                //     tracing::debug!(
-                //         "Received request msg in builder {:?}: {:?}",
-                //         self.built_from_proposed_block.view_number,
-                //         req
-                //     );
-                //     if let MessageType::RequestMessage(req) = req {
-                //         self.process_block_request(req).await;
-                //     }
-                // }
 
                 futures::select! {
                     req = self.req_receiver.next() => {

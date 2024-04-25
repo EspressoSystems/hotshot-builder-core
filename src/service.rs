@@ -26,7 +26,8 @@ use hotshot_types::{
 };
 
 use crate::builder_state::{
-    DAProposalMessage, DecideMessage, QCMessage, TransactionMessage, TransactionSource,
+    BuildBlockInfo, DAProposalMessage, DecideMessage, QCMessage, TransactionMessage,
+    TransactionSource,
 };
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use crate::WaitAndKeep;
@@ -71,6 +72,10 @@ pub struct GlobalState<Types: NodeType> {
     // registered builer states
     pub spawned_builder_states: HashMap<VidCommitment, Types::Time>,
 
+    // builder state -> last built block , it is used to respond the client
+    // if the req channel times out during get_avaialble_blocks
+    pub builder_state_to_last_built_block: HashMap<VidCommitment, ResponseMessage>,
+
     // sending a request from the hotshot to the builder states
     pub request_sender: BroadcastSender<MessageType<Types>>,
 
@@ -114,7 +119,32 @@ impl<Types: NodeType> GlobalState<Types> {
             instance_state,
             last_garbage_collected_view_num,
             buffer_view_num_count,
+            builder_state_to_last_built_block: Default::default(),
         }
+    }
+
+    pub fn update_global_state(
+        &mut self,
+        build_block_info: BuildBlockInfo<Types>,
+        builder_vid_commitment: VidCommitment,
+        response_msg: ResponseMessage,
+    ) {
+        self.block_hash_to_block
+            .entry(build_block_info.builder_hash)
+            .or_insert_with(|| {
+                (
+                    build_block_info.block_payload,
+                    build_block_info.metadata,
+                    Arc::new(RwLock::new(WaitAndKeep::Wait(
+                        build_block_info.vid_receiver,
+                    ))),
+                    build_block_info.offered_fee,
+                )
+            });
+
+        // update the builder state to last built block
+        self.builder_state_to_last_built_block
+            .insert(builder_vid_commitment, response_msg);
     }
 
     // remove the builder state handles based on the decide event
@@ -164,11 +194,18 @@ impl<Types: NodeType> GlobalState<Types> {
                     *builder_state_view_num >= garbage_collected_till_view_num
                 },
             );
+            self.builder_state_to_last_built_block.retain(
+                |builder_state_vid_commitment, _last_built_block| {
+                    self.spawned_builder_states
+                        .contains_key(builder_state_vid_commitment)
+                },
+            );
         }
 
         // update the last garbage collected view number
         self.last_garbage_collected_view_num = garbage_collected_till_view_num;
     }
+
     // private mempool submit txn
     // Currently, we don't differentiate between the transactions from the hotshot and the private mempool
     pub async fn submit_client_txn(
@@ -295,6 +332,20 @@ where
                 let e = recv_attempt.unwrap_err();
                 if e.is_empty() {
                     if Instant::now() >= timeout_after {
+                        // lookup into the builder_state_to_last_built_block, if it contains the result, return that otherwise return error
+                        if let Some(last_built_block) = self
+                            .global_state
+                            .read_arc()
+                            .await
+                            .builder_state_to_last_built_block
+                            .get(for_parent)
+                        {
+                            tracing::info!(
+                                "Returning last built block for parent {:?}",
+                                req_msg.requested_vid_commitment
+                            );
+                            break Ok(last_built_block.clone());
+                        }
                         tracing::error!(%e, "Couldn't get available blocks in time for parent {:?}",  req_msg.requested_vid_commitment);
                         break Err(BuildError::Error {
                             message: "No blocks available".to_string(),
