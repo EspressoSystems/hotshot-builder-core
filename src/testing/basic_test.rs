@@ -48,6 +48,7 @@ mod tests {
     use committable::{Commitment, CommitmentBoundsArkless, Committable};
     use sha2::{Digest, Sha256};
     use std::sync::Arc;
+    use std::time::Duration;
 
     use serde::{Deserialize, Serialize};
     /// This test simulates multiple builder states receiving messages from the channels and processing them
@@ -345,6 +346,7 @@ mod tests {
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
                 ViewNumber::new(0),
                 10,
+                Duration::from_millis(10),
             );
 
             //builder_state.event_loop().await;

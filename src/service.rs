@@ -172,7 +172,6 @@ impl<Types: NodeType> GlobalState<Types> {
         }
         {
             let cleanup_after_view = on_decide_view + self.buffer_view_num_count;
-            tracing::debug!("Removing builder commitments: [");
 
             let edit = self
                 .view_to_cleanup_targets
@@ -189,10 +188,9 @@ impl<Types: NodeType> GlobalState<Types> {
                     cleanup_after_view
                 );
             }
-            tracing::debug!("]\n");
         }
 
-        tracing::debug!("GC for view {:?} scheduled", on_decide_view);
+        tracing::debug!("GC for scheduled view {:?}", on_decide_view);
 
         self.view_to_cleanup_targets
             .retain(|view_num, (vids, block_hashes)| {
@@ -424,6 +422,7 @@ where
             }
         }
     }
+
     async fn claim_block(
         &self,
         block_hash: &BuilderCommitment,
@@ -473,6 +472,7 @@ where
             })
         }
     }
+
     async fn claim_block_header_input(
         &self,
         block_hash: &BuilderCommitment,

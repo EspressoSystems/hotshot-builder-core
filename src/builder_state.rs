@@ -22,12 +22,16 @@ use async_lock::RwLock;
 use async_trait::async_trait;
 use core::panic;
 use futures::StreamExt;
-use std::collections::{hash_map::Entry, BTreeSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Instant;
 use std::time::SystemTime;
 use std::{cmp::PartialEq, num::NonZeroUsize};
+use std::{
+    collections::{hash_map::Entry, BTreeSet},
+    time::Duration,
+};
 
 pub type TxTimeStamp = u128;
 
@@ -111,10 +115,10 @@ impl<TYPES: NodeType> std::fmt::Display for BuiltFromProposedBlock<TYPES> {
 
 #[derive(Debug, Clone)]
 pub struct BuilderState<TYPES: NodeType> {
-    // timestamp to tx hash, used for ordering for the transactions
+    /// timestamp to tx hash, used for ordering for the transactions
     pub timestamp_to_tx: BTreeMap<TxTimeStamp, Commitment<TYPES::Transaction>>,
 
-    // transaction hash to available transaction data
+    /// transaction hash to available transaction data
     pub tx_hash_to_available_txns: HashMap<
         Commitment<TYPES::Transaction>,
         (TxTimeStamp, TYPES::Transaction, TransactionSource),
@@ -146,25 +150,25 @@ pub struct BuilderState<TYPES: NodeType> {
     /// quorum proposal receiver
     pub qc_receiver: BroadcastReceiver<MessageType<TYPES>>,
 
-    // channel receiver for the block requests
+    /// channel receiver for the block requests
     pub req_receiver: BroadcastReceiver<MessageType<TYPES>>,
 
-    // global state handle, defined in the service.rs
+    /// global state handle, defined in the service.rs
     pub global_state: Arc<RwLock<GlobalState<TYPES>>>,
 
-    // response sender
+    /// response sender
     pub response_sender: UnboundedSender<ResponseMessage>,
 
-    // total nodes required for the VID computation as part of block header input response
+    /// total nodes required for the VID computation as part of block header input response
     pub total_nodes: NonZeroUsize,
 
-    // locally spawned builder Commitements
+    /// locally spawned builder Commitements
     pub builder_commitments: HashSet<(TYPES::Time, BuilderCommitment)>,
 
-    // bootstrapped view number
+    /// bootstrapped view number
     pub bootstrap_view_number: TYPES::Time,
 
-    // list of views for which we have builder spawned clones
+    /// list of views for which we have builder spawned clones
     pub spawned_clones_views_list: Arc<RwLock<BTreeSet<TYPES::Time>>>,
 
     /// last bootstrap garbage collected decided seen view_num
@@ -172,6 +176,9 @@ pub struct BuilderState<TYPES: NodeType> {
 
     /// number of view to buffer before garbage collect
     pub buffer_view_num_count: u64,
+
+    /// timeout for maximising the txns in the block
+    pub maximize_txn_capture_timeout: Duration,
 }
 
 /// Trait to hold the helper functions for the builder
@@ -633,6 +640,33 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     #[tracing::instrument(skip_all, name = "build block",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>> {
+        // provide atleast 1 txn inside the block process the transactions
+        // ideally this should be a threshold should a configurable value, if it gets non-zero before time return, otherwise return after timeout
+        let timeout_after = Instant::now() + self.maximize_txn_capture_timeout;
+        while let Ok(tx) = self.tx_receiver.try_recv() {
+            if let MessageType::TransactionMessage(rtx_msg) = tx {
+                tracing::debug!(
+                    "Received tx msg in builder {:?}:\n {:?}",
+                    self.built_from_proposed_block,
+                    rtx_msg.tx.commit()
+                );
+                if rtx_msg.tx_type == TransactionSource::HotShot {
+                    self.process_hotshot_transaction(rtx_msg.tx);
+                } else {
+                    self.process_external_transaction(rtx_msg.tx);
+                }
+                tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
+            }
+            // return if non-zero txns are available
+            if !self.timestamp_to_tx.is_empty() {
+                break;
+            }
+            // if timeout, return
+            if Instant::now() >= timeout_after {
+                break;
+            }
+        }
+
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
             self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
                 self.tx_hash_to_available_txns
@@ -909,6 +943,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         num_nodes: NonZeroUsize,
         bootstrap_view_number: TYPES::Time,
         buffer_view_num_count: u64,
+        maximize_txn_capture_timeout: Duration,
     ) -> Self {
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
@@ -930,6 +965,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             spawned_clones_views_list: Arc::new(RwLock::new(BTreeSet::new())),
             last_bootstrap_garbage_collected_decided_seen_view_num: bootstrap_view_number,
             buffer_view_num_count,
+            maximize_txn_capture_timeout,
         }
     }
 }
