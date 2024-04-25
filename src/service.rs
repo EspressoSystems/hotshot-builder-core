@@ -192,6 +192,8 @@ impl<Types: NodeType> GlobalState<Types> {
             tracing::debug!("]\n");
         }
 
+        tracing::debug!("GC for view {:?} scheduled", on_decide_view);
+
         self.view_to_cleanup_targets
             .retain(|view_num, (vids, block_hashes)| {
                 if view_num > &on_decide_view {
