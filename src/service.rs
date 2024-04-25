@@ -288,6 +288,11 @@ where
             });
         }
 
+        tracing::info!(
+            "Requesting available blocks for parent {:?}",
+            req_msg.requested_vid_commitment
+        );
+
         let mut bootstrapped_state_build_block = false;
 
         // check in the local spawned builder states, if it doesn't exist it means it cound be two cases
@@ -318,11 +323,6 @@ where
             Ok(just_return_with_this.unwrap().clone())
         } else {
             let timeout_after = Instant::now() + self.max_api_waiting_time;
-
-            tracing::info!(
-                "Requesting available blocks for parent {:?}",
-                req_msg.requested_vid_commitment
-            );
 
             // broadcast the request to the builder states
             self.global_state
