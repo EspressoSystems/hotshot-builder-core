@@ -639,8 +639,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     #[tracing::instrument(skip_all, name = "build block",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>> {
-        // provide atleast 1 txn inside the block process the transactions
-        // ideally this should be a threshold should a configurable value, if it gets non-zero before time return, otherwise return after timeout
+        // try to provide atleast one txn inside the block, ideally this should be a threshold through configurable value,
+        // if it gets non-zero before timeout return, otherwise return after timeout
         if self.timestamp_to_tx.is_empty() {
             let timeout_after = Instant::now() + self.maximize_txn_capture_timeout;
             while let Ok(tx) = self.tx_receiver.try_recv() {
