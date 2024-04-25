@@ -288,10 +288,7 @@ where
             });
         }
 
-        tracing::info!(
-            "Requesting available blocks for parent {:?}",
-            req_msg.requested_vid_commitment
-        );
+        tracing::info!("Requesting available blocks for parent {:?}", for_parent);
 
         let mut bootstrapped_state_build_block = false;
 
