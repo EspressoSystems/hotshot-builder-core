@@ -178,6 +178,9 @@ pub struct BuilderState<TYPES: NodeType> {
 
     /// timeout for maximising the txns in the block
     pub maximize_txn_capture_timeout: Duration,
+
+    /// constant fee that the builder will offer per byte of data sequenced
+    pub base_fee: u64,
 }
 
 /// Trait to hold the helper functions for the builder
@@ -696,7 +699,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             }
             let encoded_txns: Vec<u8> = payload.encode().unwrap().to_vec();
             let block_size: u64 = encoded_txns.len() as u64;
-            let offered_fee: u64 = 0;
+            let offered_fee: u64 = self.base_fee * block_size;
 
             // get the total nodes from the builder state.
             // stored while processing the DA Proposal
@@ -940,6 +943,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         bootstrap_view_number: TYPES::Time,
         buffer_view_num_count: u64,
         maximize_txn_capture_timeout: Duration,
+        base_fee: u64,
     ) -> Self {
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
@@ -962,6 +966,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             last_bootstrap_garbage_collected_decided_seen_view_num: bootstrap_view_number,
             buffer_view_num_count,
             maximize_txn_capture_timeout,
+            base_fee,
         }
     }
 }

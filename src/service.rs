@@ -12,7 +12,7 @@ use hotshot_builder_api::{
 };
 use hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
-    event::{EventType, LeafInfo},
+    event::EventType,
     message::Proposal,
     traits::{
         block_contents::BlockPayload,
@@ -666,10 +666,11 @@ pub async fn run_non_permissioned_standalone_builder_service<
                     }
                     // decide event
                     BuilderEventType::HotshotDecide {
-                        leaf_chain,
+                        latest_decide_view_num,
                         block_size,
                     } => {
-                        handle_decide_event(&decide_sender, leaf_chain, block_size).await;
+                        handle_decide_event(&decide_sender, latest_decide_view_num, block_size)
+                            .await;
                     }
                     // DA proposal event
                     BuilderEventType::HotshotDAProposal { proposal, sender } => {

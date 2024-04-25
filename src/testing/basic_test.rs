@@ -26,7 +26,6 @@ mod tests {
     use async_compatibility_layer::channel::unbounded;
     use hotshot::types::SignatureKey;
     use hotshot_types::{
-        event::LeafInfo,
         signature_key::BuilderKey,
         simple_vote::QuorumData,
         traits::block_contents::{vid_commitment, BlockHeader},
@@ -126,7 +125,7 @@ mod tests {
         let mut sreq_msgs: Vec<MessageType<TestTypes>> = Vec::new();
         // storing response messages
         let mut rres_msgs: Vec<ResponseMessage> = Vec::new();
-        let validated_state = Arc::new(TestValidatedState::default());
+        let _validated_state = Arc::new(TestValidatedState::default());
 
         // generate num_test messages for each type and send it to the respective channels;
         for i in 0..num_test_messages as u32 {
@@ -284,12 +283,7 @@ mod tests {
             };
 
             let sdecide_msg = DecideMessage::<TestTypes> {
-                leaf_chain: Arc::new(vec![LeafInfo::new(
-                    leaf.clone(),
-                    validated_state.clone(),
-                    None,
-                    None,
-                )]),
+                latest_decide_view_number: leaf.get_view_number(),
                 block_size: Some(encoded_transactions.len() as u64),
             };
 
@@ -345,8 +339,9 @@ mod tests {
                 res_sender,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
                 ViewNumber::new(0),
-                10,
-                Duration::from_millis(10),
+                10,                        // buffer view count
+                Duration::from_millis(10), // max time to wait for non-zero txn block
+                0,                         // base fee
             );
 
             //builder_state.event_loop().await;
