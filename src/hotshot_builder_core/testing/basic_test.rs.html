@@ -389,8 +389,6 @@
 <a href="#387" id="387">387</a>
 <a href="#388" id="388">388</a>
 <a href="#389" id="389">389</a>
-<a href="#390" id="390">390</a>
-<a href="#391" id="391">391</a>
 </pre></div><pre class="rust"><code><span class="kw">pub use </span>hotshot::traits::election::static_committee::{
     GeneralStaticCommittee, StaticElectionConfig,
 };
@@ -419,7 +417,6 @@
     <span class="kw">use </span>async_compatibility_layer::channel::unbounded;
     <span class="kw">use </span>hotshot::types::SignatureKey;
     <span class="kw">use </span>hotshot_types::{
-        event::LeafInfo,
         signature_key::BuilderKey,
         simple_vote::QuorumData,
         traits::block_contents::{vid_commitment, BlockHeader},
@@ -441,6 +438,7 @@
     <span class="kw">use </span>committable::{Commitment, CommitmentBoundsArkless, Committable};
     <span class="kw">use </span>sha2::{Digest, Sha256};
     <span class="kw">use </span>std::sync::Arc;
+    <span class="kw">use </span>std::time::Duration;
 
     <span class="kw">use </span>serde::{Deserialize, Serialize};
     <span class="doccomment">/// This test simulates multiple builder states receiving messages from the channels and processing them
@@ -506,6 +504,8 @@
             TestInstanceState {},
             vid_commitment(<span class="kw-2">&amp;</span>[], <span class="number">8</span>),
             ViewNumber::new(<span class="number">0</span>),
+            ViewNumber::new(<span class="number">0</span>),
+            <span class="number">10</span>,
         );
 
         <span class="comment">// to store all the sent messages
@@ -516,7 +516,7 @@
         <span class="kw">let </span><span class="kw-2">mut </span>sreq_msgs: Vec&lt;MessageType&lt;TestTypes&gt;&gt; = Vec::new();
         <span class="comment">// storing response messages
         </span><span class="kw">let </span><span class="kw-2">mut </span>rres_msgs: Vec&lt;ResponseMessage&gt; = Vec::new();
-        <span class="kw">let </span>validated_state = Arc::new(TestValidatedState::default());
+        <span class="kw">let </span>_validated_state = Arc::new(TestValidatedState::default());
 
         <span class="comment">// generate num_test messages for each type and send it to the respective channels;
         </span><span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..num_test_messages <span class="kw">as </span>u32 {
@@ -674,12 +674,7 @@
             };
 
             <span class="kw">let </span>sdecide_msg = DecideMessage::&lt;TestTypes&gt; {
-                leaf_chain: Arc::new(<span class="macro">vec!</span>[LeafInfo::new(
-                    leaf.clone(),
-                    validated_state.clone(),
-                    <span class="prelude-val">None</span>,
-                    <span class="prelude-val">None</span>,
-                )]),
+                latest_decide_view_number: leaf.get_view_number(),
                 block_size: <span class="prelude-val">Some</span>(encoded_transactions.len() <span class="kw">as </span>u64),
             };
 
@@ -735,8 +730,9 @@
                 res_sender,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
                 ViewNumber::new(<span class="number">0</span>),
-                <span class="number">10</span>, <span class="comment">// buffer view count
-                </span><span class="number">0</span>,  <span class="comment">// base fee
+                <span class="number">10</span>,                        <span class="comment">// buffer view count
+                </span>Duration::from_millis(<span class="number">10</span>), <span class="comment">// max time to wait for non-zero txn block
+                </span><span class="number">0</span>,                         <span class="comment">// base fee
             </span>);
 
             <span class="comment">//builder_state.event_loop().await;
