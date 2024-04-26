@@ -893,7 +893,6 @@
 <a href="#891" id="891">891</a>
 <a href="#892" id="892">892</a>
 <a href="#893" id="893">893</a>
-<a href="#894" id="894">894</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{
         election::static_committee::{GeneralStaticCommittee, StaticElectionConfig},
@@ -1113,9 +1112,10 @@
         txn: &lt;Types <span class="kw">as </span>NodeType&gt;::Transaction,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Commitment&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Transaction&gt;, BuildError&gt; {
         <span class="kw">let </span>tx_msg = TransactionMessage::&lt;Types&gt; {
-            tx: txn.clone(),
+            txns: <span class="macro">vec!</span>[txn.clone()],
             tx_type: TransactionSource::External,
         };
+
         <span class="self">self</span>.tx_sender
             .broadcast(MessageType::TransactionMessage(tx_msg))
             .<span class="kw">await
@@ -1772,20 +1772,18 @@ Utility functions to handle the hotshot events
     tx_channel_sender: <span class="kw-2">&amp;</span>BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
     transactions: Vec&lt;Types::Transaction&gt;,
 ) {
-    <span class="comment">// iterate over the transactions and send them to the tx_sender, might get duplicate transactions but builder needs to filter them
-    </span><span class="kw">for </span>tx_message <span class="kw">in </span>transactions {
-        <span class="kw">let </span>tx_msg = TransactionMessage::&lt;Types&gt; {
-            tx: tx_message,
-            tx_type: TransactionSource::HotShot,
-        };
-        <span class="macro">tracing::debug!</span>(
-            <span class="string">"Sending transaction to the builder states{:?}"</span>,
-            tx_msg.tx.commit()
-        );
-        tx_channel_sender
-            .broadcast(MessageType::TransactionMessage(tx_msg))
-            .<span class="kw">await
-            </span>.unwrap();
-    }
+    <span class="comment">// send the whole txn batch to the tx_sender, might get duplicate transactions but builder needs to filter them
+    </span><span class="kw">let </span>tx_msg = TransactionMessage::&lt;Types&gt; {
+        txns: transactions,
+        tx_type: TransactionSource::HotShot,
+    };
+    <span class="macro">tracing::debug!</span>(
+        <span class="string">"Sending txn_count ({:?}) transactions to the builder states"</span>,
+        tx_msg.txns.len()
+    );
+    tx_channel_sender
+        .broadcast(MessageType::TransactionMessage(tx_msg))
+        .<span class="kw">await
+        </span>.unwrap();
 }
 </code></pre></div></section></main></body></html>

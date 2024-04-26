@@ -974,6 +974,18 @@
 <a href="#972" id="972">972</a>
 <a href="#973" id="973">973</a>
 <a href="#974" id="974">974</a>
+<a href="#975" id="975">975</a>
+<a href="#976" id="976">976</a>
+<a href="#977" id="977">977</a>
+<a href="#978" id="978">978</a>
+<a href="#979" id="979">979</a>
+<a href="#980" id="980">980</a>
+<a href="#981" id="981">981</a>
+<a href="#982" id="982">982</a>
+<a href="#983" id="983">983</a>
+<a href="#984" id="984">984</a>
+<a href="#985" id="985">985</a>
+<a href="#986" id="986">986</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
     message::Proposal,
@@ -1020,7 +1032,7 @@
 <span class="doccomment">/// Transaction Message to be put on the tx channel
 </span><span class="attr">#[derive(Clone, Debug, PartialEq)]
 </span><span class="kw">pub struct </span>TransactionMessage&lt;TYPES: NodeType&gt; {
-    <span class="kw">pub </span>tx: TYPES::Transaction,
+    <span class="kw">pub </span>txns: Vec&lt;TYPES::Transaction&gt;,
     <span class="kw">pub </span>tx_type: TransactionSource,
 }
 <span class="doccomment">/// Decide Message to be put on the decide channel
@@ -1163,10 +1175,10 @@
 </span><span class="attr">#[async_trait]
 </span><span class="kw">pub trait </span>BuilderProgress&lt;TYPES: NodeType&gt; {
     <span class="doccomment">/// process the external transaction
-    </span><span class="kw">fn </span>process_external_transaction(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tx: TYPES::Transaction);
+    </span><span class="kw">fn </span>process_external_transaction(<span class="kw-2">&amp;mut </span><span class="self">self</span>, txns: Vec&lt;TYPES::Transaction&gt;);
 
     <span class="doccomment">/// process the hotshot transaction
-    </span><span class="kw">fn </span>process_hotshot_transaction(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tx: TYPES::Transaction);
+    </span><span class="kw">fn </span>process_hotshot_transaction(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tx: Vec&lt;TYPES::Transaction&gt;);
 
     <span class="doccomment">/// process the DA proposal
     </span><span class="kw">async fn </span>process_da_proposal(<span class="kw-2">&amp;mut </span><span class="self">self</span>, da_msg: DAProposalMessage&lt;TYPES&gt;);
@@ -1201,54 +1213,62 @@
 <span class="attr">#[async_trait]
 </span><span class="kw">impl</span>&lt;TYPES: NodeType&gt; BuilderProgress&lt;TYPES&gt; <span class="kw">for </span>BuilderState&lt;TYPES&gt; {
     <span class="doccomment">/// processing the external i.e private mempool transaction
-    </span><span class="kw">fn </span>process_external_transaction(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tx: TYPES::Transaction) {
+    </span><span class="kw">fn </span>process_external_transaction(<span class="kw-2">&amp;mut </span><span class="self">self</span>, txns: Vec&lt;TYPES::Transaction&gt;) {
         <span class="comment">// PRIVATE MEMPOOL TRANSACTION PROCESSING
-        </span><span class="macro">tracing::debug!</span>(<span class="string">"Processing external transaction"</span>);
-        <span class="kw">let </span>tx_hash = tx.commit();
+        </span><span class="macro">tracing::debug!</span>(<span class="string">"Processing external transactions"</span>);
         <span class="comment">// If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
-        </span><span class="kw">if </span><span class="self">self</span>.tx_hash_to_available_txns.contains_key(<span class="kw-2">&amp;</span>tx_hash)
-            || <span class="self">self</span>.included_txns.contains(<span class="kw-2">&amp;</span>tx_hash)
-        {
-            <span class="macro">tracing::debug!</span>(<span class="string">"Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it"</span>);
-        } <span class="kw">else </span>{
-            <span class="comment">// get the current timestamp in nanoseconds; it used for ordering the transactions
-            </span><span class="kw">let </span>tx_timestamp = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
+        </span>txns.iter().for_each(|tx| {
+            <span class="kw">let </span>tx_hash = tx.commit();
+            <span class="macro">tracing::debug!</span>(<span class="string">"Transaction hash: {:?}"</span>, tx_hash);
+            <span class="kw">if </span><span class="self">self</span>.tx_hash_to_available_txns.contains_key(<span class="kw-2">&amp;</span>tx_hash)
+                || <span class="self">self</span>.included_txns.contains(<span class="kw-2">&amp;</span>tx_hash)
+            {
+                <span class="macro">tracing::debug!</span>(<span class="string">"Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it"</span>);
+            } <span class="kw">else </span>{
+                <span class="comment">// get the current timestamp in nanoseconds; it used for ordering the transactions
+                </span><span class="kw">let </span>tx_timestamp = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos();
 
-            <span class="comment">// insert into both timestamp_tx and tx_hash_tx maps
-            </span><span class="self">self</span>.timestamp_to_tx.insert(tx_timestamp, tx_hash);
-            <span class="self">self</span>.tx_hash_to_available_txns
-                .insert(tx_hash, (tx_timestamp, tx, TransactionSource::External));
-        }
+                <span class="comment">// insert into both timestamp_tx and tx_hash_tx maps
+                </span><span class="self">self</span>.timestamp_to_tx.insert(tx_timestamp, tx_hash);
+                <span class="self">self</span>.tx_hash_to_available_txns
+                    .insert(tx_hash, (tx_timestamp, tx.clone(), TransactionSource::External));
+            }
+    });
     }
 
     <span class="doccomment">/// processing the hotshot i.e public mempool transaction
     </span><span class="attr">#[tracing::instrument(skip_all, name = <span class="string">"process hotshot transaction"</span>,
                                     fields(builder_built_from_proposed_block = %<span class="self">self</span>.built_from_proposed_block))]
-    </span><span class="kw">fn </span>process_hotshot_transaction(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tx: TYPES::Transaction) {
-        <span class="macro">tracing::debug!</span>(<span class="string">"Processing hotshot transaction"</span>);
-        <span class="kw">let </span>tx_hash = tx.commit();
-        <span class="comment">// HOTSHOT MEMPOOL TRANSACTION PROCESSING
-        // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
-        </span><span class="kw">if </span><span class="self">self</span>.tx_hash_to_available_txns.contains_key(<span class="kw-2">&amp;</span>tx_hash)
-            || <span class="self">self</span>.included_txns.contains(<span class="kw-2">&amp;</span>tx_hash)
-        {
-            <span class="macro">tracing::debug!</span>(<span class="string">"Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it"</span>);
-            <span class="kw">return</span>;
-        } <span class="kw">else </span>{
-            <span class="comment">// get the current timestamp in nanoseconds
-            </span><span class="kw">let </span>tx_timestamp = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
+    </span><span class="kw">fn </span>process_hotshot_transaction(<span class="kw-2">&amp;mut </span><span class="self">self</span>, txns: Vec&lt;TYPES::Transaction&gt;) {
+        <span class="comment">// Hotshot Public Mempool txns processessing
+        </span><span class="macro">tracing::debug!</span>(<span class="string">"Processing hotshot transactions"</span>);
+        <span class="comment">// If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
+        </span>txns.iter().for_each(|tx| {
+            <span class="kw">let </span>tx_hash = tx.commit();
+            <span class="macro">tracing::debug!</span>(<span class="string">"Transaction hash: {:?}"</span>, tx_hash);
+            <span class="kw">let </span>tx_hash = tx.commit();
+            <span class="comment">// HOTSHOT MEMPOOL TRANSACTION PROCESSING
+            // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
+            </span><span class="kw">if </span><span class="self">self</span>.tx_hash_to_available_txns.contains_key(<span class="kw-2">&amp;</span>tx_hash)
+                || <span class="self">self</span>.included_txns.contains(<span class="kw-2">&amp;</span>tx_hash)
+            {
+                <span class="macro">tracing::debug!</span>(<span class="string">"Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it"</span>);
+            } <span class="kw">else </span>{
+                <span class="comment">// get the current timestamp in nanoseconds
+                </span><span class="kw">let </span>tx_timestamp = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos();
 
-            <span class="comment">// insert into both timestamp_tx and tx_hash_tx maps
-            </span><span class="self">self</span>.timestamp_to_tx.insert(tx_timestamp, tx_hash);
-            <span class="self">self</span>.tx_hash_to_available_txns
-                .insert(tx_hash, (tx_timestamp, tx, TransactionSource::HotShot));
-        }
+                <span class="comment">// insert into both timestamp_tx and tx_hash_tx maps
+                </span><span class="self">self</span>.timestamp_to_tx.insert(tx_timestamp, tx_hash);
+                <span class="self">self</span>.tx_hash_to_available_txns
+                    .insert(tx_hash, (tx_timestamp, tx.clone(), TransactionSource::HotShot));
+            }
+        });
     }
 
     <span class="doccomment">/// processing the DA proposal
@@ -1622,14 +1642,14 @@
             <span class="kw">while let </span><span class="prelude-val">Ok</span>(tx) = <span class="self">self</span>.tx_receiver.try_recv() {
                 <span class="kw">if let </span>MessageType::TransactionMessage(rtx_msg) = tx {
                     <span class="macro">tracing::debug!</span>(
-                        <span class="string">"Received tx msg in builder {:?}:\n {:?}"</span>,
+                        <span class="string">"Received ({:?}) txns msg in builder {:?}"</span>,
+                        rtx_msg.txns.len(),
                         <span class="self">self</span>.built_from_proposed_block,
-                        rtx_msg.tx.commit()
                     );
                     <span class="kw">if </span>rtx_msg.tx_type == TransactionSource::HotShot {
-                        <span class="self">self</span>.process_hotshot_transaction(rtx_msg.tx);
+                        <span class="self">self</span>.process_hotshot_transaction(rtx_msg.txns);
                     } <span class="kw">else </span>{
-                        <span class="self">self</span>.process_external_transaction(rtx_msg.tx);
+                        <span class="self">self</span>.process_external_transaction(rtx_msg.txns);
                     }
                     <span class="macro">tracing::debug!</span>(<span class="string">"tx map size: {}"</span>, <span class="self">self</span>.tx_hash_to_available_txns.len());
                 }
@@ -1788,14 +1808,14 @@
                 </span><span class="kw">while let </span><span class="prelude-val">Ok</span>(tx) = <span class="self">self</span>.tx_receiver.try_recv() {
                     <span class="kw">if let </span>MessageType::TransactionMessage(rtx_msg) = tx {
                         <span class="macro">tracing::debug!</span>(
-                            <span class="string">"Received tx msg in builder {:?}:\n {:?}"</span>,
+                            <span class="string">"Received ({:?}) txns msg in builder {:?}"</span>,
+                            rtx_msg.txns.len(),
                             <span class="self">self</span>.built_from_proposed_block,
-                            rtx_msg.tx.commit()
                         );
                         <span class="kw">if </span>rtx_msg.tx_type == TransactionSource::HotShot {
-                            <span class="self">self</span>.process_hotshot_transaction(rtx_msg.tx);
+                            <span class="self">self</span>.process_hotshot_transaction(rtx_msg.txns);
                         } <span class="kw">else </span>{
-                            <span class="self">self</span>.process_external_transaction(rtx_msg.tx);
+                            <span class="self">self</span>.process_external_transaction(rtx_msg.txns);
                         }
                         <span class="macro">tracing::debug!</span>(<span class="string">"tx map size: {}"</span>, <span class="self">self</span>.tx_hash_to_available_txns.len());
                     }
@@ -1824,11 +1844,15 @@
                         <span class="kw">match </span>tx {
                             <span class="prelude-val">Some</span>(tx) =&gt; {
                                 <span class="kw">if let </span>MessageType::TransactionMessage(rtx_msg) = tx {
-                                    <span class="macro">tracing::debug!</span>(<span class="string">"Received tx msg in builder {:?}:\n {:?}"</span>, <span class="self">self</span>.built_from_proposed_block, rtx_msg.tx.commit());
+                                    <span class="macro">tracing::debug!</span>(
+                                        <span class="string">"Received ({:?}) txns msg in builder {:?}"</span>,
+                                        rtx_msg.txns.len(),
+                                        <span class="self">self</span>.built_from_proposed_block,
+                                    );
                                     <span class="kw">if </span>rtx_msg.tx_type == TransactionSource::HotShot {
-                                        <span class="self">self</span>.process_hotshot_transaction(rtx_msg.tx);
+                                        <span class="self">self</span>.process_hotshot_transaction(rtx_msg.txns);
                                     } <span class="kw">else </span>{
-                                        <span class="self">self</span>.process_external_transaction(rtx_msg.tx);
+                                        <span class="self">self</span>.process_external_transaction(rtx_msg.txns);
                                     }
                                     <span class="macro">tracing::debug!</span>(<span class="string">"tx map size: {}"</span>, <span class="self">self</span>.tx_hash_to_available_txns.len());
                                 }

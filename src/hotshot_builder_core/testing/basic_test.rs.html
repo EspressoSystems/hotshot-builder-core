@@ -525,7 +525,7 @@
             <span class="kw">let </span>encoded_transactions = TestTransaction::encode(<span class="kw-2">&amp;</span>[tx.clone()]).unwrap();
 
             <span class="kw">let </span>stx_msg = TransactionMessage::&lt;TestTypes&gt; {
-                tx: tx.clone(),
+                txns: <span class="macro">vec!</span>[tx.clone()],
                 tx_type: TransactionSource::HotShot,
             };
 
