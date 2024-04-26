@@ -261,7 +261,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         txns.iter().for_each(|tx| {
             let tx_hash = tx.commit();
             tracing::debug!("Transaction hash: {:?}", tx_hash);
-            let tx_hash = tx.commit();
             // HOTSHOT MEMPOOL TRANSACTION PROCESSING
             // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
             if self.tx_hash_to_available_txns.contains_key(&tx_hash)
