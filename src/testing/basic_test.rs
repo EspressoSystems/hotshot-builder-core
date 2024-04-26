@@ -134,7 +134,7 @@ mod tests {
             let encoded_transactions = TestTransaction::encode(&[tx.clone()]).unwrap();
 
             let stx_msg = TransactionMessage::<TestTypes> {
-                tx: tx.clone(),
+                txns: vec![tx.clone()],
                 tx_type: TransactionSource::HotShot,
             };
 

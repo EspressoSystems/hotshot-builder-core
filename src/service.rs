@@ -217,9 +217,10 @@ impl<Types: NodeType> GlobalState<Types> {
         txn: <Types as NodeType>::Transaction,
     ) -> Result<Commitment<<Types as NodeType>::Transaction>, BuildError> {
         let tx_msg = TransactionMessage::<Types> {
-            tx: txn.clone(),
+            txns: vec![txn.clone()],
             tx_type: TransactionSource::External,
         };
+
         self.tx_sender
             .broadcast(MessageType::TransactionMessage(tx_msg))
             .await
@@ -876,19 +877,17 @@ async fn handle_tx_event<Types: NodeType>(
     tx_channel_sender: &BroadcastSender<MessageType<Types>>,
     transactions: Vec<Types::Transaction>,
 ) {
-    // iterate over the transactions and send them to the tx_sender, might get duplicate transactions but builder needs to filter them
-    for tx_message in transactions {
-        let tx_msg = TransactionMessage::<Types> {
-            tx: tx_message,
-            tx_type: TransactionSource::HotShot,
-        };
-        tracing::debug!(
-            "Sending transaction to the builder states{:?}",
-            tx_msg.tx.commit()
-        );
-        tx_channel_sender
-            .broadcast(MessageType::TransactionMessage(tx_msg))
-            .await
-            .unwrap();
-    }
+    // send the whole txn batch to the tx_sender, might get duplicate transactions but builder needs to filter them
+    let tx_msg = TransactionMessage::<Types> {
+        txns: transactions,
+        tx_type: TransactionSource::HotShot,
+    };
+    tracing::debug!(
+        "Sending txn_count ({:?}) transactions to the builder states",
+        tx_msg.txns.len()
+    );
+    tx_channel_sender
+        .broadcast(MessageType::TransactionMessage(tx_msg))
+        .await
+        .unwrap();
 }
