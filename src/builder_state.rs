@@ -261,7 +261,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         txns.iter().for_each(|tx| {
             let tx_hash = tx.commit();
             tracing::debug!("Transaction hash: {:?}", tx_hash);
-            let tx_hash = tx.commit();
             // HOTSHOT MEMPOOL TRANSACTION PROCESSING
             // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
             if self.tx_hash_to_available_txns.contains_key(&tx_hash)
@@ -310,8 +309,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         {
             tracing::info!("DA Proposal handled by bootstrapped builder state");
 
-            // if we are bootstraping and we spwan a clone, we can assume in the healty version of we can just zero out
-            // da_proposal to filter out the bootstraping state and zero out the case
+            // if we are bootstrapping and we spawn a clone, we can assume in the healthy version of we can just zero out
+            // da_proposal to filter out the bootstrapping state and zero out the case
             handled_by_bootstrap = true;
         }
         // Do the validation check
