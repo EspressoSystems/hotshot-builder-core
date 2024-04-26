@@ -110,7 +110,6 @@ mod tests {
             req_sender,
             res_receiver,
             tx_sender.clone(),
-            TestInstanceState {},
             vid_commitment(&[], 8),
             ViewNumber::new(0),
             ViewNumber::new(0),

@@ -73,7 +73,7 @@ pub struct GlobalState<Types: NodeType> {
     pub spawned_builder_states: HashMap<VidCommitment, Types::Time>,
 
     // builder state -> last built block , it is used to respond the client
-    // if the req channel times out during get_avaialble_blocks
+    // if the req channel times out during get_available_blocks
     pub builder_state_to_last_built_block: HashMap<VidCommitment, ResponseMessage>,
 
     // scheduled GC by view number
@@ -90,9 +90,6 @@ pub struct GlobalState<Types: NodeType> {
     // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
     pub tx_sender: BroadcastSender<MessageType<Types>>,
 
-    // Instance state
-    pub instance_state: Types::InstanceState,
-
     // last garbage collected view number
     pub last_garbage_collected_view_num: Types::Time,
 
@@ -106,7 +103,6 @@ impl<Types: NodeType> GlobalState<Types> {
         request_sender: BroadcastSender<MessageType<Types>>,
         response_receiver: UnboundedReceiver<ResponseMessage>,
         tx_sender: BroadcastSender<MessageType<Types>>,
-        instance_state: Types::InstanceState,
         bootstrapped_builder_state_id: VidCommitment,
         bootstrapped_view_num: Types::Time,
         last_garbage_collected_view_num: Types::Time,
@@ -121,7 +117,6 @@ impl<Types: NodeType> GlobalState<Types> {
             request_sender,
             response_receiver,
             tx_sender,
-            instance_state,
             last_garbage_collected_view_num,
             buffer_view_num_count,
             builder_state_to_last_built_block: Default::default(),
@@ -293,8 +288,8 @@ where
 
         let mut bootstrapped_state_build_block = false;
 
-        // check in the local spawned builder states, if it doesn't exist it means it cound be two cases
-        // it has been sent to garbed collected, or never exists, in this let bootstrapped build a block for it
+        // check in the local spawned builder states, if it doesn't exist it means there could be two cases
+        // it has been sent to garbed collected, or never exists, in later case let bootstrapped build a block for it
         let just_return_with_this = {
             let global_state = self.global_state.read_arc().await;
             if !global_state.spawned_builder_states.contains_key(for_parent) {
@@ -599,9 +594,6 @@ pub async fn run_non_permissioned_standalone_builder_service<
         EventStreamError,
         vbs::version::StaticVersion<0, 1>,
     >,
-
-    // instance state
-    instance_state: Types::InstanceState,
 ) {
     // handle the startup event at the start
     let membership = if let Some(Ok(event)) = subscribed_events.next().await {
@@ -690,8 +682,7 @@ pub async fn run_non_permissioned_standalone_builder_service<
                     BuilderEventType::HotshotQuorumProposal { proposal, sender } => {
                         // get the leader for current view
                         let leader = membership.get_leader(proposal.data.view_number);
-                        handle_qc_event(&qc_sender, proposal, sender, leader, &instance_state)
-                            .await;
+                        handle_qc_event(&qc_sender, proposal, sender, leader).await;
                     }
                     _ => {
                         tracing::error!("Unhandled event from Builder");
@@ -726,9 +717,6 @@ pub async fn run_permissioned_standalone_builder_service<
 
     // hotshot context handle
     hotshot_handle: SystemContextHandle<Types, I>,
-
-    // pass the instance state
-    instance_state: Types::InstanceState,
 ) {
     let mut event_stream = hotshot_handle.get_event_stream();
     loop {
@@ -770,8 +758,7 @@ pub async fn run_permissioned_standalone_builder_service<
                     EventType::QuorumProposal { proposal, sender } => {
                         // get the leader for current view
                         let leader = hotshot_handle.get_leader(proposal.data.view_number).await;
-                        handle_qc_event(&qc_sender, proposal, sender, leader, &instance_state)
-                            .await;
+                        handle_qc_event(&qc_sender, proposal, sender, leader).await;
                     }
                     _ => {
                         tracing::error!("Unhandled event from Builder: {:?}", event.event);
@@ -825,7 +812,6 @@ async fn handle_qc_event<Types: NodeType>(
     qc_proposal: Proposal<Types, QuorumProposal<Types>>,
     sender: <Types as NodeType>::SignatureKey,
     leader: <Types as NodeType>::SignatureKey,
-    _instance_state: &Types::InstanceState,
 ) {
     tracing::debug!(
         "QCProposal: Leader: {:?} for the view: {:?}",

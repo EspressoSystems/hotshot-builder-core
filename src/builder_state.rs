@@ -255,7 +255,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     #[tracing::instrument(skip_all, name = "process hotshot transaction",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     fn process_hotshot_transaction(&mut self, txns: Vec<TYPES::Transaction>) {
-        // Hotshot Public Mempool txns processessing
+        // Hotshot Public Mempool txns processing
         tracing::debug!("Processing hotshot transactions");
         // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
         txns.iter().for_each(|tx| {
@@ -310,8 +310,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         {
             tracing::info!("DA Proposal handled by bootstrapped builder state");
 
-            // if we are bootstraping and we spwan a clone, we can assume in the healty version of we can just zero out
-            // da_proposal to filter out the bootstraping state and zero out the case
+            // if we are bootstrapping and we spawn a clone, we can assume in the healthy version of we can just zero out
+            // da_proposal to filter out the bootstrapping state and zero out the case
             handled_by_bootstrap = true;
         }
         // Do the validation check
