@@ -255,7 +255,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     #[tracing::instrument(skip_all, name = "process hotshot transaction",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     fn process_hotshot_transaction(&mut self, txns: Vec<TYPES::Transaction>) {
-        // Hotshot Public Mempool txns processing
+        // Hotshot Public Mempool txns processessing
         tracing::debug!("Processing hotshot transactions");
         // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
         txns.iter().for_each(|tx| {
