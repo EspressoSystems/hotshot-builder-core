@@ -232,7 +232,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         txns.iter().for_each(|tx| {
             let tx_hash = tx.commit();
             tracing::debug!("Transaction hash: {:?}", tx_hash);
-            
             if self.tx_hash_to_available_txns.contains_key(&tx_hash)
                 || self.included_txns.contains(&tx_hash)
             {
@@ -282,7 +281,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     .insert(tx_hash, (tx_timestamp, tx.clone(), TransactionSource::HotShot));
             }
         });
-    
     }
 
     /// processing the DA proposal
