@@ -879,20 +879,6 @@
 <a href="#877" id="877">877</a>
 <a href="#878" id="878">878</a>
 <a href="#879" id="879">879</a>
-<a href="#880" id="880">880</a>
-<a href="#881" id="881">881</a>
-<a href="#882" id="882">882</a>
-<a href="#883" id="883">883</a>
-<a href="#884" id="884">884</a>
-<a href="#885" id="885">885</a>
-<a href="#886" id="886">886</a>
-<a href="#887" id="887">887</a>
-<a href="#888" id="888">888</a>
-<a href="#889" id="889">889</a>
-<a href="#890" id="890">890</a>
-<a href="#891" id="891">891</a>
-<a href="#892" id="892">892</a>
-<a href="#893" id="893">893</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{
         election::static_committee::{GeneralStaticCommittee, StaticElectionConfig},
@@ -968,7 +954,7 @@
     </span><span class="kw">pub </span>spawned_builder_states: HashMap&lt;VidCommitment, Types::Time&gt;,
 
     <span class="comment">// builder state -&gt; last built block , it is used to respond the client
-    // if the req channel times out during get_avaialble_blocks
+    // if the req channel times out during get_available_blocks
     </span><span class="kw">pub </span>builder_state_to_last_built_block: HashMap&lt;VidCommitment, ResponseMessage&gt;,
 
     <span class="comment">// scheduled GC by view number
@@ -985,9 +971,6 @@
     // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
     </span><span class="kw">pub </span>tx_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
 
-    <span class="comment">// Instance state
-    </span><span class="kw">pub </span>instance_state: Types::InstanceState,
-
     <span class="comment">// last garbage collected view number
     </span><span class="kw">pub </span>last_garbage_collected_view_num: Types::Time,
 
@@ -1001,7 +984,6 @@
         request_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
         response_receiver: UnboundedReceiver&lt;ResponseMessage&gt;,
         tx_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
-        instance_state: Types::InstanceState,
         bootstrapped_builder_state_id: VidCommitment,
         bootstrapped_view_num: Types::Time,
         last_garbage_collected_view_num: Types::Time,
@@ -1016,7 +998,6 @@
             request_sender,
             response_receiver,
             tx_sender,
-            instance_state,
             last_garbage_collected_view_num,
             buffer_view_num_count,
             builder_state_to_last_built_block: Default::default(),
@@ -1188,8 +1169,8 @@ Handling Builder API responses
 
         <span class="kw">let </span><span class="kw-2">mut </span>bootstrapped_state_build_block = <span class="bool-val">false</span>;
 
-        <span class="comment">// check in the local spawned builder states, if it doesn't exist it means it cound be two cases
-        // it has been sent to garbed collected, or never exists, in this let bootstrapped build a block for it
+        <span class="comment">// check in the local spawned builder states, if it doesn't exist it means there could be two cases
+        // it has been sent to garbed collected, or never exists, in later case let bootstrapped build a block for it
         </span><span class="kw">let </span>just_return_with_this = {
             <span class="kw">let </span>global_state = <span class="self">self</span>.global_state.read_arc().<span class="kw">await</span>;
             <span class="kw">if </span>!global_state.spawned_builder_states.contains_key(for_parent) {
@@ -1494,9 +1475,6 @@ Running Non-Permissioned Builder Service
         EventStreamError,
         vbs::version::StaticVersion&lt;<span class="number">0</span>, <span class="number">1</span>&gt;,
     &gt;,
-
-    <span class="comment">// instance state
-    </span>instance_state: Types::InstanceState,
 ) {
     <span class="comment">// handle the startup event at the start
     </span><span class="kw">let </span>membership = <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(event)) = subscribed_events.next().<span class="kw">await </span>{
@@ -1585,8 +1563,7 @@ Running Non-Permissioned Builder Service
                     </span>BuilderEventType::HotshotQuorumProposal { proposal, sender } =&gt; {
                         <span class="comment">// get the leader for current view
                         </span><span class="kw">let </span>leader = membership.get_leader(proposal.data.view_number);
-                        handle_qc_event(<span class="kw-2">&amp;</span>qc_sender, proposal, sender, leader, <span class="kw-2">&amp;</span>instance_state)
-                            .<span class="kw">await</span>;
+                        handle_qc_event(<span class="kw-2">&amp;</span>qc_sender, proposal, sender, leader).<span class="kw">await</span>;
                     }
                     <span class="kw">_ </span>=&gt; {
                         <span class="macro">tracing::error!</span>(<span class="string">"Unhandled event from Builder"</span>);
@@ -1621,9 +1598,6 @@ Running Permissioned Builder Service
 
     <span class="comment">// hotshot context handle
     </span>hotshot_handle: SystemContextHandle&lt;Types, I&gt;,
-
-    <span class="comment">// pass the instance state
-    </span>instance_state: Types::InstanceState,
 ) {
     <span class="kw">let </span><span class="kw-2">mut </span>event_stream = hotshot_handle.get_event_stream();
     <span class="kw">loop </span>{
@@ -1665,8 +1639,7 @@ Running Permissioned Builder Service
                     </span>EventType::QuorumProposal { proposal, sender } =&gt; {
                         <span class="comment">// get the leader for current view
                         </span><span class="kw">let </span>leader = hotshot_handle.get_leader(proposal.data.view_number).<span class="kw">await</span>;
-                        handle_qc_event(<span class="kw-2">&amp;</span>qc_sender, proposal, sender, leader, <span class="kw-2">&amp;</span>instance_state)
-                            .<span class="kw">await</span>;
+                        handle_qc_event(<span class="kw-2">&amp;</span>qc_sender, proposal, sender, leader).<span class="kw">await</span>;
                     }
                     <span class="kw">_ </span>=&gt; {
                         <span class="macro">tracing::error!</span>(<span class="string">"Unhandled event from Builder: {:?}"</span>, event.event);
@@ -1720,7 +1693,6 @@ Utility functions to handle the hotshot events
     qc_proposal: Proposal&lt;Types, QuorumProposal&lt;Types&gt;&gt;,
     sender: &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey,
     leader: &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey,
-    _instance_state: <span class="kw-2">&amp;</span>Types::InstanceState,
 ) {
     <span class="macro">tracing::debug!</span>(
         <span class="string">"QCProposal: Leader: {:?} for the view: {:?}"</span>,

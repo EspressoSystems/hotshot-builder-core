@@ -985,7 +985,6 @@
 <a href="#983" id="983">983</a>
 <a href="#984" id="984">984</a>
 <a href="#985" id="985">985</a>
-<a href="#986" id="986">986</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
     message::Proposal,
@@ -1249,7 +1248,6 @@
         </span>txns.iter().for_each(|tx| {
             <span class="kw">let </span>tx_hash = tx.commit();
             <span class="macro">tracing::debug!</span>(<span class="string">"Transaction hash: {:?}"</span>, tx_hash);
-            <span class="kw">let </span>tx_hash = tx.commit();
             <span class="comment">// HOTSHOT MEMPOOL TRANSACTION PROCESSING
             // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
             </span><span class="kw">if </span><span class="self">self</span>.tx_hash_to_available_txns.contains_key(<span class="kw-2">&amp;</span>tx_hash)
@@ -1298,8 +1296,8 @@
         {
             <span class="macro">tracing::info!</span>(<span class="string">"DA Proposal handled by bootstrapped builder state"</span>);
 
-            <span class="comment">// if we are bootstraping and we spwan a clone, we can assume in the healty version of we can just zero out
-            // da_proposal to filter out the bootstraping state and zero out the case
+            <span class="comment">// if we are bootstrapping and we spawn a clone, we can assume in the healthy version of we can just zero out
+            // da_proposal to filter out the bootstrapping state and zero out the case
             </span>handled_by_bootstrap = <span class="bool-val">true</span>;
         }
         <span class="comment">// Do the validation check
