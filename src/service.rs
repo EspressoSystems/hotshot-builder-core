@@ -1,8 +1,5 @@
 use hotshot::{
-    traits::{
-        election::static_committee::{GeneralStaticCommittee, StaticElectionConfig},
-        NodeImplementation,
-    },
+    traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::SystemContextHandle,
 };
 use hotshot_builder_api::{
@@ -572,9 +569,7 @@ impl<Types: NodeType> ReadState for ProxyGlobalState<Types> {
 /*
 Running Non-Permissioned Builder Service
 */
-pub async fn run_non_permissioned_standalone_builder_service<
-    Types: NodeType<ElectionConfigType = StaticElectionConfig>,
->(
+pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
     // sending a transaction from the hotshot mempool to the builder states
     tx_sender: BroadcastSender<MessageType<Types>>,
 
@@ -602,24 +597,14 @@ pub async fn run_non_permissioned_standalone_builder_service<
                 known_node_with_stake,
                 non_staked_node_count,
             } => {
-                // Create membership. It is similar to init() in sequencer/src/context.rs
-                let election_config: StaticElectionConfig = GeneralStaticCommittee::<
-                    Types,
-                    <Types as NodeType>::SignatureKey,
-                >::default_election_config(
-                    known_node_with_stake.len() as u64,
-                    non_staked_node_count as u64,
-                );
-
-                let membership: GeneralStaticCommittee<
-                Types,
-                <Types as NodeType>::SignatureKey,
-                > = GeneralStaticCommittee::<Types,
-                <Types as NodeType>::SignatureKey>::create_election(
-                    known_node_with_stake.clone(),
-                    election_config,
-                    0,
-                );
+                let membership: GeneralStaticCommittee<Types, <Types as NodeType>::SignatureKey> = GeneralStaticCommittee::<
+                        Types,
+                        <Types as NodeType>::SignatureKey,
+                    >::create_election(
+                        known_node_with_stake.clone(),
+                        known_node_with_stake.clone(),
+                        0
+                    );
 
                 tracing::info!(
                     "Startup info: Known nodes with stake: {:?}, Non-staked node count: {:?}",

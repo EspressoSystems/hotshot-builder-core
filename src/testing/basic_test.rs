@@ -1,6 +1,4 @@
-pub use hotshot::traits::election::static_committee::{
-    GeneralStaticCommittee, StaticElectionConfig,
-};
+pub use hotshot::traits::election::static_committee::GeneralStaticCommittee;
 pub use hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal, ViewNumber},
     message::Proposal,
@@ -77,7 +75,6 @@ mod tests {
             type BlockPayload = TestBlockPayload;
             type SignatureKey = BLSPubKey;
             type Transaction = TestTransaction;
-            type ElectionConfigType = StaticElectionConfig;
             type ValidatedState = TestValidatedState;
             type InstanceState = TestInstanceState;
             type Membership = GeneralStaticCommittee<TestTypes, Self::SignatureKey>;
