@@ -1,6 +1,6 @@
 [package]
 name = "hotshot-builder-core"
-version = "0.1.12"
+version = "0.1.14"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -17,7 +17,7 @@ committable = "0.2"
 futures = "0.3"
 hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.45" }
 hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.45" }
-hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", branch = "hg/update_hotshot_0.5.45" }
+hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.15" }
 hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.45" }
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"

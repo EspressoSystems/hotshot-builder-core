@@ -3135,7 +3135,7 @@ dependencies = [
 
 [[package]]
 name = "hotshot-builder-core"
-version = "0.1.12"
+version = "0.1.14"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
@@ -3163,7 +3163,7 @@ dependencies = [
 [[package]]
 name = "hotshot-events-service"
 version = "0.1.15"
-source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?branch=hg/update_hotshot_0.5.45#e85f0834333f9255802fc199e06d482e81cc7b05"
+source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?tag=0.1.15#9f294559199974baa44769516c655f66d4696c27"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
