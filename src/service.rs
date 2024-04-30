@@ -30,7 +30,9 @@ use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use crate::WaitAndKeep;
 use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
-use async_compatibility_layer::channel::UnboundedReceiver;
+use async_compatibility_layer::channel::{
+    TryRecvError as UnbounderTryRecvError, UnboundedReceiver,
+};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use committable::{Commitment, Committable};
@@ -339,7 +341,8 @@ where
                     break recv_attempt.map_err(|_| BuildError::Missing);
                 } else {
                     let e = recv_attempt.unwrap_err();
-                    if e.is_empty() {
+                    let is_empty = matches!(e, UnbounderTryRecvError::Empty);
+                    if is_empty {
                         if Instant::now() >= timeout_after {
                             // lookup into the builder_state_to_last_built_block, if it contains the result, return that otherwise return error
                             if let Some(last_built_block) = self
