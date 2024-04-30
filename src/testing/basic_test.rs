@@ -1,6 +1,4 @@
-pub use hotshot::traits::election::static_committee::{
-    GeneralStaticCommittee, StaticElectionConfig,
-};
+pub use hotshot::traits::election::static_committee::GeneralStaticCommittee;
 pub use hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal, ViewNumber},
     message::Proposal,
@@ -77,7 +75,6 @@ mod tests {
             type BlockPayload = TestBlockPayload;
             type SignatureKey = BLSPubKey;
             type Transaction = TestTransaction;
-            type ElectionConfigType = StaticElectionConfig;
             type ValidatedState = TestValidatedState;
             type InstanceState = TestInstanceState;
             type Membership = GeneralStaticCommittee<TestTypes, Self::SignatureKey>;
@@ -166,8 +163,11 @@ mod tests {
             // Prepare the QC proposal message
             // calculate the vid commitment over the encoded_transactions
 
-            let (block_payload, metadata) =
-                <TestBlockPayload as BlockPayload>::from_transactions(vec![tx.clone()]).unwrap();
+            let (block_payload, metadata) = <TestBlockPayload as BlockPayload>::from_transactions(
+                vec![tx.clone()],
+                Arc::new(TestInstanceState {}),
+            )
+            .unwrap();
 
             tracing::debug!(
                 "Encoded transactions: {:?} Num nodes:{}",
@@ -341,6 +341,7 @@ mod tests {
                 10,                        // buffer view count
                 Duration::from_millis(10), // max time to wait for non-zero txn block
                 0,                         // base fee
+                Arc::new(TestInstanceState {}),
             );
 
             //builder_state.event_loop().await;
