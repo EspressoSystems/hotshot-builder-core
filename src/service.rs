@@ -43,10 +43,13 @@ use hotshot_events_service::{
     events_source::{BuilderEvent, BuilderEventType},
 };
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    ops::Deref,
+};
 use std::{fmt::Display, time::Instant};
 use tagged_base64::TaggedBase64;
 use tide_disco::method::ReadState;
@@ -203,22 +206,21 @@ impl<Types: NodeType> GlobalState<Types> {
 
     // private mempool submit txn
     // Currently, we don't differentiate between the transactions from the hotshot and the private mempool
-    pub async fn submit_client_txns(
+    pub async fn submit_client_txn(
         &self,
-        txns: Vec<<Types as NodeType>::Transaction>,
-    ) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
-        let results = txns.iter().map(|tx| tx.commit()).collect();
+        txn: <Types as NodeType>::Transaction,
+    ) -> Result<Commitment<<Types as NodeType>::Transaction>, BuildError> {
         let tx_msg = TransactionMessage::<Types> {
-            txns,
+            txns: vec![txn.clone()],
             tx_type: TransactionSource::External,
         };
 
         self.tx_sender
             .broadcast(MessageType::TransactionMessage(tx_msg))
             .await
-            .map(|_a| results)
+            .map(|_a| txn.commit())
             .map_err(|_e| BuildError::Error {
-                message: "failed to send txns".to_string(),
+                message: "failed to send txn".to_string(),
             })
     }
 }
@@ -527,19 +529,18 @@ where
         Ok(self.builder_keys.0.clone())
     }
 }
-
 #[async_trait]
 impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
-    async fn submit_txns(
-        &self,
-        txns: Vec<<Types as NodeType>::Transaction>,
+    async fn submit_txn(
+        &mut self,
+        txn: <Types as NodeType>::Transaction,
     ) -> Result<(), BuildError> {
-        tracing::debug!("Submitting transaction to the builder states{:?}", txns);
+        tracing::debug!("Submitting transaction to the builder states{:?}", txn);
         let response = self
             .global_state
             .read_arc()
             .await
-            .submit_client_txns(txns)
+            .submit_client_txn(txn)
             .await;
 
         tracing::info!(
@@ -556,16 +557,15 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
         Ok(())
     }
 }
-
 #[async_trait]
 impl<Types: NodeType> ReadState for ProxyGlobalState<Types> {
-    type State = ProxyGlobalState<Types>;
+    type State = GlobalState<Types>;
 
     async fn read<T>(
         &self,
         op: impl Send + for<'a> FnOnce(&'a Self::State) -> BoxFuture<'a, T> + 'async_trait,
     ) -> T {
-        op(self).await
+        op(self.global_state.read_arc().await.deref()).await
     }
 }
 
