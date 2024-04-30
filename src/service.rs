@@ -59,7 +59,7 @@ use tide_disco::method::ReadState;
 pub struct GlobalState<Types: NodeType> {
     // data store for the blocks
     pub block_hash_to_block: HashMap<
-        BuilderCommitment,
+        (VidCommitment, BuilderCommitment),
         (
             Types::BlockPayload,
             <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
@@ -77,7 +77,7 @@ pub struct GlobalState<Types: NodeType> {
 
     // scheduled GC by view number
     pub view_to_cleanup_targets:
-        BTreeMap<Types::Time, (Vec<VidCommitment>, Vec<BuilderCommitment>)>,
+        BTreeMap<Types::Time, (Vec<VidCommitment>, Vec<(VidCommitment, BuilderCommitment)>)>,
 
     // sending a request from the hotshot to the builder states
     pub request_sender: BroadcastSender<MessageType<Types>>,
@@ -129,7 +129,7 @@ impl<Types: NodeType> GlobalState<Types> {
         response_msg: ResponseMessage,
     ) {
         self.block_hash_to_block
-            .entry(build_block_info.builder_hash)
+            .entry((builder_vid_commitment, build_block_info.builder_hash))
             .or_insert_with(|| {
                 (
                     build_block_info.block_payload,
@@ -150,7 +150,7 @@ impl<Types: NodeType> GlobalState<Types> {
     pub fn remove_handles(
         &mut self,
         builder_vid_commitment: &VidCommitment,
-        block_hashes: HashSet<(Types::Time, BuilderCommitment)>,
+        block_hashes: HashSet<(Types::Time, (VidCommitment, BuilderCommitment))>,
         on_decide_view: Types::Time,
         bootstrap: bool,
     ) {
@@ -173,8 +173,8 @@ impl<Types: NodeType> GlobalState<Types> {
                 .or_insert((Default::default(), Default::default()));
             edit.0.push(*builder_vid_commitment);
 
-            for (view_num, block_hash) in block_hashes {
-                edit.1.push(block_hash.clone());
+            for (view_num, (parent_hash, block_hash)) in block_hashes {
+                edit.1.push((parent_hash, block_hash.clone()));
                 tracing::debug!(
                     "GC view_num {:?}: block_hash {:?}, deferred to view {:?} ",
                     view_num,
@@ -187,7 +187,7 @@ impl<Types: NodeType> GlobalState<Types> {
         tracing::debug!("GC for scheduled view {:?}", on_decide_view);
 
         self.view_to_cleanup_targets
-            .retain(|view_num, (vids, block_hashes)| {
+            .retain(|view_num, (vids, parent_hashes_block_hashes)| {
                 if view_num > &on_decide_view {
                     true
                 } else {
@@ -196,9 +196,18 @@ impl<Types: NodeType> GlobalState<Types> {
                     vids.iter().for_each(|vid| {
                         self.spawned_builder_states.remove(vid);
                     });
-                    block_hashes.iter().for_each(|block_hash| {
-                        self.block_hash_to_block.remove(block_hash);
-                    });
+                    parent_hashes_block_hashes
+                        .iter()
+                        .for_each(|(parent_hash, block_hash)| {
+                            tracing::debug!(
+                                "on_decide_view: {:?}, Removing parent_hash {:?}, block_hash {:?}",
+                                on_decide_view,
+                                parent_hash,
+                                block_hash
+                            );
+                            self.block_hash_to_block
+                                .remove(&(*parent_hash, block_hash.clone()));
+                        });
                     false
                 }
             });
@@ -398,7 +407,7 @@ where
                     _phantom: Default::default(),
                 };
                 tracing::info!(
-                    "Sending  Available Block info response for parent {:?} with block hash {:?}",
+                    "Sending available Block info response with (parent_hash: {:?}, block hash: {:?})",
                     req_msg.requested_vid_commitment,
                     response.builder_hash
                 );
@@ -419,11 +428,13 @@ where
     async fn claim_block(
         &self,
         block_hash: &BuilderCommitment,
+        parent_hash: &VidCommitment,
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockData<Types>, BuildError> {
         tracing::info!(
-            "Received request for claiming block for block hash: {:?}",
+            "Received request for claiming block for (parent_hash: {:?}, block hash: {:?})",
+            parent_hash,
             block_hash
         );
         // verify the signature
@@ -439,7 +450,7 @@ where
             .read_arc()
             .await
             .block_hash_to_block
-            .get(block_hash)
+            .get(&(*parent_hash, block_hash.clone()))
         {
             // sign over the builder commitment, as the proposer can computer it based on provide block_payload
             // and the metata data
@@ -456,7 +467,11 @@ where
                 signature: signature_over_builder_commitment,
                 sender: pub_key.clone(),
             };
-            tracing::info!("Sending Claim Block data for block hash: {:?}", block_hash);
+            tracing::info!(
+                "Sending Claim Block data for (parent_hash: {:?}, block hash: {:?})",
+                parent_hash,
+                block_hash
+            );
             Ok(block_data)
         } else {
             tracing::warn!("Claim Block not found");
@@ -469,11 +484,13 @@ where
     async fn claim_block_header_input(
         &self,
         block_hash: &BuilderCommitment,
+        parent_hash: &VidCommitment,
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
         tracing::info!(
-            "Received request for claiming block header input for block hash: {:?}",
+            "Received request for claiming block header input for (parent_hash: {:?}, block hash: {:?})",
+            parent_hash,
             block_hash
         );
         // verify the signature
@@ -489,7 +506,7 @@ where
             .read_arc()
             .await
             .block_hash_to_block
-            .get(block_hash)
+            .get(&(*parent_hash, block_hash.clone()))
         {
             tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
             let (vid_commitment, vid_precompute_data) = block.2.write().await.get().await?;
@@ -512,7 +529,8 @@ where
                 sender: pub_key.clone(),
             };
             tracing::info!(
-                "Sending Claim Block Header Input response for block hash: {:?}",
+                "Sending Claim Block Header Input response for (parent_hash: {:?}, block hash: {:?})",
+                parent_hash,
                 block_hash
             );
             Ok(response)
@@ -534,7 +552,7 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
     async fn submit_txn(
         &mut self,
         txn: <Types as NodeType>::Transaction,
-    ) -> Result<(), BuildError> {
+    ) -> Result<Commitment<<Types as NodeType>::Transaction>, BuildError> {
         tracing::debug!("Submitting transaction to the builder states{:?}", txn);
         let response = self
             .global_state
@@ -548,13 +566,7 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
             response
         );
 
-        if response.is_err() {
-            return Err(BuildError::Error {
-                message: "Failed to submit transaction".to_string(),
-            });
-        }
-
-        Ok(())
+        response
     }
 }
 #[async_trait]

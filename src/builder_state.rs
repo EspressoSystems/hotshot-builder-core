@@ -16,6 +16,7 @@ use committable::{Commitment, Committable};
 
 use crate::service::GlobalState;
 use async_broadcast::Receiver as BroadcastReceiver;
+use async_compatibility_layer::art::async_sleep;
 use async_compatibility_layer::channel::{unbounded, UnboundedSender};
 use async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
 use async_lock::RwLock;
@@ -163,7 +164,7 @@ pub struct BuilderState<TYPES: NodeType> {
     pub total_nodes: NonZeroUsize,
 
     /// locally spawned builder Commitements
-    pub builder_commitments: HashSet<(TYPES::Time, BuilderCommitment)>,
+    pub builder_commitments: HashSet<(TYPES::Time, (VidCommitment, BuilderCommitment))>,
 
     /// bootstrapped view number
     pub bootstrap_view_number: TYPES::Time,
@@ -530,9 +531,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
                 let to_be_garbage_collected_view_num =
                     <<TYPES as NodeType>::Time as ConsensusTime>::new(
-                        self.last_bootstrap_garbage_collected_decided_seen_view_num
-                            .get_u64()
-                            + self.buffer_view_num_count,
+                        latest_leaf_view_number.get_u64() - self.buffer_view_num_count,
                     );
 
                 // split_off returns greater than equal to set, so we want everything after the latest decide event
@@ -545,12 +544,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 // update the spawned_clones_views_list with the split list now
                 *self.spawned_clones_views_list.write().await = split_list;
 
-                let to_garbage_collect: HashSet<(TYPES::Time, BuilderCommitment)> = self
-                    .builder_commitments
-                    .iter()
-                    .filter(|&(view_number, _)| (*view_number) <= to_be_garbage_collected_view_num)
-                    .cloned()
-                    .collect();
+                let to_garbage_collect: HashSet<(TYPES::Time, (VidCommitment, BuilderCommitment))> =
+                    self.builder_commitments
+                        .iter()
+                        .filter(|&(view_number, _)| {
+                            (*view_number) <= to_be_garbage_collected_view_num
+                        })
+                        .cloned()
+                        .collect();
 
                 self.global_state.write_arc().await.remove_handles(
                     &self.built_from_proposed_block.vid_commitment,
@@ -654,19 +655,21 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // if it gets non-zero before timeout return, otherwise return after timeout
         if self.timestamp_to_tx.is_empty() {
             let timeout_after = Instant::now() + self.maximize_txn_capture_timeout;
-            while let Ok(tx) = self.tx_receiver.try_recv() {
-                if let MessageType::TransactionMessage(rtx_msg) = tx {
-                    tracing::debug!(
-                        "Received ({:?}) txns msg in builder {:?}",
-                        rtx_msg.txns.len(),
-                        self.built_from_proposed_block,
-                    );
-                    if rtx_msg.tx_type == TransactionSource::HotShot {
-                        self.process_hotshot_transaction(rtx_msg.txns);
-                    } else {
-                        self.process_external_transaction(rtx_msg.txns);
+            loop {
+                if let Ok(tx) = self.tx_receiver.try_recv() {
+                    if let MessageType::TransactionMessage(rtx_msg) = tx {
+                        tracing::debug!(
+                            "Received ({:?}) txns msg in builder {:?}",
+                            rtx_msg.txns.len(),
+                            self.built_from_proposed_block,
+                        );
+                        if rtx_msg.tx_type == TransactionSource::HotShot {
+                            self.process_hotshot_transaction(rtx_msg.txns);
+                        } else {
+                            self.process_external_transaction(rtx_msg.txns);
+                        }
+                        tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
                     }
-                    tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
                 }
                 // return if non-zero txns are available
                 if !self.timestamp_to_tx.is_empty() {
@@ -676,6 +679,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 if Instant::now() >= timeout_after {
                     break;
                 }
+
+                async_sleep(self.maximize_txn_capture_timeout / 10).await;
             }
         };
 
@@ -704,11 +709,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     .get(&matching_vid)
                     .unwrap_or(&self.last_bootstrap_garbage_collected_decided_seen_view_num);
                 self.builder_commitments
-                    .insert((view_number, builder_hash.clone()));
+                    .insert((view_number, (matching_vid, builder_hash.clone())));
             } else {
                 self.builder_commitments.insert((
                     self.built_from_proposed_block.view_number,
-                    builder_hash.clone(),
+                    (matching_vid, builder_hash.clone()),
                 ));
             }
             let encoded_txns: Vec<u8> = payload.encode().unwrap().to_vec();
@@ -793,11 +798,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .read_arc()
                         .await
                         .block_hash_to_block
-                        .contains_key(&response.builder_hash)
+                        .contains_key(&(requested_vid_commitment, response.builder_hash.clone()))
                     {
                         self.global_state.write_arc().await.update_global_state(
                             response,
-                            self.built_from_proposed_block.vid_commitment,
+                            requested_vid_commitment,
                             response_msg.clone(),
                         )
                     }

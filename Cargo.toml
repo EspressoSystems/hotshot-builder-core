@@ -30,3 +30,14 @@ vbs = "0.1"
 
 [dev-dependencies]
 hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.46" }
+
+
+[patch.'https://github.com/EspressoSystems/hotshot']
+hotshot-types = { path = "../HotShot/crates/types" }
+hotshot-example-types = { path = "../HotShot/crates/example-types" }
+hotshot-builder-api = { path = "../HotShot/crates/builder-api" }
+hotshot = { path = "../HotShot/crates/hotshot" }
+
+
+[patch.'https://github.com/EspressoSystems/hotshot-events-service']
+hotshot-events-service = { path = "../hotshot-events-service" }
