@@ -864,6 +864,9 @@
 <a href="#862" id="862">862</a>
 <a href="#863" id="863">863</a>
 <a href="#864" id="864">864</a>
+<a href="#865" id="865">865</a>
+<a href="#866" id="866">866</a>
+<a href="#867" id="867">867</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::SystemContextHandle,
@@ -896,7 +899,9 @@
 <span class="kw">use </span><span class="kw">crate</span>::WaitAndKeep;
 <span class="kw">use </span>async_broadcast::Sender <span class="kw">as </span>BroadcastSender;
 <span class="kw">pub use </span>async_broadcast::{broadcast, RecvError, TryRecvError};
-<span class="kw">use </span>async_compatibility_layer::channel::UnboundedReceiver;
+<span class="kw">use </span>async_compatibility_layer::channel::{
+    TryRecvError <span class="kw">as </span>UnbounderTryRecvError, UnboundedReceiver,
+};
 <span class="kw">use </span>async_lock::RwLock;
 <span class="kw">use </span>async_trait::async_trait;
 <span class="kw">use </span>committable::{Commitment, Committable};
@@ -1205,7 +1210,8 @@ Handling Builder API responses
                     <span class="kw">break </span>recv_attempt.map_err(|<span class="kw">_</span>| BuildError::Missing);
                 } <span class="kw">else </span>{
                     <span class="kw">let </span>e = recv_attempt.unwrap_err();
-                    <span class="kw">if </span>e.is_empty() {
+                    <span class="kw">let </span>is_empty = <span class="macro">matches!</span>(e, UnbounderTryRecvError::Empty);
+                    <span class="kw">if </span>is_empty {
                         <span class="kw">if </span>Instant::now() &gt;= timeout_after {
                             <span class="comment">// lookup into the builder_state_to_last_built_block, if it contains the result, return that otherwise return error
                             </span><span class="kw">if let </span><span class="prelude-val">Some</span>(last_built_block) = <span class="self">self
