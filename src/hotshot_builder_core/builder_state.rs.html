@@ -985,6 +985,13 @@
 <a href="#983" id="983">983</a>
 <a href="#984" id="984">984</a>
 <a href="#985" id="985">985</a>
+<a href="#986" id="986">986</a>
+<a href="#987" id="987">987</a>
+<a href="#988" id="988">988</a>
+<a href="#989" id="989">989</a>
+<a href="#990" id="990">990</a>
+<a href="#991" id="991">991</a>
+<a href="#992" id="992">992</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal},
     message::Proposal,
@@ -992,6 +999,7 @@
     traits::{
         block_contents::precompute_vid_commitment,
         node_implementation::{ConsensusTime, NodeType},
+        states::InstanceState,
     },
     utils::BuilderCommitment,
     vid::{VidCommitment, VidPrecomputeData},
@@ -1168,6 +1176,9 @@
 
     <span class="doccomment">/// constant fee that the builder will offer per byte of data sequenced
     </span><span class="kw">pub </span>base_fee: u64,
+
+    <span class="doccomment">/// instance state to enfoce max_block_size
+    </span><span class="kw">pub </span>instance_state: Arc&lt;<span class="kw">dyn </span>InstanceState&gt;,
 }
 
 <span class="doccomment">/// Trait to hold the helper functions for the builder
@@ -1668,6 +1679,7 @@
                     .get(tx_hash)
                     .map(|(_ts, tx, _source)| tx.clone())
             }),
+            <span class="self">self</span>.instance_state.clone(),
         ) {
             <span class="kw">let </span>builder_hash = payload.builder_commitment(<span class="kw-2">&amp;</span>metadata);
             <span class="comment">// count the number of txns
@@ -1944,6 +1956,7 @@
         buffer_view_num_count: u64,
         maximize_txn_capture_timeout: Duration,
         base_fee: u64,
+        instance_state: Arc&lt;<span class="kw">dyn </span>InstanceState&gt;,
     ) -&gt; <span class="self">Self </span>{
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
@@ -1967,6 +1980,7 @@
             buffer_view_num_count,
             maximize_txn_capture_timeout,
             base_fee,
+            instance_state,
         }
     }
 }

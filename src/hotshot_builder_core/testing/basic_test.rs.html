@@ -388,9 +388,8 @@
 <a href="#386" id="386">386</a>
 <a href="#387" id="387">387</a>
 <a href="#388" id="388">388</a>
-</pre></div><pre class="rust"><code><span class="kw">pub use </span>hotshot::traits::election::static_committee::{
-    GeneralStaticCommittee, StaticElectionConfig,
-};
+<a href="#389" id="389">389</a>
+</pre></div><pre class="rust"><code><span class="kw">pub use </span>hotshot::traits::election::static_committee::GeneralStaticCommittee;
 <span class="kw">pub use </span>hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal, ViewNumber},
     message::Proposal,
@@ -467,7 +466,6 @@
             <span class="kw">type </span>BlockPayload = TestBlockPayload;
             <span class="kw">type </span>SignatureKey = BLSPubKey;
             <span class="kw">type </span>Transaction = TestTransaction;
-            <span class="kw">type </span>ElectionConfigType = StaticElectionConfig;
             <span class="kw">type </span>ValidatedState = TestValidatedState;
             <span class="kw">type </span>InstanceState = TestInstanceState;
             <span class="kw">type </span>Membership = GeneralStaticCommittee&lt;TestTypes, <span class="self">Self</span>::SignatureKey&gt;;
@@ -556,8 +554,11 @@
             <span class="comment">// Prepare the QC proposal message
             // calculate the vid commitment over the encoded_transactions
 
-            </span><span class="kw">let </span>(block_payload, metadata) =
-                &lt;TestBlockPayload <span class="kw">as </span>BlockPayload&gt;::from_transactions(<span class="macro">vec!</span>[tx.clone()]).unwrap();
+            </span><span class="kw">let </span>(block_payload, metadata) = &lt;TestBlockPayload <span class="kw">as </span>BlockPayload&gt;::from_transactions(
+                <span class="macro">vec!</span>[tx.clone()],
+                Arc::new(TestInstanceState {}),
+            )
+            .unwrap();
 
             <span class="macro">tracing::debug!</span>(
                 <span class="string">"Encoded transactions: {:?} Num nodes:{}"</span>,
@@ -731,7 +732,8 @@
                 <span class="number">10</span>,                        <span class="comment">// buffer view count
                 </span>Duration::from_millis(<span class="number">10</span>), <span class="comment">// max time to wait for non-zero txn block
                 </span><span class="number">0</span>,                         <span class="comment">// base fee
-            </span>);
+                </span>Arc::new(TestInstanceState {}),
+            );
 
             <span class="comment">//builder_state.event_loop().await;
             </span>builder_state.event_loop();

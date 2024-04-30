@@ -864,26 +864,8 @@
 <a href="#862" id="862">862</a>
 <a href="#863" id="863">863</a>
 <a href="#864" id="864">864</a>
-<a href="#865" id="865">865</a>
-<a href="#866" id="866">866</a>
-<a href="#867" id="867">867</a>
-<a href="#868" id="868">868</a>
-<a href="#869" id="869">869</a>
-<a href="#870" id="870">870</a>
-<a href="#871" id="871">871</a>
-<a href="#872" id="872">872</a>
-<a href="#873" id="873">873</a>
-<a href="#874" id="874">874</a>
-<a href="#875" id="875">875</a>
-<a href="#876" id="876">876</a>
-<a href="#877" id="877">877</a>
-<a href="#878" id="878">878</a>
-<a href="#879" id="879">879</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
-    traits::{
-        election::static_committee::{GeneralStaticCommittee, StaticElectionConfig},
-        NodeImplementation,
-    },
+    traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::SystemContextHandle,
 };
 <span class="kw">use </span>hotshot_builder_api::{
@@ -1453,9 +1435,7 @@ Handling Builder API responses
 <span class="comment">/*
 Running Non-Permissioned Builder Service
 */
-</span><span class="kw">pub async fn </span>run_non_permissioned_standalone_builder_service&lt;
-    Types: NodeType&lt;ElectionConfigType = StaticElectionConfig&gt;,
-&gt;(
+</span><span class="kw">pub async fn </span>run_non_permissioned_standalone_builder_service&lt;Types: NodeType&gt;(
     <span class="comment">// sending a transaction from the hotshot mempool to the builder states
     </span>tx_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
 
@@ -1483,24 +1463,14 @@ Running Non-Permissioned Builder Service
                 known_node_with_stake,
                 non_staked_node_count,
             } =&gt; {
-                <span class="comment">// Create membership. It is similar to init() in sequencer/src/context.rs
-                </span><span class="kw">let </span>election_config: StaticElectionConfig = GeneralStaticCommittee::&lt;
-                    Types,
-                    &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey,
-                &gt;::default_election_config(
-                    known_node_with_stake.len() <span class="kw">as </span>u64,
-                    non_staked_node_count <span class="kw">as </span>u64,
-                );
-
-                <span class="kw">let </span>membership: GeneralStaticCommittee&lt;
-                Types,
-                &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey,
-                &gt; = GeneralStaticCommittee::&lt;Types,
-                &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey&gt;::create_election(
-                    known_node_with_stake.clone(),
-                    election_config,
-                    <span class="number">0</span>,
-                );
+                <span class="kw">let </span>membership: GeneralStaticCommittee&lt;Types, &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey&gt; = GeneralStaticCommittee::&lt;
+                        Types,
+                        &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey,
+                    &gt;::create_election(
+                        known_node_with_stake.clone(),
+                        known_node_with_stake.clone(),
+                        <span class="number">0
+                    </span>);
 
                 <span class="macro">tracing::info!</span>(
                     <span class="string">"Startup info: Known nodes with stake: {:?}, Non-staked node count: {:?}"</span>,
