@@ -165,8 +165,7 @@ pub struct BuilderState<TYPES: NodeType> {
     pub total_nodes: NonZeroUsize,
 
     /// locally spawned builder Commitements
-    pub builder_commitments:
-        HashSet<(TYPES::Time, (VidCommitment, BuilderCommitment, TYPES::Time))>,
+    pub builder_commitments: HashSet<(VidCommitment, BuilderCommitment, TYPES::Time)>,
 
     /// bootstrapped view number
     pub bootstrap_view_number: TYPES::Time,
@@ -547,15 +546,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 // update the spawned_clones_views_list with the split list now
                 *self.spawned_clones_views_list.write().await = split_list;
 
-                let to_garbage_collect: HashSet<(
-                    TYPES::Time,
-                    (VidCommitment, BuilderCommitment, TYPES::Time),
-                )> = self
-                    .builder_commitments
-                    .iter()
-                    .filter(|&(view_number, _)| (*view_number) <= to_be_garbage_collected_view_num)
-                    .cloned()
-                    .collect();
+                let to_garbage_collect: HashSet<(VidCommitment, BuilderCommitment, TYPES::Time)> =
+                    self.builder_commitments
+                        .iter()
+                        .filter(|&(_, _, view_number)| {
+                            (*view_number) <= to_be_garbage_collected_view_num
+                        })
+                        .cloned()
+                        .collect();
 
                 self.global_state.write_arc().await.remove_handles(
                     &self.built_from_proposed_block.vid_commitment,
@@ -565,8 +563,9 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 );
 
                 // Remove builder commitments for older views
-                self.builder_commitments
-                    .retain(|(view_number, _)| (*view_number) > to_be_garbage_collected_view_num);
+                self.builder_commitments.retain(|(_, _, view_number)| {
+                    (*view_number) > to_be_garbage_collected_view_num
+                });
 
                 self.da_proposal_payload_commit_to_da_proposal.retain(
                     |_builder_commitment, da_proposal| {
@@ -597,8 +596,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 latest_leaf_view_number,
                 false,
             );
-
-            // clear out the local_block_hash_to_block
             return Some(Status::ShouldExit);
         }
 
@@ -706,19 +703,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
             // insert the view number and builder commitment in the builder_commitments set
             // get the view number from the global state for bootstrapped is building for non-existing builder states
-            if self.built_from_proposed_block.view_number.get_u64()
-                == self.bootstrap_view_number.get_u64()
-            {
-                self.builder_commitments.insert((
-                    requested_view_number,
-                    (matching_vid, builder_hash.clone(), requested_view_number),
-                ));
-            } else {
-                self.builder_commitments.insert((
-                    self.built_from_proposed_block.view_number,
-                    (matching_vid, builder_hash.clone(), requested_view_number),
-                ));
-            }
+
+            self.builder_commitments.insert((
+                matching_vid,
+                builder_hash.clone(),
+                requested_view_number,
+            ));
+
             let encoded_txns: Vec<u8> = payload.encode().unwrap().to_vec();
             let block_size: u64 = encoded_txns.len() as u64;
             let offered_fee: u64 = self.base_fee * block_size;
@@ -794,15 +785,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         offered_fee: response.offered_fee,
                     };
 
-                    // write to global state as well
-                    // only write if the entry does not exist
-                    // if !self
-                    //     .global_state
-                    //     .read_arc()
-                    //     .await
-                    //     .block_hash_to_block
-                    //     .contains_key(&(response.builder_hash.clone(), requested_view_number))
-                    // {
                     let builder_hash = response.builder_hash.clone();
                     self.global_state.write_arc().await.update_global_state(
                         response,
@@ -810,7 +792,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         requested_view_number,
                         response_msg.clone(),
                     );
-                    // }
+
                     // ... and finally, send the response
                     self.response_sender.send(response_msg).await.unwrap();
 

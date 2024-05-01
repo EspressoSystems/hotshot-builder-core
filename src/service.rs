@@ -156,7 +156,7 @@ impl<Types: NodeType> GlobalState<Types> {
     pub fn remove_handles(
         &mut self,
         builder_vid_commitment: &VidCommitment,
-        block_hashes: HashSet<(Types::Time, (VidCommitment, BuilderCommitment, Types::Time))>,
+        block_hashes: HashSet<(VidCommitment, BuilderCommitment, Types::Time)>,
         on_decide_view: Types::Time,
         bootstrap: bool,
     ) {
@@ -164,41 +164,40 @@ impl<Types: NodeType> GlobalState<Types> {
         if !bootstrap {
             // remove everything from the spawned builder states when view_num <= on_decide_view
             self.spawned_builder_states
-                .retain(|(vid, view_num)| view_num > &on_decide_view);
+                .retain(|(_vid, view_num)| view_num > &on_decide_view);
         }
-        {
-            let cleanup_after_view = on_decide_view + self.buffer_view_num_count;
 
-            let edit = self
-                .view_to_cleanup_targets
-                .entry(cleanup_after_view)
-                .or_insert((Default::default(), Default::default()));
-            edit.0.push(*builder_vid_commitment);
+        let cleanup_after_view = on_decide_view + self.buffer_view_num_count;
 
-            for (view_num, (parent_hash, block_hash, view_number_built_in)) in block_hashes {
-                edit.1
-                    .push((parent_hash, block_hash.clone(), view_number_built_in));
-                tracing::debug!(
-                    "GC view_num {:?}: block_hash {:?}, deferred to view {:?} ",
-                    view_num,
-                    block_hash,
-                    cleanup_after_view
-                );
-            }
+        let edit = self
+            .view_to_cleanup_targets
+            .entry(cleanup_after_view)
+            .or_insert((Default::default(), Default::default()));
+        edit.0.push(*builder_vid_commitment);
+
+        for (parent_hash, block_hash, view_number_built_for) in block_hashes {
+            edit.1
+                .push((parent_hash, block_hash.clone(), view_number_built_for));
+            tracing::debug!(
+                "GC view_num {:?}: block_hash {:?}, deferred to view {:?} ",
+                view_number_built_for,
+                block_hash,
+                cleanup_after_view
+            );
         }
 
         tracing::debug!("GC for scheduled view {:?}", on_decide_view);
 
-        self.view_to_cleanup_targets
-            .retain(|view_num, (vids, parent_hashes_block_hashes)| {
+        self.view_to_cleanup_targets.retain(
+            |view_num, (_vids, parent_hash_block_hashes_view_num)| {
                 if view_num > &on_decide_view {
                     true
                 } else {
                     // go through the vids and remove from the builder_state_to_last_built_block
                     // and block_hashes and remove the block_hashes from the block_hash_to_block
 
-                    parent_hashes_block_hashes.iter().for_each(
-                        |(parent_hash, block_hash, view_number_built_in)| {
+                    parent_hash_block_hashes_view_num.iter().for_each(
+                        |(parent_hash, block_hash, view_number_built_for)| {
                             tracing::debug!(
                                 "on_decide_view: {:?}, Removing parent_hash {:?}, block_hash {:?}",
                                 on_decide_view,
@@ -206,7 +205,7 @@ impl<Types: NodeType> GlobalState<Types> {
                                 block_hash
                             );
                             self.block_hash_to_block
-                                .remove(&(block_hash.clone(), *view_number_built_in));
+                                .remove(&(block_hash.clone(), *view_number_built_for));
                         },
                     );
                     // remove all the last built block for the builder states having view_num > on_decide_view
@@ -214,7 +213,8 @@ impl<Types: NodeType> GlobalState<Types> {
                         .retain(|(_vid, view_number), _| view_number > view_num);
                     false
                 }
-            });
+            },
+        );
     }
 
     // private mempool submit txn
@@ -373,26 +373,6 @@ where
                     if is_empty {
                         if Instant::now() >= timeout_after {
                             tracing::warn!(%e, "Couldn't get available blocks in time for parent {:?}",  req_msg.requested_vid_commitment);
-                            // go through the self.builder_state_to_last_built_block and check only on parent_comm, don't compare view_num as it is not used
-                            // let mut result = None;
-                            // // go through each entry
-                            // {
-                            //     for (builder_state, response) in
-                            //         global_state.builder_state_to_last_built_block.iter()
-                            //     {
-                            //         if builder_state.0 == req_msg.requested_vid_commitment {
-                            //             tracing::info!(
-                            //                 "Returning last built block for parent {:?}",
-                            //                 req_msg.requested_vid_commitment
-                            //             );
-                            //             result = Some(response.clone());
-                            //             break;
-                            //         }
-                            //     }
-                            // };
-                            // if result.is_some() {
-                            //     break Ok(result.unwrap());
-                            // }
                             if let Some(last_built_block) = self
                                 .global_state
                                 .read_arc()
