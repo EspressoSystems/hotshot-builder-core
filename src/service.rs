@@ -30,9 +30,7 @@ use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use crate::WaitAndKeep;
 use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
-use async_compatibility_layer::channel::{
-    TryRecvError as UnbounderTryRecvError, UnboundedReceiver,
-};
+use async_compatibility_layer::channel::{unbounded, TryRecvError as UnbounderTryRecvError};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use committable::{Commitment, Committable};
@@ -69,7 +67,8 @@ pub struct GlobalState<Types: NodeType> {
     >,
 
     // registered builer states
-    pub spawned_builder_states: HashSet<(VidCommitment, Types::Time)>,
+    pub spawned_builder_states:
+        HashMap<(VidCommitment, Types::Time), BroadcastSender<MessageType<Types>>>,
 
     // builder state -> last built block , it is used to respond the client
     // if the req channel times out during get_available_blocks
@@ -84,11 +83,7 @@ pub struct GlobalState<Types: NodeType> {
         ),
     >,
 
-    // sending a request from the hotshot to the builder states
-    pub request_sender: BroadcastSender<MessageType<Types>>,
-
-    // getting a response from the builder states based on the request sent by the hotshot
-    pub response_receiver: UnboundedReceiver<ResponseMessage>,
+    pub bootstrap_sender: BroadcastSender<MessageType<Types>>,
 
     // sending a transaction from the hotshot/private mempool to the builder states
     // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
@@ -104,22 +99,23 @@ pub struct GlobalState<Types: NodeType> {
 impl<Types: NodeType> GlobalState<Types> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        request_sender: BroadcastSender<MessageType<Types>>,
-        response_receiver: UnboundedReceiver<ResponseMessage>,
+        bootstrap_sender: BroadcastSender<MessageType<Types>>,
         tx_sender: BroadcastSender<MessageType<Types>>,
         bootstrapped_builder_state_id: VidCommitment,
         bootstrapped_view_num: Types::Time,
         last_garbage_collected_view_num: Types::Time,
         buffer_view_num_count: u64,
     ) -> Self {
-        let mut spawned_builder_states = HashSet::new();
-        spawned_builder_states.insert((bootstrapped_builder_state_id, bootstrapped_view_num));
+        let mut spawned_builder_states = HashMap::new();
+        spawned_builder_states.insert(
+            (bootstrapped_builder_state_id, bootstrapped_view_num),
+            bootstrap_sender.clone(),
+        );
         GlobalState {
             block_hash_to_block: Default::default(),
             spawned_builder_states,
             view_to_cleanup_targets: Default::default(),
-            request_sender,
-            response_receiver,
+            bootstrap_sender,
             tx_sender,
             last_garbage_collected_view_num,
             buffer_view_num_count,
@@ -164,7 +160,7 @@ impl<Types: NodeType> GlobalState<Types> {
         if !bootstrap {
             // remove everything from the spawned builder states when view_num <= on_decide_view
             self.spawned_builder_states
-                .retain(|(_vid, view_num)| view_num > &on_decide_view);
+                .retain(|(_vid, view_num), _channel| view_num > &on_decide_view);
         }
 
         let cleanup_after_view = on_decide_view + self.buffer_view_num_count;
@@ -235,6 +231,17 @@ impl<Types: NodeType> GlobalState<Types> {
             .map_err(|_e| BuildError::Error {
                 message: "failed to send txn".to_string(),
             })
+    }
+
+    pub fn get_channel_for_builder_or_bootstrap(
+        &self,
+        key: &(VidCommitment, Types::Time),
+    ) -> &BroadcastSender<MessageType<Types>> {
+        if let Some(channel) = self.spawned_builder_states.get(key) {
+            channel
+        } else {
+            &self.bootstrap_sender
+        }
     }
 }
 
@@ -314,7 +321,7 @@ where
                 .read_arc()
                 .await
                 .spawned_builder_states
-                .contains(&(*for_parent, view_num))
+                .contains_key(&(*for_parent, view_num))
             {
                 if let Some(cached) = self
                     .global_state
@@ -332,13 +339,13 @@ where
                 None
             }
         };
-
+        let (response_sender, response_receiver) = unbounded();
         let req_msg = RequestMessage {
             requested_vid_commitment: (*for_parent),
             requested_view_number: view_number,
             bootstrap_build_block: bootstrapped_state_build_block,
+            response_channel: response_sender,
         };
-
         let response_received = if just_return_with_this.is_some() {
             Ok(just_return_with_this.unwrap().clone())
         } else {
@@ -348,7 +355,7 @@ where
             self.global_state
                 .read_arc()
                 .await
-                .request_sender
+                .get_channel_for_builder_or_bootstrap(&(*for_parent, view_num))
                 .broadcast(MessageType::RequestMessage(req_msg.clone()))
                 .await
                 .unwrap();
@@ -359,12 +366,7 @@ where
             );
 
             loop {
-                let recv_attempt = self
-                    .global_state
-                    .read_arc()
-                    .await
-                    .response_receiver
-                    .try_recv();
+                let recv_attempt = response_receiver.try_recv();
                 if recv_attempt.is_ok() {
                     break recv_attempt.map_err(|_| BuildError::Missing);
                 } else {

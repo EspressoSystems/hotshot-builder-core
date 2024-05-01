@@ -20,14 +20,15 @@ mod tests {
     use super::*;
     use std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
 
-    use async_compatibility_layer::art::async_spawn;
     use async_compatibility_layer::channel::unbounded;
+    use async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
     use hotshot::types::SignatureKey;
     use hotshot_types::{
         signature_key::BuilderKey,
         simple_vote::QuorumData,
         traits::block_contents::{vid_commitment, BlockHeader},
         utils::BuilderCommitment,
+        vid::VidCommitment,
     };
 
     use hotshot_example_types::{
@@ -94,9 +95,8 @@ mod tests {
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
         let (qc_sender, qc_receiver) =
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
-        let (req_sender, req_receiver) =
+        let (bootstrap_sender, bootstrap_receiver) =
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
-        let (res_sender, res_receiver) = unbounded();
 
         // generate the keys for the buidler
         let seed = [201_u8; 32];
@@ -104,8 +104,7 @@ mod tests {
             BLSPubKey::generated_from_seed_indexed(seed, 2011_u64);
         // instantiate the global state also
         let global_state = GlobalState::<TestTypes>::new(
-            req_sender,
-            res_receiver,
+            bootstrap_sender,
             tx_sender.clone(),
             vid_commitment(&[], 8),
             ViewNumber::new(0),
@@ -118,7 +117,11 @@ mod tests {
         let mut sdecide_msgs: Vec<DecideMessage<TestTypes>> = Vec::new();
         let mut sda_msgs: Vec<DAProposalMessage<TestTypes>> = Vec::new();
         let mut sqc_msgs: Vec<QCMessage<TestTypes>> = Vec::new();
-        let mut sreq_msgs: Vec<MessageType<TestTypes>> = Vec::new();
+        let mut sreq_msgs: Vec<(
+            UnboundedReceiver<ResponseMessage>,
+            (VidCommitment, ViewNumber),
+            MessageType<TestTypes>,
+        )> = Vec::new();
         // storing response messages
         let mut rres_msgs: Vec<ResponseMessage> = Vec::new();
         let _validated_state = Arc::new(TestValidatedState::default());
@@ -305,17 +308,24 @@ mod tests {
             // send decide and request messages later
             let _requested_builder_commitment = payload_builder_commitment;
             let requested_vid_commitment = payload_vid_commitment;
+
+            let (response_sender, response_receiver) = unbounded();
             let request_message = MessageType::<TestTypes>::RequestMessage(RequestMessage {
                 requested_vid_commitment,
                 requested_view_number: i as u64,
                 bootstrap_build_block: false,
+                response_channel: response_sender,
             });
 
             stx_msgs.push(stx_msg);
             sdecide_msgs.push(sdecide_msg);
             sda_msgs.push(sda_msg);
             sqc_msgs.push(sqc_msg);
-            sreq_msgs.push(request_message);
+            sreq_msgs.push((
+                response_receiver,
+                (requested_vid_commitment, ViewNumber::new(i as u64)),
+                request_message,
+            ));
         }
 
         //let global_state_clone = arc_rwlock_global_state.clone();
@@ -334,9 +344,8 @@ mod tests {
                 decide_receiver,
                 da_receiver,
                 qc_receiver,
-                req_receiver,
+                bootstrap_receiver,
                 arc_rwlock_global_state_clone,
-                res_sender,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
                 ViewNumber::new(0),
                 10,                        // buffer view count
@@ -357,8 +366,8 @@ mod tests {
             arc_rwlock_global_state
                 .read_arc()
                 .await
-                .request_sender
-                .broadcast(req_msg.clone())
+                .get_channel_for_builder_or_bootstrap(&req_msg.1)
+                .broadcast(req_msg.2.clone())
                 .await
                 .unwrap();
         }
@@ -373,18 +382,12 @@ mod tests {
                 .unwrap();
         }
 
-        while let Ok(res_msg) = arc_rwlock_global_state
-            .read_arc()
-            .await
-            .response_receiver
-            .try_recv()
-        {
-            rres_msgs.push(res_msg);
-            if rres_msgs.len() == (num_test_messages - 1) {
-                break;
+        for req_msg in sreq_msgs.iter() {
+            while let Ok(res_msg) = req_msg.0.try_recv() {
+                rres_msgs.push(res_msg);
             }
+            //task::sleep(std::time::Duration::from_secs(60)).await;
         }
-        assert_eq!(rres_msgs.len(), (num_test_messages - 1));
-        //task::sleep(std::time::Duration::from_secs(60)).await;
+        assert_eq!(rres_msgs.len(), (num_test_messages));
     }
 }
