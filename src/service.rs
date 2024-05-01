@@ -69,7 +69,7 @@ pub struct GlobalState<Types: NodeType> {
     >,
 
     // registered builer states
-    pub spawned_builder_states: HashMap<VidCommitment, Types::Time>,
+    pub spawned_builder_states: HashSet<(VidCommitment, Types::Time)>,
 
     // builder state -> last built block , it is used to respond the client
     // if the req channel times out during get_available_blocks
@@ -112,8 +112,8 @@ impl<Types: NodeType> GlobalState<Types> {
         last_garbage_collected_view_num: Types::Time,
         buffer_view_num_count: u64,
     ) -> Self {
-        let mut spawned_builder_states = HashMap::new();
-        spawned_builder_states.insert(bootstrapped_builder_state_id, bootstrapped_view_num);
+        let mut spawned_builder_states = HashSet::new();
+        spawned_builder_states.insert((bootstrapped_builder_state_id, bootstrapped_view_num));
         GlobalState {
             block_hash_to_block: Default::default(),
             spawned_builder_states,
@@ -162,13 +162,9 @@ impl<Types: NodeType> GlobalState<Types> {
     ) {
         // remove the builder commitment from the spawned builder states
         if !bootstrap {
-            let view_num = self.spawned_builder_states.remove(builder_vid_commitment);
-            if view_num.is_some() {
-                tracing::info!(
-                    "Removing handles for builder view num {:?}",
-                    view_num.unwrap()
-                );
-            }
+            // remove everything from the spawned builder states when view_num <= on_decide_view
+            self.spawned_builder_states
+                .retain(|(vid, view_num)| view_num > &on_decide_view);
         }
         {
             let cleanup_after_view = on_decide_view + self.buffer_view_num_count;
@@ -200,9 +196,7 @@ impl<Types: NodeType> GlobalState<Types> {
                 } else {
                     // go through the vids and remove from the builder_state_to_last_built_block
                     // and block_hashes and remove the block_hashes from the block_hash_to_block
-                    vids.iter().for_each(|vid| {
-                        self.spawned_builder_states.remove(vid);
-                    });
+
                     parent_hashes_block_hashes.iter().for_each(
                         |(parent_hash, block_hash, view_number_built_in)| {
                             tracing::debug!(
@@ -314,9 +308,18 @@ where
         // check in the local spawned builder states, if it doesn't exist it means there could be two cases
         // it has been sent to garbed collected, or never exists, in later case let bootstrapped build a block for it
         let just_return_with_this = {
-            let global_state = self.global_state.read_arc().await;
-            if !global_state.spawned_builder_states.contains_key(for_parent) {
-                if let Some(cached) = global_state
+            //let global_state = self.global_state.read_arc().await;
+            if !self
+                .global_state
+                .read_arc()
+                .await
+                .spawned_builder_states
+                .contains(&(*for_parent, view_num))
+            {
+                if let Some(cached) = self
+                    .global_state
+                    .read_arc()
+                    .await
                     .builder_state_to_last_built_block
                     .get(&(*for_parent, view_num))
                 {
@@ -370,7 +373,26 @@ where
                     if is_empty {
                         if Instant::now() >= timeout_after {
                             tracing::warn!(%e, "Couldn't get available blocks in time for parent {:?}",  req_msg.requested_vid_commitment);
-                            // lookup into the builder_state_to_last_built_block, if it contains the result, return that otherwise return error
+                            // go through the self.builder_state_to_last_built_block and check only on parent_comm, don't compare view_num as it is not used
+                            // let mut result = None;
+                            // // go through each entry
+                            // {
+                            //     for (builder_state, response) in
+                            //         global_state.builder_state_to_last_built_block.iter()
+                            //     {
+                            //         if builder_state.0 == req_msg.requested_vid_commitment {
+                            //             tracing::info!(
+                            //                 "Returning last built block for parent {:?}",
+                            //                 req_msg.requested_vid_commitment
+                            //             );
+                            //             result = Some(response.clone());
+                            //             break;
+                            //         }
+                            //     }
+                            // };
+                            // if result.is_some() {
+                            //     break Ok(result.unwrap());
+                            // }
                             if let Some(last_built_block) = self
                                 .global_state
                                 .read_arc()
@@ -388,7 +410,9 @@ where
                                 message: "No blocks available".to_string(),
                             });
                         }
-                        async_compatibility_layer::art::async_yield_now().await;
+                        //async_compatibility_layer::art::async_yield_now().await;
+                        async_compatibility_layer::art::async_sleep(self.max_api_waiting_time / 10)
+                            .await;
                         continue;
                     } else {
                         tracing::error!(%e, "Channel closed while getting available blocks for parent {:?}", req_msg.requested_vid_commitment);
@@ -463,6 +487,7 @@ where
         }
         let (pub_key, sign_key) = self.builder_keys.clone();
         let view_num = <<Types as NodeType>::Time as ConsensusTime>::new(view_number);
+
         if let Some(block) = self
             .global_state
             .read_arc()
@@ -580,7 +605,7 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
             .submit_client_txn(txn)
             .await;
 
-        tracing::info!(
+        tracing::debug!(
             "Transaction submitted to the builder states, sending response: {:?}",
             response
         );

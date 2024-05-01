@@ -643,10 +643,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             .write_arc()
             .await
             .spawned_builder_states
-            .insert(
+            .insert((
                 self.built_from_proposed_block.vid_commitment,
                 self.built_from_proposed_block.view_number,
-            );
+            ));
 
         self.event_loop();
     }
@@ -709,15 +709,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             if self.built_from_proposed_block.view_number.get_u64()
                 == self.bootstrap_view_number.get_u64()
             {
-                let view_number = *self
-                    .global_state
-                    .read_arc()
-                    .await
-                    .spawned_builder_states
-                    .get(&matching_vid)
-                    .unwrap_or(&self.last_bootstrap_garbage_collected_decided_seen_view_num);
                 self.builder_commitments.insert((
-                    view_number,
+                    requested_view_number,
                     (matching_vid, builder_hash.clone(), requested_view_number),
                 ));
             } else {
@@ -780,11 +773,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .read_arc()
                         .await
                         .spawned_builder_states
-                        .contains_key(&requested_vid_commitment)))
+                        .contains(&(requested_vid_commitment, requested_view_number))))
         {
             tracing::info!(
-                "Request handled by builder with view {:?}",
-                self.built_from_proposed_block.view_number
+                "Request handled by builder with view {:?} for (parent {:?}, view_num: {:?})",
+                self.built_from_proposed_block.view_number,
+                requested_vid_commitment,
+                requested_view_number
             );
             let response = self
                 .build_block(requested_vid_commitment, requested_view_number)
@@ -792,13 +787,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
             match response {
                 Some(response) => {
-                    tracing::info!(
-                        "Builder {:?} Sending response to the request{:?} with builder hash {:?}",
-                        self.built_from_proposed_block.view_number,
-                        req,
-                        response.builder_hash
-                    );
-
                     // form the response message
                     let response_msg = ResponseMessage {
                         builder_hash: response.builder_hash.clone(),
@@ -808,23 +796,30 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
                     // write to global state as well
                     // only write if the entry does not exist
-                    if !self
-                        .global_state
-                        .read_arc()
-                        .await
-                        .block_hash_to_block
-                        .contains_key(&(response.builder_hash.clone(), requested_view_number))
-                    {
-                        self.global_state.write_arc().await.update_global_state(
-                            response,
-                            requested_vid_commitment,
-                            requested_view_number,
-                            response_msg.clone(),
-                        )
-                    }
-
+                    // if !self
+                    //     .global_state
+                    //     .read_arc()
+                    //     .await
+                    //     .block_hash_to_block
+                    //     .contains_key(&(response.builder_hash.clone(), requested_view_number))
+                    // {
+                    let builder_hash = response.builder_hash.clone();
+                    self.global_state.write_arc().await.update_global_state(
+                        response,
+                        requested_vid_commitment,
+                        requested_view_number,
+                        response_msg.clone(),
+                    );
+                    // }
                     // ... and finally, send the response
                     self.response_sender.send(response_msg).await.unwrap();
+
+                    tracing::info!(
+                        "Builder {:?} Sent response to the request{:?} with builder hash {:?}",
+                        self.built_from_proposed_block.view_number,
+                        req,
+                        builder_hash
+                    );
                 }
                 None => {
                     tracing::warn!("No response to send");
