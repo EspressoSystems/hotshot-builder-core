@@ -381,6 +381,7 @@ where
                     if is_empty {
                         if Instant::now() >= timeout_after {
                             tracing::warn!(%e, "Couldn't get available blocks in time for parent {:?}",  req_msg.requested_vid_commitment);
+                            // lookup into the builder_state_to_last_built_block, if it contains the result, return that otherwise return error
                             if let Some(last_built_block) = self
                                 .global_state
                                 .read_arc()

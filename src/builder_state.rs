@@ -298,7 +298,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // Case 2: No intended builder state exist
         // To handle both cases, we can have the bootstrap builder running,
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
-        // check the presence of da_msg.proposal.data.view_number-1 in the spawned_clones_views_list
+        // check the presence of da_msg.proposal.data.view_number-1 in the spawned_builder_states list
         if self.built_from_proposed_block.view_number.get_u64()
             == self.bootstrap_view_number.get_u64()
             && (da_msg.proposal.data.view_number.get_u64() == 0
@@ -415,7 +415,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // Case 2: No intended builder state exist
         // To handle both cases, we can have the bootstrap builder running,
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
-        // check the presence of da_msg.proposal.data.view_number-1 in the spawned_clones_views_list
+        // check the presence of da_msg.proposal.data.view_number-1 in the the spawned_builder_states list
         if self.built_from_proposed_block.view_number.get_u64()
             == self.bootstrap_view_number.get_u64()
             && (qc_msg.proposal.data.view_number.get_u64() == 0
@@ -565,9 +565,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             }
         } else if self.built_from_proposed_block.view_number < latest_leaf_view_number {
             tracing::info!("Task view is less than the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
-            // convert leaf commitments into buildercommiments
-            // remove the handles from the global state
-            // TODO: Does it make sense to remove it here or should we remove in api responses?
             self.global_state.write_arc().await.remove_handles(
                 &self.built_from_proposed_block.vid_commitment,
                 self.builder_commitments.clone(),
@@ -677,9 +674,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // count the number of txns
             let txn_count = payload.num_transactions(&metadata);
 
-            // insert the view number and builder commitment in the builder_commitments set
-            // get the view number from the global state for bootstrapped is building for non-existing builder states
-
+           // insert the recently built block into the builder commitments
             self.builder_commitments.insert((
                 matching_vid,
                 builder_hash.clone(),
