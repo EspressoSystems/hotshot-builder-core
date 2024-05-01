@@ -236,6 +236,14 @@ impl<Types: NodeType> GlobalState<Types> {
                 message: "failed to send txn".to_string(),
             })
     }
+
+    // check for the existence of the builder state for a view
+    pub fn check_builder_state_existence_for_a_view(&self, key: &Types::Time) -> bool {
+        // iterate over the spawned builder states and check if the view number exists
+        self.spawned_builder_states
+            .iter()
+            .any(|(_vid, view_num)| view_num == key)
+    }
 }
 
 pub struct ProxyGlobalState<Types: NodeType> {
