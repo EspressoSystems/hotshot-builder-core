@@ -72,6 +72,7 @@ pub struct QCMessage<TYPES: NodeType> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RequestMessage {
     pub requested_vid_commitment: VidCommitment,
+    pub requested_view_number: u64,
     pub bootstrap_build_block: bool,
 }
 /// Response Message to be put on the response channel
@@ -164,7 +165,8 @@ pub struct BuilderState<TYPES: NodeType> {
     pub total_nodes: NonZeroUsize,
 
     /// locally spawned builder Commitements
-    pub builder_commitments: HashSet<(TYPES::Time, (VidCommitment, BuilderCommitment))>,
+    pub builder_commitments:
+        HashSet<(TYPES::Time, (VidCommitment, BuilderCommitment, TYPES::Time))>,
 
     /// bootstrapped view number
     pub bootstrap_view_number: TYPES::Time,
@@ -218,6 +220,7 @@ pub trait BuilderProgress<TYPES: NodeType> {
     async fn build_block(
         &mut self,
         matching_builder_commitment: VidCommitment,
+        matching_view_number: TYPES::Time,
     ) -> Option<BuildBlockInfo<TYPES>>;
 
     /// Event Loop
@@ -544,14 +547,15 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 // update the spawned_clones_views_list with the split list now
                 *self.spawned_clones_views_list.write().await = split_list;
 
-                let to_garbage_collect: HashSet<(TYPES::Time, (VidCommitment, BuilderCommitment))> =
-                    self.builder_commitments
-                        .iter()
-                        .filter(|&(view_number, _)| {
-                            (*view_number) <= to_be_garbage_collected_view_num
-                        })
-                        .cloned()
-                        .collect();
+                let to_garbage_collect: HashSet<(
+                    TYPES::Time,
+                    (VidCommitment, BuilderCommitment, TYPES::Time),
+                )> = self
+                    .builder_commitments
+                    .iter()
+                    .filter(|&(view_number, _)| (*view_number) <= to_be_garbage_collected_view_num)
+                    .cloned()
+                    .collect();
 
                 self.global_state.write_arc().await.remove_handles(
                     &self.built_from_proposed_block.vid_commitment,
@@ -650,7 +654,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     // build a block
     #[tracing::instrument(skip_all, name = "build block",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
-    async fn build_block(&mut self, matching_vid: VidCommitment) -> Option<BuildBlockInfo<TYPES>> {
+    async fn build_block(
+        &mut self,
+        matching_vid: VidCommitment,
+        requested_view_number: TYPES::Time,
+    ) -> Option<BuildBlockInfo<TYPES>> {
         // try to provide atleast one txn inside the block, ideally this should be a threshold through configurable value,
         // if it gets non-zero before timeout return, otherwise return after timeout
         if self.timestamp_to_tx.is_empty() {
@@ -708,12 +716,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     .spawned_builder_states
                     .get(&matching_vid)
                     .unwrap_or(&self.last_bootstrap_garbage_collected_decided_seen_view_num);
-                self.builder_commitments
-                    .insert((view_number, (matching_vid, builder_hash.clone())));
+                self.builder_commitments.insert((
+                    view_number,
+                    (matching_vid, builder_hash.clone(), requested_view_number),
+                ));
             } else {
                 self.builder_commitments.insert((
                     self.built_from_proposed_block.view_number,
-                    (matching_vid, builder_hash.clone()),
+                    (matching_vid, builder_hash.clone(), requested_view_number),
                 ));
             }
             let encoded_txns: Vec<u8> = payload.encode().unwrap().to_vec();
@@ -757,8 +767,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
     async fn process_block_request(&mut self, req: RequestMessage) {
         let requested_vid_commitment = req.requested_vid_commitment;
+        let requested_view_number =
+            <<TYPES as NodeType>::Time as ConsensusTime>::new(req.requested_view_number);
         // If a spawned clone is active then it will handle the request, otherwise the bootstrapped builder will handle it based on flag bootstrap_build_block
-        if requested_vid_commitment == self.built_from_proposed_block.vid_commitment
+        if (requested_vid_commitment == self.built_from_proposed_block.vid_commitment
+            && requested_view_number == self.built_from_proposed_block.view_number)
             || (self.built_from_proposed_block.view_number.get_u64()
                 == self.bootstrap_view_number.get_u64()
                 && (req.bootstrap_build_block
@@ -773,7 +786,9 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 "Request handled by builder with view {:?}",
                 self.built_from_proposed_block.view_number
             );
-            let response = self.build_block(requested_vid_commitment).await;
+            let response = self
+                .build_block(requested_vid_commitment, requested_view_number)
+                .await;
 
             match response {
                 Some(response) => {
@@ -798,11 +813,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .read_arc()
                         .await
                         .block_hash_to_block
-                        .contains_key(&(requested_vid_commitment, response.builder_hash.clone()))
+                        .contains_key(&(response.builder_hash.clone(), requested_view_number))
                     {
                         self.global_state.write_arc().await.update_global_state(
                             response,
                             requested_vid_commitment,
+                            requested_view_number,
                             response_msg.clone(),
                         )
                     }
@@ -824,7 +840,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let _builder_handle = async_spawn(async move {
             loop {
                 tracing::debug!("Builder event loop");
-
                 // read all the available txns from the channel and process them
                 while let Ok(tx) = self.tx_receiver.try_recv() {
                     if let MessageType::TransactionMessage(rtx_msg) = tx {

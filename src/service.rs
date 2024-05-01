@@ -15,7 +15,7 @@ use hotshot_types::{
         block_contents::BlockPayload,
         consensus_api::ConsensusApi,
         election::Membership,
-        node_implementation::NodeType,
+        node_implementation::{ConsensusTime, NodeType},
         signature_key::{BuilderSignatureKey, SignatureKey},
     },
     utils::BuilderCommitment,
@@ -59,7 +59,7 @@ use tide_disco::method::ReadState;
 pub struct GlobalState<Types: NodeType> {
     // data store for the blocks
     pub block_hash_to_block: HashMap<
-        (VidCommitment, BuilderCommitment),
+        (BuilderCommitment, Types::Time),
         (
             Types::BlockPayload,
             <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
@@ -73,11 +73,16 @@ pub struct GlobalState<Types: NodeType> {
 
     // builder state -> last built block , it is used to respond the client
     // if the req channel times out during get_available_blocks
-    pub builder_state_to_last_built_block: HashMap<VidCommitment, ResponseMessage>,
+    pub builder_state_to_last_built_block: HashMap<(VidCommitment, Types::Time), ResponseMessage>,
 
     // scheduled GC by view number
-    pub view_to_cleanup_targets:
-        BTreeMap<Types::Time, (Vec<VidCommitment>, Vec<(VidCommitment, BuilderCommitment)>)>,
+    pub view_to_cleanup_targets: BTreeMap<
+        Types::Time,
+        (
+            Vec<VidCommitment>,
+            Vec<(VidCommitment, BuilderCommitment, Types::Time)>,
+        ),
+    >,
 
     // sending a request from the hotshot to the builder states
     pub request_sender: BroadcastSender<MessageType<Types>>,
@@ -126,10 +131,11 @@ impl<Types: NodeType> GlobalState<Types> {
         &mut self,
         build_block_info: BuildBlockInfo<Types>,
         builder_vid_commitment: VidCommitment,
+        view_num: Types::Time,
         response_msg: ResponseMessage,
     ) {
         self.block_hash_to_block
-            .entry((builder_vid_commitment, build_block_info.builder_hash))
+            .entry((build_block_info.builder_hash, view_num))
             .or_insert_with(|| {
                 (
                     build_block_info.block_payload,
@@ -143,14 +149,14 @@ impl<Types: NodeType> GlobalState<Types> {
 
         // update the builder state to last built block
         self.builder_state_to_last_built_block
-            .insert(builder_vid_commitment, response_msg);
+            .insert((builder_vid_commitment, view_num), response_msg);
     }
 
     // remove the builder state handles based on the decide event
     pub fn remove_handles(
         &mut self,
         builder_vid_commitment: &VidCommitment,
-        block_hashes: HashSet<(Types::Time, (VidCommitment, BuilderCommitment))>,
+        block_hashes: HashSet<(Types::Time, (VidCommitment, BuilderCommitment, Types::Time))>,
         on_decide_view: Types::Time,
         bootstrap: bool,
     ) {
@@ -173,8 +179,9 @@ impl<Types: NodeType> GlobalState<Types> {
                 .or_insert((Default::default(), Default::default()));
             edit.0.push(*builder_vid_commitment);
 
-            for (view_num, (parent_hash, block_hash)) in block_hashes {
-                edit.1.push((parent_hash, block_hash.clone()));
+            for (view_num, (parent_hash, block_hash, view_number_built_in)) in block_hashes {
+                edit.1
+                    .push((parent_hash, block_hash.clone(), view_number_built_in));
                 tracing::debug!(
                     "GC view_num {:?}: block_hash {:?}, deferred to view {:?} ",
                     view_num,
@@ -196,9 +203,8 @@ impl<Types: NodeType> GlobalState<Types> {
                     vids.iter().for_each(|vid| {
                         self.spawned_builder_states.remove(vid);
                     });
-                    parent_hashes_block_hashes
-                        .iter()
-                        .for_each(|(parent_hash, block_hash)| {
+                    parent_hashes_block_hashes.iter().for_each(
+                        |(parent_hash, block_hash, view_number_built_in)| {
                             tracing::debug!(
                                 "on_decide_view: {:?}, Removing parent_hash {:?}, block_hash {:?}",
                                 on_decide_view,
@@ -206,8 +212,12 @@ impl<Types: NodeType> GlobalState<Types> {
                                 block_hash
                             );
                             self.block_hash_to_block
-                                .remove(&(*parent_hash, block_hash.clone()));
-                        });
+                                .remove(&(block_hash.clone(), *view_number_built_in));
+                        },
+                    );
+                    // remove all the last built block for the builder states having view_num > on_decide_view
+                    self.builder_state_to_last_built_block
+                        .retain(|(_vid, view_number), _| view_number > view_num);
                     false
                 }
             });
@@ -281,6 +291,7 @@ where
     async fn get_available_blocks(
         &self,
         for_parent: &VidCommitment,
+        view_number: u64,
         sender: Types::SignatureKey,
         signature: &<Types::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<Vec<AvailableBlockInfo<Types>>, BuildError> {
@@ -292,10 +303,14 @@ where
             });
         }
 
-        tracing::info!("Requesting available blocks for parent {:?}", for_parent);
+        tracing::info!(
+            "Requesting available blocks for (parent {:?}, view_num: {:?})",
+            for_parent,
+            view_number
+        );
 
         let mut bootstrapped_state_build_block = false;
-
+        let view_num = <<Types as NodeType>::Time as ConsensusTime>::new(view_number);
         // check in the local spawned builder states, if it doesn't exist it means there could be two cases
         // it has been sent to garbed collected, or never exists, in later case let bootstrapped build a block for it
         let just_return_with_this = {
@@ -303,7 +318,7 @@ where
             if !global_state.spawned_builder_states.contains_key(for_parent) {
                 if let Some(cached) = global_state
                     .builder_state_to_last_built_block
-                    .get(for_parent)
+                    .get(&(*for_parent, view_num))
                 {
                     Some(cached.clone())
                 } else {
@@ -317,6 +332,7 @@ where
 
         let req_msg = RequestMessage {
             requested_vid_commitment: (*for_parent),
+            requested_view_number: view_number,
             bootstrap_build_block: bootstrapped_state_build_block,
         };
 
@@ -353,13 +369,14 @@ where
                     let is_empty = matches!(e, UnbounderTryRecvError::Empty);
                     if is_empty {
                         if Instant::now() >= timeout_after {
+                            tracing::warn!(%e, "Couldn't get available blocks in time for parent {:?}",  req_msg.requested_vid_commitment);
                             // lookup into the builder_state_to_last_built_block, if it contains the result, return that otherwise return error
                             if let Some(last_built_block) = self
                                 .global_state
                                 .read_arc()
                                 .await
                                 .builder_state_to_last_built_block
-                                .get(for_parent)
+                                .get(&(*for_parent, view_num))
                             {
                                 tracing::info!(
                                     "Returning last built block for parent {:?}",
@@ -367,7 +384,6 @@ where
                                 );
                                 break Ok(last_built_block.clone());
                             }
-                            tracing::warn!(%e, "Couldn't get available blocks in time for parent {:?}",  req_msg.requested_vid_commitment);
                             break Err(BuildError::Error {
                                 message: "No blocks available".to_string(),
                             });
@@ -407,8 +423,9 @@ where
                     _phantom: Default::default(),
                 };
                 tracing::info!(
-                    "Sending available Block info response with (parent_hash: {:?}, block hash: {:?})",
+                    "Sending available Block info response for (parent {:?}, view_num: {:?}) with block hash: {:?})",
                     req_msg.requested_vid_commitment,
+                    view_number,
                     response.builder_hash
                 );
                 Ok(vec![initial_block_info])
@@ -428,14 +445,14 @@ where
     async fn claim_block(
         &self,
         block_hash: &BuilderCommitment,
-        parent_hash: &VidCommitment,
+        view_number: u64,
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockData<Types>, BuildError> {
         tracing::info!(
-            "Received request for claiming block for (parent_hash: {:?}, block hash: {:?})",
-            parent_hash,
-            block_hash
+            "Received request for claiming block for (block_hash {:?}, view_num: {:?})",
+            block_hash,
+            view_number
         );
         // verify the signature
         if !sender.validate(signature, block_hash.as_ref()) {
@@ -445,12 +462,13 @@ where
             });
         }
         let (pub_key, sign_key) = self.builder_keys.clone();
+        let view_num = <<Types as NodeType>::Time as ConsensusTime>::new(view_number);
         if let Some(block) = self
             .global_state
             .read_arc()
             .await
             .block_hash_to_block
-            .get(&(*parent_hash, block_hash.clone()))
+            .get(&(block_hash.clone(), view_num))
         {
             // sign over the builder commitment, as the proposer can computer it based on provide block_payload
             // and the metata data
@@ -468,9 +486,9 @@ where
                 sender: pub_key.clone(),
             };
             tracing::info!(
-                "Sending Claim Block data for (parent_hash: {:?}, block hash: {:?})",
-                parent_hash,
-                block_hash
+                "Sending Claim Block data for (block_hash {:?}, view_num: {:?})",
+                block_hash,
+                view_number
             );
             Ok(block_data)
         } else {
@@ -484,14 +502,14 @@ where
     async fn claim_block_header_input(
         &self,
         block_hash: &BuilderCommitment,
-        parent_hash: &VidCommitment,
+        view_number: u64,
         sender: Types::SignatureKey,
         signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
         tracing::info!(
-            "Received request for claiming block header input for (parent_hash: {:?}, block hash: {:?})",
-            parent_hash,
-            block_hash
+            "Received request for claiming block header input for (block_hash {:?}, view_num: {:?})",
+            block_hash,
+            view_number
         );
         // verify the signature
         if !sender.validate(signature, block_hash.as_ref()) {
@@ -501,12 +519,13 @@ where
             });
         }
         let (pub_key, sign_key) = self.builder_keys.clone();
+        let view_num = <<Types as NodeType>::Time as ConsensusTime>::new(view_number);
         if let Some(block) = self
             .global_state
             .read_arc()
             .await
             .block_hash_to_block
-            .get(&(*parent_hash, block_hash.clone()))
+            .get(&(block_hash.clone(), view_num))
         {
             tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
             let (vid_commitment, vid_precompute_data) = block.2.write().await.get().await?;
@@ -529,9 +548,9 @@ where
                 sender: pub_key.clone(),
             };
             tracing::info!(
-                "Sending Claim Block Header Input response for (parent_hash: {:?}, block hash: {:?})",
-                parent_hash,
-                block_hash
+                "Sending Claim Block Header Input response for (block_hash {:?}, view_num: {:?})",
+                block_hash,
+                view_number
             );
             Ok(response)
         } else {

@@ -307,6 +307,7 @@ mod tests {
             let requested_vid_commitment = payload_vid_commitment;
             let request_message = MessageType::<TestTypes>::RequestMessage(RequestMessage {
                 requested_vid_commitment,
+                requested_view_number: i as u64,
                 bootstrap_build_block: false,
             });
 
