@@ -32,10 +32,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use std::time::SystemTime;
 use std::{cmp::PartialEq, num::NonZeroUsize};
-use std::{
-    collections::{hash_map::Entry, BTreeSet},
-    time::Duration,
-};
+use std::{collections::hash_map::Entry, time::Duration};
 
 pub type TxTimeStamp = u128;
 
@@ -172,7 +169,7 @@ pub struct BuilderState<TYPES: NodeType> {
     pub bootstrap_view_number: TYPES::Time,
 
     /// list of views for which we have builder spawned clones
-    pub spawned_clones_views_list: Arc<RwLock<BTreeSet<TYPES::Time>>>,
+    pub spawned_clones_list: Arc<RwLock<HashMap<TYPES::Time, HashSet<VidCommitment>>>>,
 
     /// last bootstrap garbage collected decided seen view_num
     pub last_bootstrap_garbage_collected_decided_seen_view_num: TYPES::Time,
@@ -311,10 +308,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             == self.bootstrap_view_number.get_u64()
             && (da_msg.proposal.data.view_number.get_u64() == 0
                 || !self
-                    .spawned_clones_views_list
+                    .spawned_clones_list
                     .read()
                     .await
-                    .contains(&(da_msg.proposal.data.view_number - 1)))
+                    .contains_key(&(da_msg.proposal.data.view_number - 1)))
         {
             tracing::info!("DA Proposal handled by bootstrapped builder state");
 
@@ -386,11 +383,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     self.quorum_proposal_payload_commit_to_quorum_proposal
                         .remove(&payload_builder_commitment.clone());
 
-                    // Before spawning a clone add the view number to the spawned_clones_views_list
-                    self.spawned_clones_views_list
-                        .write()
-                        .await
-                        .insert(qc_proposal_data.view_number);
                     // if bootstrap in spawning it, then empty out its txns (part of GC)
                     if handled_by_bootstrap {
                         self.tx_hash_to_available_txns.clear();
@@ -427,15 +419,15 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // Case 2: No intended builder state exist
         // To handle both cases, we can have the bootstrap builder running,
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
-        // check the presence of da_msg.proposal.data.view_number-1 in the spawned_clones_views_list
+        // check the presence of da_msg.proposal.data.view_number-1 in the spawned_clones_list
         if self.built_from_proposed_block.view_number.get_u64()
             == self.bootstrap_view_number.get_u64()
             && (qc_msg.proposal.data.view_number.get_u64() == 0
                 || !self
-                    .spawned_clones_views_list
+                    .spawned_clones_list
                     .read()
                     .await
-                    .contains(&(qc_msg.proposal.data.view_number - 1)))
+                    .contains_key(&(qc_msg.proposal.data.view_number - 1)))
         {
             tracing::info!("QC Proposal handled by bootstrapped builder state");
             handled_by_bootstrap = true;
@@ -481,11 +473,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         "Spawning a clone from process QC proposal for view number: {:?}",
                         view_number
                     );
-
-                    self.spawned_clones_views_list
-                        .write()
-                        .await
-                        .insert(da_proposal_data.view_number);
                     // if handled by bootstrap, then empty out its txns (part of GC)
                     if handled_by_bootstrap {
                         self.tx_hash_to_available_txns.clear();
@@ -540,15 +527,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         latest_leaf_view_number.get_u64() - self.buffer_view_num_count,
                     );
 
-                // split_off returns greater than equal to set, so we want everything after the latest decide event
-                let split_list = self
-                    .spawned_clones_views_list
+                // prune the spawned_clones_list based on the view number
+                self.spawned_clones_list
                     .write()
                     .await
-                    .split_off(&(to_be_garbage_collected_view_num));
-
-                // update the spawned_clones_views_list with the split list now
-                *self.spawned_clones_views_list.write().await = split_list;
+                    .retain(|view_number, _| *view_number > to_be_garbage_collected_view_num);
 
                 let to_garbage_collect: HashSet<(VidCommitment, BuilderCommitment, TYPES::Time)> =
                     self.builder_commitments
@@ -639,6 +622,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     txn_info.remove_entry();
                 }
             });
+
+        // regiter the spawned builder state to spawned_clones_list based on the view number
+        self.spawned_clones_list
+            .write()
+            .await
+            .entry(self.built_from_proposed_block.view_number)
+            .or_insert_with(HashSet::new)
+            .insert(self.built_from_proposed_block.vid_commitment);
 
         // register the spawned builder state to spawned_builder_states in the global state
         self.global_state
@@ -962,6 +953,11 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         base_fee: u64,
         instance_state: Arc<dyn InstanceState>,
     ) -> Self {
+        let mut spawned_clones_list = HashMap::new();
+        spawned_clones_list.insert(
+            built_from_proposed_block.view_number,
+            HashSet::from_iter(vec![built_from_proposed_block.vid_commitment]),
+        );
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
             tx_hash_to_available_txns: HashMap::new(),
@@ -978,7 +974,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             builder_commitments: HashSet::new(),
             total_nodes: num_nodes,
             bootstrap_view_number,
-            spawned_clones_views_list: Arc::new(RwLock::new(BTreeSet::new())),
+            spawned_clones_list: Arc::new(RwLock::new(spawned_clones_list)),
             last_bootstrap_garbage_collected_decided_seen_view_num: bootstrap_view_number,
             buffer_view_num_count,
             maximize_txn_capture_timeout,
@@ -1007,7 +1003,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             builder_commitments: self.builder_commitments.clone(),
             total_nodes: self.total_nodes,
             bootstrap_view_number: self.bootstrap_view_number,
-            spawned_clones_views_list: self.spawned_clones_views_list.clone(),
+            spawned_clones_list: self.spawned_clones_list.clone(),
             last_bootstrap_garbage_collected_decided_seen_view_num: self
                 .last_bootstrap_garbage_collected_decided_seen_view_num,
             buffer_view_num_count: self.buffer_view_num_count,
