@@ -41,13 +41,10 @@ use hotshot_events_service::{
     events_source::{BuilderEvent, BuilderEventType},
 };
 use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    ops::Deref,
-};
 use std::{fmt::Display, time::Instant};
 use tagged_base64::TaggedBase64;
 use tide_disco::method::ReadState;
@@ -215,21 +212,22 @@ impl<Types: NodeType> GlobalState<Types> {
 
     // private mempool submit txn
     // Currently, we don't differentiate between the transactions from the hotshot and the private mempool
-    pub async fn submit_client_txn(
+    pub async fn submit_client_txns(
         &self,
-        txn: <Types as NodeType>::Transaction,
-    ) -> Result<Commitment<<Types as NodeType>::Transaction>, BuildError> {
+        txns: Vec<<Types as NodeType>::Transaction>,
+    ) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
+        let results = txns.iter().map(|tx| tx.commit()).collect();
         let tx_msg = TransactionMessage::<Types> {
-            txns: vec![txn.clone()],
+            txns,
             tx_type: TransactionSource::External,
         };
 
         self.tx_sender
             .broadcast(MessageType::TransactionMessage(tx_msg))
             .await
-            .map(|_a| txn.commit())
+            .map(|_a| results)
             .map_err(|_e| BuildError::Error {
-                message: "failed to send txn".to_string(),
+                message: "failed to send txns".to_string(),
             })
     }
 
@@ -323,26 +321,21 @@ where
         // it has been sent to garbed collected, or never exists, in later case let bootstrapped build a block for it
         let just_return_with_this = {
             //let global_state = self.global_state.read_arc().await;
-            if !self
+            if self
                 .global_state
                 .read_arc()
                 .await
                 .spawned_builder_states
                 .contains_key(&(*for_parent, view_num))
             {
-                if let Some(cached) = self
-                    .global_state
+                None
+            } else {
+                self.global_state
                     .read_arc()
                     .await
                     .builder_state_to_last_built_block
                     .get(&(*for_parent, view_num))
-                {
-                    Some(cached.clone())
-                } else {
-                    None
-                }
-            } else {
-                None
+                    .cloned()
             }
         };
         let (response_sender, response_receiver) = unbounded();
@@ -581,16 +574,16 @@ where
 }
 #[async_trait]
 impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
-    async fn submit_txn(
-        &mut self,
-        txn: <Types as NodeType>::Transaction,
-    ) -> Result<Commitment<<Types as NodeType>::Transaction>, BuildError> {
-        tracing::debug!("Submitting transaction to the builder states{:?}", txn);
+    async fn submit_txns(
+        &self,
+        txns: Vec<<Types as NodeType>::Transaction>,
+    ) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
+        tracing::debug!("Submitting transaction to the builder states{:?}", txns);
         let response = self
             .global_state
             .read_arc()
             .await
-            .submit_client_txn(txn)
+            .submit_client_txns(txns)
             .await;
 
         tracing::debug!(
@@ -603,13 +596,13 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
 }
 #[async_trait]
 impl<Types: NodeType> ReadState for ProxyGlobalState<Types> {
-    type State = GlobalState<Types>;
+    type State = ProxyGlobalState<Types>;
 
     async fn read<T>(
         &self,
         op: impl Send + for<'a> FnOnce(&'a Self::State) -> BoxFuture<'a, T> + 'async_trait,
     ) -> T {
-        op(self.global_state.read_arc().await.deref()).await
+        op(self).await
     }
 }
 
