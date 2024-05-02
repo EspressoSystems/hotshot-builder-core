@@ -1,11 +1,11 @@
 [package]
 name = "hotshot-builder-core"
-version = "0.1.14"
+version = "0.1.15"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-broadcast = "0.7.0"
+async-broadcast = "0.7"
 async-compatibility-layer = { version = "1.1", default-features = false, features = [
     "logging-utils",
 ] }
