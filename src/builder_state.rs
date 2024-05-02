@@ -381,15 +381,16 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     self.quorum_proposal_payload_commit_to_quorum_proposal
                         .remove(&payload_builder_commitment.clone());
 
+                    let (req_sender, req_receiver) = broadcast(self.req_receiver.capacity());
+                    self.clone_with_receiver(req_receiver)
+                    .spawn_clone(da_proposal_data, qc_proposal_data, sender, req_sender)
+                    .await;
+                
                     // if bootstrap in spawning it, then empty out its txns (part of GC)
                     if handled_by_bootstrap {
                         self.tx_hash_to_available_txns.clear();
                         self.timestamp_to_tx.clear();
                     }
-                    let (req_sender, req_receiver) = broadcast(self.req_receiver.capacity());
-                    self.clone_with_receiver(req_receiver)
-                        .spawn_clone(da_proposal_data, qc_proposal_data, sender, req_sender)
-                        .await;
                 } else {
                     tracing::debug!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers");
                 }
@@ -473,15 +474,17 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         "Spawning a clone from process QC proposal for view number: {:?}",
                         view_number
                     );
+                    
+                    let (req_sender, req_receiver) = broadcast(self.req_receiver.capacity());
+                    self.clone_with_receiver(req_receiver)
+                        .spawn_clone(da_proposal_data, qc_proposal_data, sender, req_sender)
+                        .await;
+                    
                     // if handled by bootstrap, then empty out its txns (part of GC)
                     if handled_by_bootstrap {
                         self.tx_hash_to_available_txns.clear();
                         self.timestamp_to_tx.clear();
                     }
-                    let (req_sender, req_receiver) = broadcast(self.req_receiver.capacity());
-                    self.clone_with_receiver(req_receiver)
-                        .spawn_clone(da_proposal_data, qc_proposal_data, sender, req_sender)
-                        .await;
                 } else {
                     tracing::debug!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers");
                 }
