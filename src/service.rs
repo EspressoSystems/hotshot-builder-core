@@ -318,7 +318,6 @@ where
             view_number
         );
 
-        let mut bootstrapped_state_build_block = false;
         let view_num = <<Types as NodeType>::Time as ConsensusTime>::new(view_number);
         // check in the local spawned builder states, if it doesn't exist it means there could be two cases
         // it has been sent to garbed collected, or never exists, in later case let bootstrapped build a block for it
@@ -340,7 +339,6 @@ where
                 {
                     Some(cached.clone())
                 } else {
-                    bootstrapped_state_build_block = true;
                     None
                 }
             } else {
@@ -351,7 +349,6 @@ where
         let req_msg = RequestMessage {
             requested_vid_commitment: (*for_parent),
             requested_view_number: view_number,
-            bootstrap_build_block: bootstrapped_state_build_block,
             response_channel: response_sender,
         };
         let response_received = if just_return_with_this.is_some() {

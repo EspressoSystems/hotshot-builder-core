@@ -313,7 +313,6 @@ mod tests {
             let request_message = MessageType::<TestTypes>::RequestMessage(RequestMessage {
                 requested_vid_commitment,
                 requested_view_number: i as u64,
-                bootstrap_build_block: false,
                 response_channel: response_sender,
             });
 

@@ -73,7 +73,6 @@ pub struct QCMessage<TYPES: NodeType> {
 pub struct RequestMessage {
     pub requested_vid_commitment: VidCommitment,
     pub requested_view_number: u64,
-    pub bootstrap_build_block: bool,
     pub response_channel: UnboundedSender<ResponseMessage>,
 }
 /// Response Message to be put on the response channel
@@ -733,7 +732,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let requested_vid_commitment = req.requested_vid_commitment;
         let requested_view_number =
             <<TYPES as NodeType>::Time as ConsensusTime>::new(req.requested_view_number);
-        // If a spawned clone is active then it will handle the request, otherwise the bootstrapped builder will handle it based on flag bootstrap_build_block
+        // If a spawned clone is active then it will handle the request, otherwise the bootstrapped builder will handle
         if (requested_vid_commitment == self.built_from_proposed_block.vid_commitment
             && requested_view_number == self.built_from_proposed_block.view_number)
             || (self.built_from_proposed_block.view_number.get_u64()
