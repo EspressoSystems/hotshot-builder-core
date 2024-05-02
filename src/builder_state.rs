@@ -979,7 +979,6 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             builder_commitments: self.builder_commitments.clone(),
             total_nodes: self.total_nodes,
             bootstrap_view_number: self.bootstrap_view_number,
-            spawned_clones_list: self.spawned_clones_list.clone(),
             last_bootstrap_garbage_collected_decided_seen_view_num: self
                 .last_bootstrap_garbage_collected_decided_seen_view_num,
             buffer_view_num_count: self.buffer_view_num_count,
