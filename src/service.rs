@@ -321,26 +321,21 @@ where
         // it has been sent to garbed collected, or never exists, in later case let bootstrapped build a block for it
         let just_return_with_this = {
             //let global_state = self.global_state.read_arc().await;
-            if !self
+            if self
                 .global_state
                 .read_arc()
                 .await
                 .spawned_builder_states
                 .contains_key(&(*for_parent, view_num))
             {
-                if let Some(cached) = self
-                    .global_state
+                None
+            } else {
+                self.global_state
                     .read_arc()
                     .await
                     .builder_state_to_last_built_block
                     .get(&(*for_parent, view_num))
-                {
-                    Some(cached.clone())
-                } else {
-                    None
-                }
-            } else {
-                None
+                    .cloned()
             }
         };
         let (response_sender, response_receiver) = unbounded();
