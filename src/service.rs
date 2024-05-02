@@ -34,6 +34,7 @@ use async_compatibility_layer::{art::async_timeout, channel::unbounded};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use committable::{Commitment, Committable};
+use derivative::Derivative;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use hotshot_events_service::{
@@ -57,20 +58,11 @@ pub struct BlockInfo<Types: NodeType> {
     pub offered_fee: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Derivative)]
+#[derivative(Default(bound = ""))]
 pub struct BuilderStatesInfo<Types: NodeType> {
     pub vid_commitments: Vec<VidCommitment>,
     pub block_ids: Vec<(VidCommitment, BuilderCommitment, Types::Time)>,
-}
-
-// impl default for the builderstateinfo
-impl<Types: NodeType> Default for BuilderStatesInfo<Types> {
-    fn default() -> Self {
-        BuilderStatesInfo {
-            vid_commitments: Default::default(),
-            block_ids: Default::default(),
-        }
-    }
 }
 
 #[allow(clippy::type_complexity)]
