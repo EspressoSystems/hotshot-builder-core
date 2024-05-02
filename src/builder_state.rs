@@ -257,7 +257,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     #[tracing::instrument(skip_all, name = "process hotshot transaction",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     fn process_hotshot_transaction(&mut self, txns: Vec<TYPES::Transaction>) {
-        // Hotshot Public Mempool txns processessing
+        // Hotshot Public Mempool txns processing
         tracing::debug!("Processing hotshot transactions");
         // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
         txns.iter().for_each(|tx| {
@@ -383,9 +383,9 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
                     let (req_sender, req_receiver) = broadcast(self.req_receiver.capacity());
                     self.clone_with_receiver(req_receiver)
-                    .spawn_clone(da_proposal_data, qc_proposal_data, sender, req_sender)
-                    .await;
-                
+                        .spawn_clone(da_proposal_data, qc_proposal_data, sender, req_sender)
+                        .await;
+
                     // if bootstrap in spawning it, then empty out its txns (part of GC)
                     if handled_by_bootstrap {
                         self.tx_hash_to_available_txns.clear();
@@ -474,12 +474,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         "Spawning a clone from process QC proposal for view number: {:?}",
                         view_number
                     );
-                    
+
                     let (req_sender, req_receiver) = broadcast(self.req_receiver.capacity());
                     self.clone_with_receiver(req_receiver)
                         .spawn_clone(da_proposal_data, qc_proposal_data, sender, req_sender)
                         .await;
-                    
+
                     // if handled by bootstrap, then empty out its txns (part of GC)
                     if handled_by_bootstrap {
                         self.tx_hash_to_available_txns.clear();

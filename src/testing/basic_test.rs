@@ -117,6 +117,7 @@ mod tests {
         let mut sdecide_msgs: Vec<DecideMessage<TestTypes>> = Vec::new();
         let mut sda_msgs: Vec<DAProposalMessage<TestTypes>> = Vec::new();
         let mut sqc_msgs: Vec<QCMessage<TestTypes>> = Vec::new();
+        #[allow(clippy::type_complexity)]
         let mut sreq_msgs: Vec<(
             UnboundedReceiver<ResponseMessage>,
             (VidCommitment, ViewNumber),
