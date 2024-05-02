@@ -243,6 +243,14 @@ impl<Types: NodeType> GlobalState<Types> {
             &self.bootstrap_sender
         }
     }
+
+    // check for the existence of the builder state for a view
+    pub fn check_builder_state_existence_for_a_view(&self, key: &Types::Time) -> bool {
+        // iterate over the spawned builder states and check if the view number exists
+        self.spawned_builder_states
+            .iter()
+            .any(|((_vid, view_num), _sender)| view_num == key)
+    }
 }
 
 pub struct ProxyGlobalState<Types: NodeType> {
@@ -375,6 +383,7 @@ where
                     if is_empty {
                         if Instant::now() >= timeout_after {
                             tracing::warn!(%e, "Couldn't get available blocks in time for parent {:?}",  req_msg.requested_vid_commitment);
+                            // lookup into the builder_state_to_last_built_block, if it contains the result, return that otherwise return error
                             if let Some(last_built_block) = self
                                 .global_state
                                 .read_arc()
