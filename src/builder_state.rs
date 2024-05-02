@@ -73,7 +73,6 @@ pub struct QCMessage<TYPES: NodeType> {
 pub struct RequestMessage {
     pub requested_vid_commitment: VidCommitment,
     pub requested_view_number: u64,
-    pub bootstrap_build_block: bool,
     pub response_channel: UnboundedSender<ResponseMessage>,
 }
 /// Response Message to be put on the response channel
@@ -418,7 +417,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // Case 2: No intended builder state exist
         // To handle both cases, we can have the bootstrap builder running,
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
-        // check the presence of da_msg.proposal.data.view_number-1 in the the spawned_builder_states list
+        // check the presence of da_msg.proposal.data.view_number-1 in the spawned_builder_states
         if self.built_from_proposed_block.view_number.get_u64()
             == self.bootstrap_view_number.get_u64()
             && (qc_msg.proposal.data.view_number.get_u64() == 0
@@ -683,7 +682,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // count the number of txns
             let txn_count = payload.num_transactions(&metadata);
 
-           // insert the recently built block into the builder commitments
+            // insert the recently built block into the builder commitments
             self.builder_commitments.insert((
                 matching_vid,
                 builder_hash.clone(),
@@ -733,17 +732,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let requested_vid_commitment = req.requested_vid_commitment;
         let requested_view_number =
             <<TYPES as NodeType>::Time as ConsensusTime>::new(req.requested_view_number);
-        // If a spawned clone is active then it will handle the request, otherwise the bootstrapped builder will handle it based on flag bootstrap_build_block
+        // If a spawned clone is active then it will handle the request, otherwise the bootstrapped builder will handle
         if (requested_vid_commitment == self.built_from_proposed_block.vid_commitment
             && requested_view_number == self.built_from_proposed_block.view_number)
-            || ((self.built_from_proposed_block.view_number.get_u64()
-                == self.bootstrap_view_number.get_u64()
-                && req.bootstrap_build_block)
-                && !self
-                    .global_state
-                    .read_arc()
-                    .await
-                    .check_builder_state_existence_for_a_view(&requested_view_number))
+            || (self.built_from_proposed_block.view_number.get_u64()
+                == self.bootstrap_view_number.get_u64())
         {
             tracing::info!(
                 "Request handled by builder with view {:?} for (parent {:?}, view_num: {:?})",
