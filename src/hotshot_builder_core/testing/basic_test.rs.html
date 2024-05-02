@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/testing/basic_test.rs`."><title>basic_test.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-5bc39a1768837dd0.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="hotshot_builder_core" data-themes="" data-resource-suffix="" data-rustdoc-version="1.77.2 (25ef9e3d8 2024-04-09)" data-channel="1.77.2" data-search-js="search-dd67cee4cfa65049.js" data-settings-js="settings-4313503d2e1961c2.js" ><script src="../../../static.files/storage-4c98445ec4002617.js"></script><script defer src="../../../static.files/src-script-e66d777a5a92e9b2.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-48f368f3872407c8.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-04d5337699b92874.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/testing/basic_test.rs`."><title>basic_test.rs - source</title><script> if (window.location.protocol !== "file:") document.write(`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2">`)</script><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-e935ef01ae1c1829.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="hotshot_builder_core" data-themes="" data-resource-suffix="" data-rustdoc-version="1.78.0 (9b00956e5 2024-04-29)" data-channel="1.78.0" data-search-js="search-42d8da7a6b9792c2.js" data-settings-js="settings-4313503d2e1961c2.js" ><script src="../../../static.files/storage-4c98445ec4002617.js"></script><script defer src="../../../static.files/src-script-e66d777a5a92e9b2.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-12cf3b4f4f9dc36d.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-04d5337699b92874.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title">
             <h2>Files</h2></div></nav><div class="sidebar-resizer"></div>
     <main><nav class="sub"><form class="search-form"><span></span><div id="sidebar-button" tabindex="-1"><a href="../../../hotshot_builder_core/all.html" title="show sidebar"></a></div><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" tabindex="-1"><a href="../../../help.html" title="help">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
@@ -389,6 +389,10 @@
 <a href="#387" id="387">387</a>
 <a href="#388" id="388">388</a>
 <a href="#389" id="389">389</a>
+<a href="#390" id="390">390</a>
+<a href="#391" id="391">391</a>
+<a href="#392" id="392">392</a>
+<a href="#393" id="393">393</a>
 </pre></div><pre class="rust"><code><span class="kw">pub use </span>hotshot::traits::election::static_committee::GeneralStaticCommittee;
 <span class="kw">pub use </span>hotshot_types::{
     data::{DAProposal, Leaf, QuorumProposal, ViewNumber},
@@ -411,14 +415,15 @@
     <span class="kw">use super</span>::<span class="kw-2">*</span>;
     <span class="kw">use </span>std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
 
-    <span class="kw">use </span>async_compatibility_layer::art::async_spawn;
     <span class="kw">use </span>async_compatibility_layer::channel::unbounded;
+    <span class="kw">use </span>async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
     <span class="kw">use </span>hotshot::types::SignatureKey;
     <span class="kw">use </span>hotshot_types::{
         signature_key::BuilderKey,
         simple_vote::QuorumData,
         traits::block_contents::{vid_commitment, BlockHeader},
         utils::BuilderCommitment,
+        vid::VidCommitment,
     };
 
     <span class="kw">use </span>hotshot_example_types::{
@@ -485,9 +490,8 @@
             broadcast::&lt;MessageType&lt;TestTypes&gt;&gt;(num_test_messages * multiplication_factor);
         <span class="kw">let </span>(qc_sender, qc_receiver) =
             broadcast::&lt;MessageType&lt;TestTypes&gt;&gt;(num_test_messages * multiplication_factor);
-        <span class="kw">let </span>(req_sender, req_receiver) =
+        <span class="kw">let </span>(bootstrap_sender, bootstrap_receiver) =
             broadcast::&lt;MessageType&lt;TestTypes&gt;&gt;(num_test_messages * multiplication_factor);
-        <span class="kw">let </span>(res_sender, res_receiver) = unbounded();
 
         <span class="comment">// generate the keys for the buidler
         </span><span class="kw">let </span>seed = [<span class="number">201_u8</span>; <span class="number">32</span>];
@@ -495,8 +499,7 @@
             BLSPubKey::generated_from_seed_indexed(seed, <span class="number">2011_u64</span>);
         <span class="comment">// instantiate the global state also
         </span><span class="kw">let </span>global_state = GlobalState::&lt;TestTypes&gt;::new(
-            req_sender,
-            res_receiver,
+            bootstrap_sender,
             tx_sender.clone(),
             vid_commitment(<span class="kw-2">&amp;</span>[], <span class="number">8</span>),
             ViewNumber::new(<span class="number">0</span>),
@@ -509,7 +512,12 @@
         <span class="kw">let </span><span class="kw-2">mut </span>sdecide_msgs: Vec&lt;DecideMessage&lt;TestTypes&gt;&gt; = Vec::new();
         <span class="kw">let </span><span class="kw-2">mut </span>sda_msgs: Vec&lt;DAProposalMessage&lt;TestTypes&gt;&gt; = Vec::new();
         <span class="kw">let </span><span class="kw-2">mut </span>sqc_msgs: Vec&lt;QCMessage&lt;TestTypes&gt;&gt; = Vec::new();
-        <span class="kw">let </span><span class="kw-2">mut </span>sreq_msgs: Vec&lt;MessageType&lt;TestTypes&gt;&gt; = Vec::new();
+        <span class="attr">#[allow(clippy::type_complexity)]
+        </span><span class="kw">let </span><span class="kw-2">mut </span>sreq_msgs: Vec&lt;(
+            UnboundedReceiver&lt;ResponseMessage&gt;,
+            (VidCommitment, ViewNumber),
+            MessageType&lt;TestTypes&gt;,
+        )&gt; = Vec::new();
         <span class="comment">// storing response messages
         </span><span class="kw">let </span><span class="kw-2">mut </span>rres_msgs: Vec&lt;ResponseMessage&gt; = Vec::new();
         <span class="kw">let </span>_validated_state = Arc::new(TestValidatedState::default());
@@ -696,16 +704,23 @@
             <span class="comment">// send decide and request messages later
             </span><span class="kw">let </span>_requested_builder_commitment = payload_builder_commitment;
             <span class="kw">let </span>requested_vid_commitment = payload_vid_commitment;
+
+            <span class="kw">let </span>(response_sender, response_receiver) = unbounded();
             <span class="kw">let </span>request_message = MessageType::&lt;TestTypes&gt;::RequestMessage(RequestMessage {
                 requested_vid_commitment,
-                bootstrap_build_block: <span class="bool-val">false</span>,
+                requested_view_number: i <span class="kw">as </span>u64,
+                response_channel: response_sender,
             });
 
             stx_msgs.push(stx_msg);
             sdecide_msgs.push(sdecide_msg);
             sda_msgs.push(sda_msg);
             sqc_msgs.push(sqc_msg);
-            sreq_msgs.push(request_message);
+            sreq_msgs.push((
+                response_receiver,
+                (requested_vid_commitment, ViewNumber::new(i <span class="kw">as </span>u64)),
+                request_message,
+            ));
         }
 
         <span class="comment">//let global_state_clone = arc_rwlock_global_state.clone();
@@ -724,9 +739,8 @@
                 decide_receiver,
                 da_receiver,
                 qc_receiver,
-                req_receiver,
+                bootstrap_receiver,
                 arc_rwlock_global_state_clone,
-                res_sender,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
                 ViewNumber::new(<span class="number">0</span>),
                 <span class="number">10</span>,                        <span class="comment">// buffer view count
@@ -747,8 +761,8 @@
             arc_rwlock_global_state
                 .read_arc()
                 .<span class="kw">await
-                </span>.request_sender
-                .broadcast(req_msg.clone())
+                </span>.get_channel_for_builder_or_bootstrap(<span class="kw-2">&amp;</span>req_msg.<span class="number">1</span>)
+                .broadcast(req_msg.<span class="number">2</span>.clone())
                 .<span class="kw">await
                 </span>.unwrap();
         }
@@ -763,19 +777,13 @@
                 </span>.unwrap();
         }
 
-        <span class="kw">while let </span><span class="prelude-val">Ok</span>(res_msg) = arc_rwlock_global_state
-            .read_arc()
-            .<span class="kw">await
-            </span>.response_receiver
-            .try_recv()
-        {
-            rres_msgs.push(res_msg);
-            <span class="kw">if </span>rres_msgs.len() == (num_test_messages - <span class="number">1</span>) {
-                <span class="kw">break</span>;
+        <span class="kw">for </span>req_msg <span class="kw">in </span>sreq_msgs.iter() {
+            <span class="kw">while let </span><span class="prelude-val">Ok</span>(res_msg) = req_msg.<span class="number">0</span>.try_recv() {
+                rres_msgs.push(res_msg);
             }
-        }
-        <span class="macro">assert_eq!</span>(rres_msgs.len(), (num_test_messages - <span class="number">1</span>));
-        <span class="comment">//task::sleep(std::time::Duration::from_secs(60)).await;
-    </span>}
+            <span class="comment">//task::sleep(std::time::Duration::from_secs(60)).await;
+        </span>}
+        <span class="macro">assert_eq!</span>(rres_msgs.len(), (num_test_messages));
+    }
 }
 </code></pre></div></section></main></body></html>
