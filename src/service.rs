@@ -390,15 +390,12 @@ where
                         continue;
                     }
                     Ok(recv_attempt) => {
-                        if recv_attempt.is_ok() {
-                            break recv_attempt.map_err(|_| BuildError::Missing);
-                        } else {
-                            let e = recv_attempt.unwrap_err();
+                        if let Err(e) = recv_attempt {
                             tracing::error!(%e, "Channel closed while getting available blocks for parent {:?}", req_msg.requested_vid_commitment);
-                            break Err(BuildError::Error {
-                                message: "channel unexpectedly closed".to_string(),
-                            });
                         }
+                        break recv_attempt.map_err(|_| BuildError::Error {
+                            message: "channel unexpectedly closed".to_string(),
+                        });
                     }
                 }
             }
