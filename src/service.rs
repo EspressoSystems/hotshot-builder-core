@@ -30,7 +30,7 @@ use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use crate::WaitAndKeep;
 use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
-use async_compatibility_layer::channel::{unbounded, TryRecvError as UnbounderTryRecvError};
+use async_compatibility_layer::{art::async_timeout, channel::unbounded};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use committable::{Commitment, Committable};
@@ -348,6 +348,7 @@ where
             Ok(just_return_with_this.unwrap().clone())
         } else {
             let timeout_after = Instant::now() + self.max_api_waiting_time;
+            let check_duration = self.max_api_waiting_time / 10;
 
             // broadcast the request to the builder states
             self.global_state
@@ -364,15 +365,10 @@ where
             );
 
             loop {
-                let recv_attempt = response_receiver.try_recv();
-                if recv_attempt.is_ok() {
-                    break recv_attempt.map_err(|_| BuildError::Missing);
-                } else {
-                    let e = recv_attempt.unwrap_err();
-                    let is_empty = matches!(e, UnbounderTryRecvError::Empty);
-                    if is_empty {
+                match async_timeout(check_duration, response_receiver.recv()).await {
+                    Err(toe) => {
                         if Instant::now() >= timeout_after {
-                            tracing::warn!(%e, "Couldn't get available blocks in time for parent {:?}",  req_msg.requested_vid_commitment);
+                            tracing::warn!(%toe, "Couldn't get available blocks in time for parent {:?}",  req_msg.requested_vid_commitment);
                             // lookup into the builder_state_to_last_built_block, if it contains the result, return that otherwise return error
                             if let Some(last_built_block) = self
                                 .global_state
@@ -391,13 +387,18 @@ where
                                 message: "No blocks available".to_string(),
                             });
                         }
-                        async_compatibility_layer::art::async_yield_now().await;
                         continue;
-                    } else {
-                        tracing::error!(%e, "Channel closed while getting available blocks for parent {:?}", req_msg.requested_vid_commitment);
-                        break Err(BuildError::Error {
-                            message: "channel unexpectedly closed".to_string(),
-                        });
+                    }
+                    Ok(recv_attempt) => {
+                        if recv_attempt.is_ok() {
+                            break recv_attempt.map_err(|_| BuildError::Missing);
+                        } else {
+                            let e = recv_attempt.unwrap_err();
+                            tracing::error!(%e, "Channel closed while getting available blocks for parent {:?}", req_msg.requested_vid_commitment);
+                            break Err(BuildError::Error {
+                                message: "channel unexpectedly closed".to_string(),
+                            });
+                        }
                     }
                 }
             }
