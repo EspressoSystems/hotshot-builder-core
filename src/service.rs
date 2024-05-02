@@ -50,6 +50,7 @@ use std::{fmt::Display, time::Instant};
 use tagged_base64::TaggedBase64;
 use tide_disco::method::ReadState;
 
+// It holds all the necessary information for a block
 #[derive(Debug)]
 pub struct BlockInfo<Types: NodeType> {
     pub block_payload: Types::BlockPayload,
@@ -58,11 +59,35 @@ pub struct BlockInfo<Types: NodeType> {
     pub offered_fee: u64,
 }
 
+// It holds the information for the proposed block
+#[derive(Debug)]
+pub struct ProposedBlockId<Types: NodeType> {
+    pub parent_commitment: VidCommitment,
+    pub payload_commitment: BuilderCommitment,
+    pub parent_view: Types::Time,
+}
+
+impl<Types: NodeType> ProposedBlockId<Types> {
+    pub fn new(
+        parent_commitment: VidCommitment,
+        payload_commitment: BuilderCommitment,
+        parent_view: Types::Time,
+    ) -> Self {
+        ProposedBlockId {
+            parent_commitment,
+            payload_commitment,
+            parent_view,
+        }
+    }
+}
+
 #[derive(Debug, Derivative)]
 #[derivative(Default(bound = ""))]
 pub struct BuilderStatesInfo<Types: NodeType> {
+    // list of all the builder states spawned for a view
     pub vid_commitments: Vec<VidCommitment>,
-    pub block_ids: Vec<(VidCommitment, BuilderCommitment, Types::Time)>,
+    // list of all the proposed blocks for a view
+    pub block_ids: Vec<ProposedBlockId<Types>>,
 }
 
 #[allow(clippy::type_complexity)]
@@ -170,8 +195,9 @@ impl<Types: NodeType> GlobalState<Types> {
         edit.vid_commitments.push(*builder_vid_commitment);
 
         for (parent_hash, block_hash, view_number_built_for) in block_hashes {
-            edit.block_ids
-                .push((parent_hash, block_hash.clone(), view_number_built_for));
+            let proposed_block_id =
+                ProposedBlockId::new(parent_hash, block_hash.clone(), view_number_built_for);
+            edit.block_ids.push(proposed_block_id);
             tracing::debug!(
                 "GC view_num {:?}: block_hash {:?}, deferred to view {:?} ",
                 view_number_built_for,
@@ -195,11 +221,15 @@ impl<Types: NodeType> GlobalState<Types> {
                     // and block_hashes and remove the block_hashes from the block_hash_to_block
 
                     parent_hash_block_hashes_view_num.iter().for_each(
-                        |(parent_hash, block_hash, view_number_built_for)| {
+                        |ProposedBlockId {
+                             parent_commitment: parent_vid_commmitment,
+                             payload_commitment: block_hash,
+                             parent_view: view_number_built_for,
+                         }| {
                             tracing::debug!(
                                 "on_decide_view: {:?}, Removing parent_hash {:?}, block_hash {:?}",
                                 on_decide_view,
-                                parent_hash,
+                                parent_vid_commmitment,
                                 block_hash
                             );
                             self.block_hash_to_block
