@@ -391,9 +391,7 @@ where
                                 message: "No blocks available".to_string(),
                             });
                         }
-                        //async_compatibility_layer::art::async_yield_now().await;
-                        async_compatibility_layer::art::async_sleep(self.max_api_waiting_time / 10)
-                            .await;
+                        async_compatibility_layer::art::async_yield_now().await;
                         continue;
                     } else {
                         tracing::error!(%e, "Channel closed while getting available blocks for parent {:?}", req_msg.requested_vid_commitment);
