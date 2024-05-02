@@ -3072,7 +3072,7 @@ dependencies = [
 [[package]]
 name = "hotshot"
 version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=main#485d6f222b06277623e0f9ea0032587d819f085e"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.47#cd9d329d35376f278ac7ad8cb9f1241847841404"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3117,7 +3117,7 @@ dependencies = [
 [[package]]
 name = "hotshot-builder-api"
 version = "0.1.7"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=main#485d6f222b06277623e0f9ea0032587d819f085e"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.47#cd9d329d35376f278ac7ad8cb9f1241847841404"
 dependencies = [
  "async-trait",
  "clap",
@@ -3135,7 +3135,7 @@ dependencies = [
 
 [[package]]
 name = "hotshot-builder-core"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
@@ -3162,8 +3162,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot-events-service"
-version = "0.1.15"
-source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?branch=nfy/do_not_merge/track_hotshot_main#c9f19e92db0428b4e624e5fde29f2fdb15f6a710"
+version = "0.1.17"
+source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?tag=0.1.17#f2656d3c66627a32a0faf5be59497762d250a812"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
@@ -3188,7 +3188,7 @@ dependencies = [
 [[package]]
 name = "hotshot-example-types"
 version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=main#485d6f222b06277623e0f9ea0032587d819f085e"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.47#cd9d329d35376f278ac7ad8cb9f1241847841404"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3218,7 +3218,7 @@ dependencies = [
 [[package]]
 name = "hotshot-orchestrator"
 version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=main#485d6f222b06277623e0f9ea0032587d819f085e"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.47#cd9d329d35376f278ac7ad8cb9f1241847841404"
 dependencies = [
  "anyhow",
  "async-compatibility-layer",
@@ -3247,7 +3247,7 @@ dependencies = [
 [[package]]
 name = "hotshot-task"
 version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=main#485d6f222b06277623e0f9ea0032587d819f085e"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.47#cd9d329d35376f278ac7ad8cb9f1241847841404"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
@@ -3260,7 +3260,7 @@ dependencies = [
 [[package]]
 name = "hotshot-task-impls"
 version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=main#485d6f222b06277623e0f9ea0032587d819f085e"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.47#cd9d329d35376f278ac7ad8cb9f1241847841404"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3293,7 +3293,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.11"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=main#485d6f222b06277623e0f9ea0032587d819f085e"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.47#cd9d329d35376f278ac7ad8cb9f1241847841404"
 dependencies = [
  "anyhow",
  "ark-bls12-381",
@@ -3345,7 +3345,7 @@ dependencies = [
 [[package]]
 name = "hotshot-web-server"
 version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=main#485d6f222b06277623e0f9ea0032587d819f085e"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.47#cd9d329d35376f278ac7ad8cb9f1241847841404"
 dependencies = [
  "async-compatibility-layer",
  "async-lock 2.8.0",
@@ -4416,7 +4416,7 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=main#485d6f222b06277623e0f9ea0032587d819f085e"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.47#cd9d329d35376f278ac7ad8cb9f1241847841404"
 dependencies = [
  "anyhow",
  "async-compatibility-layer",
