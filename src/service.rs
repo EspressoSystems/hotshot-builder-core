@@ -49,19 +49,19 @@ use std::{fmt::Display, time::Instant};
 use tagged_base64::TaggedBase64;
 use tide_disco::method::ReadState;
 
+#[derive(Debug)]
+pub struct BlockInfo<Types: NodeType> {
+    pub block_payload: Types::BlockPayload,
+    pub metadata: <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
+    pub vid_receiver: Arc<RwLock<WaitAndKeep<(VidCommitment, VidPrecomputeData)>>>,
+    pub offered_fee: u64,
+}
+
 #[allow(clippy::type_complexity)]
 #[derive(Debug)]
 pub struct GlobalState<Types: NodeType> {
     // data store for the blocks
-    pub block_hash_to_block: HashMap<
-        (BuilderCommitment, Types::Time),
-        (
-            Types::BlockPayload,
-            <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
-            Arc<RwLock<WaitAndKeep<(VidCommitment, VidPrecomputeData)>>>,
-            u64, // Fees
-        ),
-    >,
+    pub block_hash_to_block: HashMap<(BuilderCommitment, Types::Time), BlockInfo<Types>>,
 
     // registered builer states
     pub spawned_builder_states:
@@ -129,15 +129,13 @@ impl<Types: NodeType> GlobalState<Types> {
     ) {
         self.block_hash_to_block
             .entry((build_block_info.builder_hash, view_num))
-            .or_insert_with(|| {
-                (
-                    build_block_info.block_payload,
-                    build_block_info.metadata,
-                    Arc::new(RwLock::new(WaitAndKeep::Wait(
-                        build_block_info.vid_receiver,
-                    ))),
-                    build_block_info.offered_fee,
-                )
+            .or_insert_with(|| BlockInfo {
+                block_payload: build_block_info.block_payload,
+                metadata: build_block_info.metadata,
+                vid_receiver: Arc::new(RwLock::new(WaitAndKeep::Wait(
+                    build_block_info.vid_receiver,
+                ))),
+                offered_fee: build_block_info.offered_fee,
             });
 
         // update the builder state to last built block
@@ -465,7 +463,7 @@ where
         let (pub_key, sign_key) = self.builder_keys.clone();
         let view_num = <<Types as NodeType>::Time as ConsensusTime>::new(view_number);
 
-        if let Some(block) = self
+        if let Some(block_info) = self
             .global_state
             .read_arc()
             .await
@@ -474,7 +472,9 @@ where
         {
             // sign over the builder commitment, as the proposer can computer it based on provide block_payload
             // and the metata data
-            let response_block_hash = block.0.builder_commitment(&block.1);
+            let response_block_hash = block_info
+                .block_payload
+                .builder_commitment(&block_info.metadata);
             let signature_over_builder_commitment =
                 <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
                     &sign_key,
@@ -482,8 +482,8 @@ where
                 )
                 .expect("Claim block signing failed");
             let block_data = AvailableBlockData::<Types> {
-                block_payload: block.0.clone(),
-                metadata: block.1.clone(),
+                block_payload: block_info.block_payload.clone(),
+                metadata: block_info.metadata.clone(),
                 signature: signature_over_builder_commitment,
                 sender: pub_key.clone(),
             };
@@ -522,7 +522,7 @@ where
         }
         let (pub_key, sign_key) = self.builder_keys.clone();
         let view_num = <<Types as NodeType>::Time as ConsensusTime>::new(view_number);
-        if let Some(block) = self
+        if let Some(block_info) = self
             .global_state
             .read_arc()
             .await
@@ -530,7 +530,8 @@ where
             .get(&(block_hash.clone(), view_num))
         {
             tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
-            let (vid_commitment, vid_precompute_data) = block.2.write().await.get().await?;
+            let (vid_commitment, vid_precompute_data) =
+                block_info.vid_receiver.write().await.get().await?;
             let signature_over_vid_commitment =
                 <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
                     &sign_key,
@@ -538,9 +539,13 @@ where
                 )
                 .expect("Claim block header input message signing failed");
 
-            let signature_over_fee_info =
-                Types::BuilderSignatureKey::sign_fee(&sign_key, block.3, &block.1, &vid_commitment)
-                    .expect("Claim block header input fee signing failed");
+            let signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
+                &sign_key,
+                block_info.offered_fee,
+                &block_info.metadata,
+                &vid_commitment,
+            )
+            .expect("Claim block header input fee signing failed");
 
             let response = AvailableBlockHeaderInput::<Types> {
                 vid_commitment,
