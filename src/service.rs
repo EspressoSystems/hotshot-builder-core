@@ -57,6 +57,22 @@ pub struct BlockInfo<Types: NodeType> {
     pub offered_fee: u64,
 }
 
+#[derive(Debug)]
+pub struct BuiderStatesInfo<Types: NodeType> {
+    pub vid_commitments: Vec<VidCommitment>,
+    pub block_ids: Vec<(VidCommitment, BuilderCommitment, Types::Time)>,
+}
+
+// impl default for the builderstateinfo
+impl<Types: NodeType> Default for BuiderStatesInfo<Types> {
+    fn default() -> Self {
+        BuiderStatesInfo {
+            vid_commitments: Default::default(),
+            block_ids: Default::default(),
+        }
+    }
+}
+
 #[allow(clippy::type_complexity)]
 #[derive(Debug)]
 pub struct GlobalState<Types: NodeType> {
@@ -72,13 +88,7 @@ pub struct GlobalState<Types: NodeType> {
     pub builder_state_to_last_built_block: HashMap<(VidCommitment, Types::Time), ResponseMessage>,
 
     // scheduled GC by view number
-    pub view_to_cleanup_targets: BTreeMap<
-        Types::Time,
-        (
-            Vec<VidCommitment>,
-            Vec<(VidCommitment, BuilderCommitment, Types::Time)>,
-        ),
-    >,
+    pub view_to_cleanup_targets: BTreeMap<Types::Time, BuiderStatesInfo<Types>>,
 
     pub bootstrap_sender: BroadcastSender<MessageType<Types>>,
 
@@ -163,11 +173,12 @@ impl<Types: NodeType> GlobalState<Types> {
         let edit = self
             .view_to_cleanup_targets
             .entry(cleanup_after_view)
-            .or_insert((Default::default(), Default::default()));
-        edit.0.push(*builder_vid_commitment);
+            .or_insert(BuiderStatesInfo::default());
+
+        edit.vid_commitments.push(*builder_vid_commitment);
 
         for (parent_hash, block_hash, view_number_built_for) in block_hashes {
-            edit.1
+            edit.block_ids
                 .push((parent_hash, block_hash.clone(), view_number_built_for));
             tracing::debug!(
                 "GC view_num {:?}: block_hash {:?}, deferred to view {:?} ",
@@ -180,7 +191,11 @@ impl<Types: NodeType> GlobalState<Types> {
         tracing::debug!("GC for scheduled view {:?}", on_decide_view);
 
         self.view_to_cleanup_targets.retain(
-            |view_num, (_vids, parent_hash_block_hashes_view_num)| {
+            |view_num,
+             BuiderStatesInfo {
+                 vid_commitments: _vids,
+                 block_ids: parent_hash_block_hashes_view_num,
+             }| {
                 if view_num > &on_decide_view {
                     true
                 } else {
