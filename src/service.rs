@@ -58,15 +58,15 @@ pub struct BlockInfo<Types: NodeType> {
 }
 
 #[derive(Debug)]
-pub struct BuiderStatesInfo<Types: NodeType> {
+pub struct BuilderStatesInfo<Types: NodeType> {
     pub vid_commitments: Vec<VidCommitment>,
     pub block_ids: Vec<(VidCommitment, BuilderCommitment, Types::Time)>,
 }
 
 // impl default for the builderstateinfo
-impl<Types: NodeType> Default for BuiderStatesInfo<Types> {
+impl<Types: NodeType> Default for BuilderStatesInfo<Types> {
     fn default() -> Self {
-        BuiderStatesInfo {
+        BuilderStatesInfo {
             vid_commitments: Default::default(),
             block_ids: Default::default(),
         }
@@ -88,7 +88,7 @@ pub struct GlobalState<Types: NodeType> {
     pub builder_state_to_last_built_block: HashMap<(VidCommitment, Types::Time), ResponseMessage>,
 
     // scheduled GC by view number
-    pub view_to_cleanup_targets: BTreeMap<Types::Time, BuiderStatesInfo<Types>>,
+    pub view_to_cleanup_targets: BTreeMap<Types::Time, BuilderStatesInfo<Types>>,
 
     pub bootstrap_sender: BroadcastSender<MessageType<Types>>,
 
@@ -173,7 +173,7 @@ impl<Types: NodeType> GlobalState<Types> {
         let edit = self
             .view_to_cleanup_targets
             .entry(cleanup_after_view)
-            .or_insert(BuiderStatesInfo::default());
+            .or_default();
 
         edit.vid_commitments.push(*builder_vid_commitment);
 
@@ -192,7 +192,7 @@ impl<Types: NodeType> GlobalState<Types> {
 
         self.view_to_cleanup_targets.retain(
             |view_num,
-             BuiderStatesInfo {
+             BuilderStatesInfo {
                  vid_commitments: _vids,
                  block_ids: parent_hash_block_hashes_view_num,
              }| {
