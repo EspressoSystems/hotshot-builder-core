@@ -16,10 +16,10 @@ clap = { version = "4.4", features = ["derive", "env"] }
 committable = "0.2"
 derivative = "2.2"
 futures = "0.3"
-hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.48" }
-hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.48" }
-hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.18" }
-hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.48" }
+hotshot = { git = "https://github.com/EspressoSystems/hotshot", branch = "tbro/instance_state-by-ref" }
+hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", branch = "tbro/instance_state-by-ref" }
+hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", branch = "tbro/update-hotshot" }
+hotshot-types = { git = "https://github.com/EspressoSystems/hotshot", branch = "tbro/instance_state-by-ref" }
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
 snafu = "0.8"
