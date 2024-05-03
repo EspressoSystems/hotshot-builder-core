@@ -129,8 +129,9 @@ pub struct BuilderState<TYPES: NodeType> {
     /// Included txs set while building blocks
     pub included_txns: HashSet<Commitment<TYPES::Transaction>>,
 
-    /// da_proposal_payload_commit to da_proposal
-    pub da_proposal_payload_commit_to_da_proposal: HashMap<BuilderCommitment, DAProposal<TYPES>>,
+    /// da_proposal_payload_commit to (da_proposal, node_count)
+    pub da_proposal_payload_commit_to_da_proposal:
+        HashMap<BuilderCommitment, (DAProposal<TYPES>, usize)>,
 
     /// quorum_proposal_payload_commit to quorum_proposal
     pub quorum_proposal_payload_commit_to_quorum_proposal:
@@ -207,6 +208,7 @@ pub trait BuilderProgress<TYPES: NodeType> {
         da_proposal: DAProposal<TYPES>,
         quorum_proposal: QuorumProposal<TYPES>,
         leader: TYPES::SignatureKey,
+        num_nodes: usize,
         req_sender: BroadcastSender<MessageType<TYPES>>,
     );
 
@@ -242,7 +244,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 // get the current timestamp in nanoseconds; it used for ordering the transactions
                 let tx_timestamp = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or(Duration::new(0, 0))
                     .as_nanos();
 
                 // insert into both timestamp_tx and tx_hash_tx maps
@@ -273,7 +275,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 // get the current timestamp in nanoseconds
                 let tx_timestamp = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or(Duration::new(0, 0))
                     .as_nanos();
 
                 // insert into both timestamp_tx and tx_hash_tx maps
@@ -338,9 +340,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // generate the vid commitment; num nodes are received through hotshot api in service.rs and passed along with message onto channel
         let total_nodes = da_msg.total_nodes;
 
-        // set the total nodes required for the VID computation // later required in the build_block
-        self.total_nodes = NonZeroUsize::new(total_nodes).unwrap();
-
         // form a block payload from the encoded transactions
         let block_payload =
             <TYPES::BlockPayload as BlockPayload>::from_bytes(&encoded_txns, &metadata);
@@ -383,7 +382,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
                     let (req_sender, req_receiver) = broadcast(self.req_receiver.capacity());
                     self.clone_with_receiver(req_receiver)
-                        .spawn_clone(da_proposal_data, qc_proposal_data, sender, req_sender)
+                        .spawn_clone(
+                            da_proposal_data,
+                            qc_proposal_data,
+                            sender,
+                            total_nodes,
+                            req_sender,
+                        )
                         .await;
 
                     // if bootstrap in spawning it, then empty out its txns (part of GC)
@@ -395,7 +400,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     tracing::debug!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers");
                 }
             } else {
-                e.insert(da_proposal_data);
+                e.insert((da_proposal_data, total_nodes));
             }
         } else {
             tracing::debug!("Payload commitment already exists in the da_proposal_payload_commit_to_da_proposal hashmap, so ignoring it");
@@ -462,7 +467,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 .da_proposal_payload_commit_to_da_proposal
                 .entry(payload_builder_commitment.clone())
             {
-                let da_proposal_data = da_proposal_data.remove();
+                let (da_proposal_data, total_nodes) = da_proposal_data.remove();
 
                 // remove the entry from the da_proposal_payload_commit_to_da_proposal hashmap
                 self.da_proposal_payload_commit_to_da_proposal
@@ -477,7 +482,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
                     let (req_sender, req_receiver) = broadcast(self.req_receiver.capacity());
                     self.clone_with_receiver(req_receiver)
-                        .spawn_clone(da_proposal_data, qc_proposal_data, sender, req_sender)
+                        .spawn_clone(
+                            da_proposal_data,
+                            qc_proposal_data,
+                            sender,
+                            total_nodes,
+                            req_sender,
+                        )
                         .await;
 
                     // if handled by bootstrap, then empty out its txns (part of GC)
@@ -552,7 +563,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 });
 
                 self.da_proposal_payload_commit_to_da_proposal.retain(
-                    |_builder_commitment, da_proposal| {
+                    |_builder_commitment, (da_proposal, _node_count)| {
                         da_proposal.view_number > to_be_garbage_collected_view_num
                     },
                 );
@@ -591,8 +602,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         da_proposal: DAProposal<TYPES>,
         quorum_proposal: QuorumProposal<TYPES>,
         _leader: TYPES::SignatureKey,
+        total_nodes: usize,
         req_sender: BroadcastSender<MessageType<TYPES>>,
     ) {
+        self.total_nodes = NonZeroUsize::new(total_nodes).unwrap_or(self.total_nodes);
         self.built_from_proposed_block.view_number = quorum_proposal.view_number;
         self.built_from_proposed_block.vid_commitment =
             quorum_proposal.block_header.payload_commitment();
@@ -692,7 +705,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 requested_view_number,
             ));
 
-            let encoded_txns: Vec<u8> = payload.encode().unwrap().to_vec();
+            let encoded_txns: Vec<u8> = payload.encode().ok()?.to_vec();
             let block_size: u64 = encoded_txns.len() as u64;
             let offered_fee: u64 = self.base_fee * block_size;
 
@@ -769,14 +782,25 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     );
 
                     // ... and finally, send the response
-                    req.response_channel.send(response_msg).await.unwrap();
-
-                    tracing::info!(
-                        "Builder {:?} Sent response to the request{:?} with builder hash {:?}",
-                        self.built_from_proposed_block.view_number,
-                        req,
-                        builder_hash
-                    );
+                    match req.response_channel.send(response_msg).await {
+                        Ok(_sent) => {
+                            tracing::info!(
+                                "Builder {:?} Sent response to the request{:?} with builder hash {:?}",
+                                self.built_from_proposed_block.view_number,
+                                req,
+                                builder_hash
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Builder {:?} failed to send response to the request{:?} with builder hash {:?}, ERRROR {:?}",
+                                self.built_from_proposed_block.view_number,
+                                req,
+                                builder_hash,
+                                e
+                            );
+                        }
+                    }
                 }
                 None => {
                     tracing::warn!("No response to send");
@@ -971,12 +995,8 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             da_proposal_receiver: self.da_proposal_receiver.clone(),
             qc_receiver: self.qc_receiver.clone(),
             req_receiver,
-            da_proposal_payload_commit_to_da_proposal: self
-                .da_proposal_payload_commit_to_da_proposal
-                .clone(),
-            quorum_proposal_payload_commit_to_quorum_proposal: self
-                .quorum_proposal_payload_commit_to_quorum_proposal
-                .clone(),
+            da_proposal_payload_commit_to_da_proposal: HashMap::new(),
+            quorum_proposal_payload_commit_to_quorum_proposal: HashMap::new(),
             global_state: self.global_state.clone(),
             builder_commitments: self.builder_commitments.clone(),
             total_nodes: self.total_nodes,
