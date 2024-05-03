@@ -1,6 +1,6 @@
 [package]
 name = "hotshot-builder-core"
-version = "0.1.15"
+version = "0.1.16"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -16,10 +16,10 @@ clap = { version = "4.4", features = ["derive", "env"] }
 committable = "0.2"
 derivative = "2.2"
 futures = "0.3"
-hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.47" }
-hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.47" }
-hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.17" }
-hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.47" }
+hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.48" }
+hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.48" }
+hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.18" }
+hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.48" }
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
 snafu = "0.8"
@@ -30,4 +30,4 @@ tracing = "0.1"
 vbs = "0.1"
 
 [dev-dependencies]
-hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.47" }
+hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.48" }
