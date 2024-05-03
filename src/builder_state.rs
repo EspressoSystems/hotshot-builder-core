@@ -705,7 +705,17 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 requested_view_number,
             ));
 
-            let encoded_txns: Vec<u8> = payload.encode().ok()?.to_vec();
+            let encoded_txns: Vec<u8> = payload
+                .encode()
+                .inspect_err(|e| {
+                    tracing::error!(
+                        "Failed to encode block payload for parent {:?}@{:?}: {e}",
+                        matching_vid,
+                        requested_view_number
+                    )
+                })
+                .ok()?
+                .to_vec();
             let block_size: u64 = encoded_txns.len() as u64;
             let offered_fee: u64 = self.base_fee * block_size;
 
