@@ -85,8 +85,8 @@
                 <span class="kw">let </span>got = fut.recv().<span class="kw">await</span>.map_err(|<span class="kw">_</span>| BuildError::Error {
                     message: <span class="string">"failed to resolve VidCommitment from channel"</span>.to_string(),
                 });
-                <span class="kw">if </span>got.is_ok() {
-                    <span class="kw">let </span><span class="kw-2">mut </span>replace = WaitAndKeep::Keep(got.clone().unwrap());
+                <span class="kw">if let </span><span class="prelude-val">Ok</span>(got) = <span class="kw-2">&amp;</span>got {
+                    <span class="kw">let </span><span class="kw-2">mut </span>replace = WaitAndKeep::Keep(got.clone());
                     core::mem::swap(<span class="self">self</span>, <span class="kw-2">&amp;mut </span>replace);
                 }
                 got

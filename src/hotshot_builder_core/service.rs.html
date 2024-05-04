@@ -942,6 +942,39 @@
 <a href="#940" id="940">940</a>
 <a href="#941" id="941">941</a>
 <a href="#942" id="942">942</a>
+<a href="#943" id="943">943</a>
+<a href="#944" id="944">944</a>
+<a href="#945" id="945">945</a>
+<a href="#946" id="946">946</a>
+<a href="#947" id="947">947</a>
+<a href="#948" id="948">948</a>
+<a href="#949" id="949">949</a>
+<a href="#950" id="950">950</a>
+<a href="#951" id="951">951</a>
+<a href="#952" id="952">952</a>
+<a href="#953" id="953">953</a>
+<a href="#954" id="954">954</a>
+<a href="#955" id="955">955</a>
+<a href="#956" id="956">956</a>
+<a href="#957" id="957">957</a>
+<a href="#958" id="958">958</a>
+<a href="#959" id="959">959</a>
+<a href="#960" id="960">960</a>
+<a href="#961" id="961">961</a>
+<a href="#962" id="962">962</a>
+<a href="#963" id="963">963</a>
+<a href="#964" id="964">964</a>
+<a href="#965" id="965">965</a>
+<a href="#966" id="966">966</a>
+<a href="#967" id="967">967</a>
+<a href="#968" id="968">968</a>
+<a href="#969" id="969">969</a>
+<a href="#970" id="970">970</a>
+<a href="#971" id="971">971</a>
+<a href="#972" id="972">972</a>
+<a href="#973" id="973">973</a>
+<a href="#974" id="974">974</a>
+<a href="#975" id="975">975</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::SystemContextHandle,
@@ -1217,6 +1250,11 @@
         <span class="kw">if let </span><span class="prelude-val">Some</span>(channel) = <span class="self">self</span>.spawned_builder_states.get(key) {
             channel
         } <span class="kw">else </span>{
+            <span class="macro">tracing::info!</span>(
+                <span class="string">"failed to recover builder for parent {:?}@{:?}, using bootstrap"</span>,
+                key.<span class="number">0</span>,
+                key.<span class="number">1
+            </span>);
             <span class="kw-2">&amp;</span><span class="self">self</span>.bootstrap_sender
         }
     }
@@ -1323,23 +1361,29 @@ Handling Builder API responses
             requested_view_number: view_number,
             response_channel: response_sender,
         };
-        <span class="kw">let </span>response_received = <span class="kw">if </span>just_return_with_this.is_some() {
-            <span class="prelude-val">Ok</span>(just_return_with_this.unwrap().clone())
+        <span class="kw">let </span>response_received = <span class="kw">if let </span><span class="prelude-val">Some</span>(response_cached) = just_return_with_this {
+            <span class="prelude-val">Ok</span>(response_cached)
         } <span class="kw">else </span>{
             <span class="kw">let </span>timeout_after = Instant::now() + <span class="self">self</span>.max_api_waiting_time;
             <span class="kw">let </span>check_duration = <span class="self">self</span>.max_api_waiting_time / <span class="number">10</span>;
 
             <span class="comment">// broadcast the request to the builder states
-            </span><span class="self">self</span>.global_state
+            </span><span class="kw">if let </span><span class="prelude-val">Err</span>(e) = <span class="self">self
+                </span>.global_state
                 .read_arc()
                 .<span class="kw">await
                 </span>.get_channel_for_builder_or_bootstrap(<span class="kw-2">&amp;</span>(<span class="kw-2">*</span>for_parent, view_num))
                 .broadcast(MessageType::RequestMessage(req_msg.clone()))
                 .<span class="kw">await
-                </span>.unwrap();
+            </span>{
+                <span class="macro">tracing::warn!</span>(
+                    <span class="string">"Error {e} sending get_available_blocks request for parent {:?}@{view_number}"</span>,
+                    req_msg.requested_vid_commitment
+                );
+            }
 
             <span class="macro">tracing::debug!</span>(
-                <span class="string">"Waiting for response for parent {:?}"</span>,
+                <span class="string">"Waiting for response for get_available_blocks with parent {:?}@{view_number}"</span>,
                 req_msg.requested_vid_commitment
             );
 
@@ -1645,10 +1689,10 @@ Running Non-Permissioned Builder Service
     };
 
     <span class="kw">loop </span>{
-        <span class="kw">let </span>event = subscribed_events.next().<span class="kw">await</span>.unwrap();
+        <span class="kw">let </span>event = subscribed_events.next().<span class="kw">await</span>;
         <span class="comment">//tracing::debug!("Builder Event received from HotShot: {:?}", event);
         </span><span class="kw">match </span>event {
-            <span class="prelude-val">Ok</span>(event) =&gt; {
+            <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(event)) =&gt; {
                 <span class="kw">match </span>event.event {
                     BuilderEventType::HotshotError { error } =&gt; {
                         <span class="macro">tracing::error!</span>(<span class="string">"Error event in HotShot: {:?}"</span>, error);
@@ -1681,7 +1725,7 @@ Running Non-Permissioned Builder Service
                             proposal,
                             sender,
                             leader,
-                            NonZeroUsize::new(total_nodes).unwrap(),
+                            NonZeroUsize::new(total_nodes).unwrap_or(NonZeroUsize::MIN),
                         )
                         .<span class="kw">await</span>;
                     }
@@ -1696,8 +1740,11 @@ Running Non-Permissioned Builder Service
                     }
                 }
             }
-            <span class="prelude-val">Err</span>(e) =&gt; {
+            <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(e)) =&gt; {
                 <span class="macro">tracing::error!</span>(<span class="string">"Error in the event stream: {:?}"</span>, e);
+            }
+            <span class="prelude-val">None </span>=&gt; {
+                <span class="macro">tracing::error!</span>(<span class="string">"Event stream ended"</span>);
             }
         }
     }
@@ -1801,14 +1848,20 @@ Utility functions to handle the hotshot events
             sender: leader,
             total_nodes: total_nodes.into(),
         };
+        <span class="kw">let </span>view_number = da_msg.proposal.data.view_number;
         <span class="macro">tracing::debug!</span>(
-            <span class="string">"Sending DA proposal to the builder states for view number {:?}"</span>,
-            da_msg.proposal.data.view_number
+            <span class="string">"Sending DA proposal to the builder states for view {:?}"</span>,
+            view_number
         );
-        da_channel_sender
+        <span class="kw">if let </span><span class="prelude-val">Err</span>(e) = da_channel_sender
             .broadcast(MessageType::DAProposalMessage(da_msg))
             .<span class="kw">await
-            </span>.unwrap();
+        </span>{
+            <span class="macro">tracing::warn!</span>(
+                <span class="string">"Error {e}, failed to send DA proposal to builder states for view {:?}"</span>,
+                view_number
+            );
+        }
     } <span class="kw">else </span>{
         <span class="macro">tracing::error!</span>(<span class="string">"Validation Failure on DAProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}"</span>, da_proposal.data.view_number, leader, sender);
     }
@@ -1834,14 +1887,20 @@ Utility functions to handle the hotshot events
             proposal: qc_proposal,
             sender: leader,
         };
+        <span class="kw">let </span>view_number = qc_msg.proposal.data.view_number;
         <span class="macro">tracing::debug!</span>(
             <span class="string">"Sending QC proposal to the builder states for view {:?}"</span>,
-            qc_msg.proposal.data.view_number
+            view_number
         );
-        qc_channel_sender
+        <span class="kw">if let </span><span class="prelude-val">Err</span>(e) = qc_channel_sender
             .broadcast(MessageType::QCMessage(qc_msg))
             .<span class="kw">await
-            </span>.unwrap();
+        </span>{
+            <span class="macro">tracing::warn!</span>(
+                <span class="string">"Error {e}, failed to send QC proposal to builder states for view {:?}"</span>,
+                view_number
+            );
+        }
     } <span class="kw">else </span>{
         <span class="macro">tracing::error!</span>(<span class="string">"Validation Failure on QCProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}"</span>, qc_proposal.data.view_number, leader, sender);
     }
@@ -1857,13 +1916,18 @@ Utility functions to handle the hotshot events
         block_size,
     };
     <span class="macro">tracing::debug!</span>(
-        <span class="string">"Sending Decide event to the builder states for view {:?}"</span>,
+        <span class="string">"Sending Decide event to builder states for view {:?}"</span>,
         latest_decide_view_number
     );
-    decide_channel_sender
+    <span class="kw">if let </span><span class="prelude-val">Err</span>(e) = decide_channel_sender
         .broadcast(MessageType::DecideMessage(decide_msg))
         .<span class="kw">await
-        </span>.unwrap();
+    </span>{
+        <span class="macro">tracing::warn!</span>(
+            <span class="string">"Error {e}, failed to Decide event to builder states for view {:?}"</span>,
+            latest_decide_view_number
+        );
+    }
 }
 
 <span class="kw">async fn </span>handle_tx_event&lt;Types: NodeType&gt;(
@@ -1879,9 +1943,11 @@ Utility functions to handle the hotshot events
         <span class="string">"Sending txn_count ({:?}) transactions to the builder states"</span>,
         tx_msg.txns.len()
     );
-    tx_channel_sender
+    <span class="kw">if let </span><span class="prelude-val">Err</span>(e) = tx_channel_sender
         .broadcast(MessageType::TransactionMessage(tx_msg))
         .<span class="kw">await
-        </span>.unwrap();
+    </span>{
+        <span class="macro">tracing::warn!</span>(<span class="string">"Error {e}, failed to send transactions to the builder states"</span>);
+    }
 }
 </code></pre></div></section></main></body></html>
