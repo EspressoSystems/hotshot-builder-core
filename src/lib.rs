@@ -36,8 +36,8 @@ impl<T: Clone> WaitAndKeep<T> {
                 let got = fut.recv().await.map_err(|_| BuildError::Error {
                     message: "failed to resolve VidCommitment from channel".to_string(),
                 });
-                if got.is_ok() {
-                    let mut replace = WaitAndKeep::Keep(got.clone().unwrap());
+                if let Ok(got) = &got {
+                    let mut replace = WaitAndKeep::Keep(got.clone());
                     core::mem::swap(self, &mut replace);
                 }
                 got

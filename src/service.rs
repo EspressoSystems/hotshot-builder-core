@@ -273,6 +273,11 @@ impl<Types: NodeType> GlobalState<Types> {
         if let Some(channel) = self.spawned_builder_states.get(key) {
             channel
         } else {
+            tracing::info!(
+                "failed to recover builder for parent {:?}@{:?}, using bootstrap",
+                key.0,
+                key.1
+            );
             &self.bootstrap_sender
         }
     }
@@ -379,23 +384,29 @@ where
             requested_view_number: view_number,
             response_channel: response_sender,
         };
-        let response_received = if just_return_with_this.is_some() {
-            Ok(just_return_with_this.unwrap().clone())
+        let response_received = if let Some(response_cached) = just_return_with_this {
+            Ok(response_cached)
         } else {
             let timeout_after = Instant::now() + self.max_api_waiting_time;
             let check_duration = self.max_api_waiting_time / 10;
 
             // broadcast the request to the builder states
-            self.global_state
+            if let Err(e) = self
+                .global_state
                 .read_arc()
                 .await
                 .get_channel_for_builder_or_bootstrap(&(*for_parent, view_num))
                 .broadcast(MessageType::RequestMessage(req_msg.clone()))
                 .await
-                .unwrap();
+            {
+                tracing::warn!(
+                    "Error {e} sending get_available_blocks request for parent {:?}@{view_number}",
+                    req_msg.requested_vid_commitment
+                );
+            }
 
             tracing::debug!(
-                "Waiting for response for parent {:?}",
+                "Waiting for response for get_available_blocks with parent {:?}@{view_number}",
                 req_msg.requested_vid_commitment
             );
 
@@ -701,10 +712,10 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
     };
 
     loop {
-        let event = subscribed_events.next().await.unwrap();
+        let event = subscribed_events.next().await;
         //tracing::debug!("Builder Event received from HotShot: {:?}", event);
         match event {
-            Ok(event) => {
+            Some(Ok(event)) => {
                 match event.event {
                     BuilderEventType::HotshotError { error } => {
                         tracing::error!("Error event in HotShot: {:?}", error);
@@ -737,7 +748,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                             proposal,
                             sender,
                             leader,
-                            NonZeroUsize::new(total_nodes).unwrap(),
+                            NonZeroUsize::new(total_nodes).unwrap_or(NonZeroUsize::MIN),
                         )
                         .await;
                     }
@@ -752,8 +763,11 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                     }
                 }
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 tracing::error!("Error in the event stream: {:?}", e);
+            }
+            None => {
+                tracing::error!("Event stream ended");
             }
         }
     }
@@ -857,14 +871,20 @@ async fn handle_da_event<Types: NodeType>(
             sender: leader,
             total_nodes: total_nodes.into(),
         };
+        let view_number = da_msg.proposal.data.view_number;
         tracing::debug!(
-            "Sending DA proposal to the builder states for view number {:?}",
-            da_msg.proposal.data.view_number
+            "Sending DA proposal to the builder states for view {:?}",
+            view_number
         );
-        da_channel_sender
+        if let Err(e) = da_channel_sender
             .broadcast(MessageType::DAProposalMessage(da_msg))
             .await
-            .unwrap();
+        {
+            tracing::warn!(
+                "Error {e}, failed to send DA proposal to builder states for view {:?}",
+                view_number
+            );
+        }
     } else {
         tracing::error!("Validation Failure on DAProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", da_proposal.data.view_number, leader, sender);
     }
@@ -890,14 +910,20 @@ async fn handle_qc_event<Types: NodeType>(
             proposal: qc_proposal,
             sender: leader,
         };
+        let view_number = qc_msg.proposal.data.view_number;
         tracing::debug!(
             "Sending QC proposal to the builder states for view {:?}",
-            qc_msg.proposal.data.view_number
+            view_number
         );
-        qc_channel_sender
+        if let Err(e) = qc_channel_sender
             .broadcast(MessageType::QCMessage(qc_msg))
             .await
-            .unwrap();
+        {
+            tracing::warn!(
+                "Error {e}, failed to send QC proposal to builder states for view {:?}",
+                view_number
+            );
+        }
     } else {
         tracing::error!("Validation Failure on QCProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", qc_proposal.data.view_number, leader, sender);
     }
@@ -913,13 +939,18 @@ async fn handle_decide_event<Types: NodeType>(
         block_size,
     };
     tracing::debug!(
-        "Sending Decide event to the builder states for view {:?}",
+        "Sending Decide event to builder states for view {:?}",
         latest_decide_view_number
     );
-    decide_channel_sender
+    if let Err(e) = decide_channel_sender
         .broadcast(MessageType::DecideMessage(decide_msg))
         .await
-        .unwrap();
+    {
+        tracing::warn!(
+            "Error {e}, failed to Decide event to builder states for view {:?}",
+            latest_decide_view_number
+        );
+    }
 }
 
 async fn handle_tx_event<Types: NodeType>(
@@ -935,8 +966,10 @@ async fn handle_tx_event<Types: NodeType>(
         "Sending txn_count ({:?}) transactions to the builder states",
         tx_msg.txns.len()
     );
-    tx_channel_sender
+    if let Err(e) = tx_channel_sender
         .broadcast(MessageType::TransactionMessage(tx_msg))
         .await
-        .unwrap();
+    {
+        tracing::warn!("Error {e}, failed to send transactions to the builder states");
+    }
 }
