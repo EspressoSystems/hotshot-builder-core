@@ -1297,17 +1297,19 @@ checksum = "d32a725bc159af97c3e629873bb9f88fb8cf8a4867175f76dc987815ea07c83b"
 [[package]]
 name = "cdn-broker"
 version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.2.5#c4208513280bd9beeb151e20e44179f2d3cc690a"
+source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.3#bde96dbc21f4c9fde116606cb580db0ab759f44f"
 dependencies = [
  "async-std",
  "cdn-proto",
  "clap",
+ "console-subscriber",
  "dashmap",
  "derivative",
  "jf-primitives 0.4.0-pre.0",
  "lazy_static",
  "local-ip-address",
  "parking_lot",
+ "portpicker",
  "prometheus",
  "rand 0.8.5",
  "rkyv",
@@ -1319,7 +1321,7 @@ dependencies = [
 [[package]]
 name = "cdn-client"
 version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.2.5#c4208513280bd9beeb151e20e44179f2d3cc690a"
+source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.3#bde96dbc21f4c9fde116606cb580db0ab759f44f"
 dependencies = [
  "async-std",
  "cdn-proto",
@@ -1334,7 +1336,7 @@ dependencies = [
 [[package]]
 name = "cdn-marshal"
 version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.2.5#c4208513280bd9beeb151e20e44179f2d3cc690a"
+source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.3#bde96dbc21f4c9fde116606cb580db0ab759f44f"
 dependencies = [
  "async-std",
  "cdn-proto",
@@ -1348,7 +1350,7 @@ dependencies = [
 [[package]]
 name = "cdn-proto"
 version = "0.1.0"
-source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.2.5#c4208513280bd9beeb151e20e44179f2d3cc690a"
+source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.3#bde96dbc21f4c9fde116606cb580db0ab759f44f"
 dependencies = [
  "anyhow",
  "ark-serialize",
@@ -1360,7 +1362,6 @@ dependencies = [
  "lazy_static",
  "mnemonic",
  "mockall",
- "parking_lot",
  "pem",
  "prometheus",
  "quinn",
@@ -3072,7 +3073,7 @@ dependencies = [
 [[package]]
 name = "hotshot"
 version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.48#136dd95096528dfdaf3672b17e2d7bfcb6a581d7"
+source = "git+https://github.com/EspressoSystems/hotshot?tag=0.5.49#6d293ae9b71c0b2433704f97c15c4bb77135e9b6"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3097,7 +3098,6 @@ dependencies = [
  "hotshot-task",
  "hotshot-task-impls",
  "hotshot-types",
- "hotshot-web-server",
  "jf-primitives 0.4.4",
  "libp2p-identity",
  "libp2p-networking",
@@ -3117,7 +3117,7 @@ dependencies = [
 [[package]]
 name = "hotshot-builder-api"
 version = "0.1.7"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.48#136dd95096528dfdaf3672b17e2d7bfcb6a581d7"
+source = "git+https://github.com/EspressoSystems/hotshot?tag=0.5.49#6d293ae9b71c0b2433704f97c15c4bb77135e9b6"
 dependencies = [
  "async-trait",
  "clap",
@@ -3164,7 +3164,7 @@ dependencies = [
 [[package]]
 name = "hotshot-events-service"
 version = "0.1.18"
-source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?tag=0.1.18#fb32c7c0f12e571436ec462c48ad2938017f9f8b"
+source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?branch=tbro/update-hotshot#370f1b46ffcc49c991abb8aa1e03957875c8af1c"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
@@ -3189,7 +3189,7 @@ dependencies = [
 [[package]]
 name = "hotshot-example-types"
 version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.48#136dd95096528dfdaf3672b17e2d7bfcb6a581d7"
+source = "git+https://github.com/EspressoSystems/hotshot?tag=0.5.49#6d293ae9b71c0b2433704f97c15c4bb77135e9b6"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3219,7 +3219,7 @@ dependencies = [
 [[package]]
 name = "hotshot-orchestrator"
 version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.48#136dd95096528dfdaf3672b17e2d7bfcb6a581d7"
+source = "git+https://github.com/EspressoSystems/hotshot?tag=0.5.49#6d293ae9b71c0b2433704f97c15c4bb77135e9b6"
 dependencies = [
  "anyhow",
  "async-compatibility-layer",
@@ -3248,7 +3248,7 @@ dependencies = [
 [[package]]
 name = "hotshot-task"
 version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.48#136dd95096528dfdaf3672b17e2d7bfcb6a581d7"
+source = "git+https://github.com/EspressoSystems/hotshot?tag=0.5.49#6d293ae9b71c0b2433704f97c15c4bb77135e9b6"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
@@ -3261,7 +3261,7 @@ dependencies = [
 [[package]]
 name = "hotshot-task-impls"
 version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.48#136dd95096528dfdaf3672b17e2d7bfcb6a581d7"
+source = "git+https://github.com/EspressoSystems/hotshot?tag=0.5.49#6d293ae9b71c0b2433704f97c15c4bb77135e9b6"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3294,7 +3294,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.11"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.48#136dd95096528dfdaf3672b17e2d7bfcb6a581d7"
+source = "git+https://github.com/EspressoSystems/hotshot?tag=0.5.49#6d293ae9b71c0b2433704f97c15c4bb77135e9b6"
 dependencies = [
  "anyhow",
  "ark-bls12-381",
@@ -3340,25 +3340,6 @@ dependencies = [
  "tracing",
  "typenum",
  "url",
- "vbs",
-]
-
-[[package]]
-name = "hotshot-web-server"
-version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.48#136dd95096528dfdaf3672b17e2d7bfcb6a581d7"
-dependencies = [
- "async-compatibility-layer",
- "async-lock 2.8.0",
- "async-std",
- "clap",
- "futures",
- "hotshot-types",
- "rand 0.8.5",
- "tide-disco",
- "tokio",
- "toml",
- "tracing",
  "vbs",
 ]
 
@@ -4417,7 +4398,7 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.48#136dd95096528dfdaf3672b17e2d7bfcb6a581d7"
+source = "git+https://github.com/EspressoSystems/hotshot?tag=0.5.49#6d293ae9b71c0b2433704f97c15c4bb77135e9b6"
 dependencies = [
  "anyhow",
  "async-compatibility-layer",
