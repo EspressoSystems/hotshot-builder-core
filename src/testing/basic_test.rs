@@ -169,7 +169,7 @@ mod tests {
 
             let (block_payload, metadata) = <TestBlockPayload as BlockPayload>::from_transactions(
                 vec![tx.clone()],
-                Arc::new(TestInstanceState {}),
+                &TestInstanceState {},
             )
             .unwrap();
 
