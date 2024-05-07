@@ -564,7 +564,7 @@
 
             </span><span class="kw">let </span>(block_payload, metadata) = &lt;TestBlockPayload <span class="kw">as </span>BlockPayload&gt;::from_transactions(
                 <span class="macro">vec!</span>[tx.clone()],
-                Arc::new(TestInstanceState {}),
+                <span class="kw-2">&amp;</span>TestInstanceState {},
             )
             .unwrap();
 
