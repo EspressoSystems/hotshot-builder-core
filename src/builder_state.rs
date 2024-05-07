@@ -5,7 +5,6 @@ use hotshot_types::{
     traits::{
         block_contents::precompute_vid_commitment,
         node_implementation::{ConsensusTime, NodeType},
-        states::InstanceState,
     },
     utils::BuilderCommitment,
     vid::{VidCommitment, VidPrecomputeData},
@@ -181,7 +180,7 @@ pub struct BuilderState<TYPES: NodeType> {
     pub base_fee: u64,
 
     /// instance state to enfoce max_block_size
-    pub instance_state: Arc<dyn InstanceState>,
+    pub instance_state: Arc<TYPES::InstanceState>,
 }
 
 /// Trait to hold the helper functions for the builder
@@ -692,7 +691,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     .get(tx_hash)
                     .map(|(_ts, tx, _source)| tx.clone())
             }),
-            self.instance_state.clone(),
+            &self.instance_state,
         ) {
             let builder_hash = payload.builder_commitment(&metadata);
             // count the number of txns
@@ -969,7 +968,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         buffer_view_num_count: u64,
         maximize_txn_capture_timeout: Duration,
         base_fee: u64,
-        instance_state: Arc<dyn InstanceState>,
+        instance_state: Arc<TYPES::InstanceState>,
     ) -> Self {
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
