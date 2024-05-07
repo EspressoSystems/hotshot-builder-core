@@ -1,25 +1,20 @@
-pub use hotshot::traits::election::static_committee::GeneralStaticCommittee;
-pub use hotshot_types::{
-    data::{DAProposal, Leaf, QuorumProposal, ViewNumber},
-    message::Proposal,
-    signature_key::{BLSPrivKey, BLSPubKey},
-    simple_certificate::{QuorumCertificate, SimpleCertificate, SuccessThreshold},
-    traits::{
-        block_contents::BlockPayload,
-        node_implementation::{ConsensusTime, NodeType},
-    },
-};
-
-pub use crate::builder_state::{BuilderProgress, BuilderState, MessageType, ResponseMessage};
-pub use async_broadcast::{
-    broadcast, Receiver as BroadcastReceiver, RecvError, Sender as BroadcastSender, TryRecvError,
-};
 /// The following tests are performed:
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
+    use hotshot::traits::election::static_committee::GeneralStaticCommittee;
+    use hotshot_types::{
+        data::{DAProposal, Leaf, QuorumProposal, ViewNumber},
+        message::Proposal,
+        signature_key::BLSPubKey,
+        simple_certificate::{QuorumCertificate, SimpleCertificate, SuccessThreshold},
+        traits::{
+            block_contents::BlockPayload,
+            node_implementation::{ConsensusTime, NodeType},
+        },
+    };
 
+    use crate::builder_state::{BuilderProgress, BuilderState, MessageType, ResponseMessage};
+    use async_broadcast::broadcast;
     use async_compatibility_layer::channel::unbounded;
     use async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
     use hotshot::types::SignatureKey;
@@ -30,6 +25,7 @@ mod tests {
         utils::BuilderCommitment,
         vid::VidCommitment,
     };
+    use std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
 
     use hotshot_example_types::{
         block_types::{TestBlockHeader, TestBlockPayload, TestMetadata, TestTransaction},
