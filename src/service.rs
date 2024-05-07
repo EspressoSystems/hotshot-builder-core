@@ -29,6 +29,7 @@ use crate::builder_state::{
 };
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use crate::WaitAndKeep;
+use anyhow::anyhow;
 use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
 use async_compatibility_layer::{art::async_timeout, channel::unbounded};
@@ -671,7 +672,9 @@ async fn connect_to_events_service<Types: NodeType>(
         hotshot_events_api_url.clone(),
     );
 
-    assert!(client.connect(None).await);
+    if !(client.connect(None).await) {
+        return None;
+    }
 
     tracing::info!("Builder client connected to the hotshot events api");
 
@@ -680,7 +683,7 @@ async fn connect_to_events_service<Types: NodeType>(
         .socket("hotshot-events/events")
         .subscribe::<BuilderEvent<Types>>()
         .await
-        .unwrap();
+        .ok()?;
 
     // handle the startup event at the start
     let membership = if let Some(Ok(event)) = subscribed_events.next().await {
@@ -733,7 +736,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
 
     // Url to (re)connect to for the events stream
     hotshot_events_api_url: Url,
-) {
+) -> Result<(), anyhow::Error> {
     // connection to the events stream
     // mut subscribed_events: surf_disco::socket::Connection<
     //     BuilderEvent<Types>,
@@ -744,7 +747,9 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
 
     let connected = connect_to_events_service(hotshot_events_api_url.clone()).await;
     if connected.is_none() {
-        return;
+        return Err(anyhow!(
+            "failed to connect to API at {hotshot_events_api_url}"
+        ));
     }
     let (mut subscribed_events, mut membership) = connected.unwrap();
 
@@ -807,7 +812,9 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                 tracing::error!("Event stream ended");
                 let connected = connect_to_events_service(hotshot_events_api_url.clone()).await;
                 if connected.is_none() {
-                    return;
+                    return Err(anyhow!(
+                        "failed to reconnect to API at {hotshot_events_api_url}"
+                    ));
                 }
                 (subscribed_events, membership) = connected.unwrap();
             }
