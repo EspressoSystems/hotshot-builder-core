@@ -1022,7 +1022,7 @@
 <a href="#1020" id="1020">1020</a>
 <a href="#1021" id="1021">1021</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
-    data::{DAProposal, Leaf, QuorumProposal},
+    data::{DaProposal, Leaf, QuorumProposal},
     message::Proposal,
     traits::block_contents::{BlockHeader, BlockPayload},
     traits::{
@@ -1079,8 +1079,8 @@
 }
 <span class="doccomment">/// DA Proposal Message to be put on the da proposal channel
 </span><span class="attr">#[derive(Clone, Debug, PartialEq)]
-</span><span class="kw">pub struct </span>DAProposalMessage&lt;TYPES: NodeType&gt; {
-    <span class="kw">pub </span>proposal: Proposal&lt;TYPES, DAProposal&lt;TYPES&gt;&gt;,
+</span><span class="kw">pub struct </span>DaProposalMessage&lt;TYPES: NodeType&gt; {
+    <span class="kw">pub </span>proposal: Proposal&lt;TYPES, DaProposal&lt;TYPES&gt;&gt;,
     <span class="kw">pub </span>sender: TYPES::SignatureKey,
     <span class="kw">pub </span>total_nodes: usize,
 }
@@ -1153,7 +1153,7 @@
 
     <span class="doccomment">/// da_proposal_payload_commit to (da_proposal, node_count)
     </span><span class="kw">pub </span>da_proposal_payload_commit_to_da_proposal:
-        HashMap&lt;BuilderCommitment, (DAProposal&lt;TYPES&gt;, usize)&gt;,
+        HashMap&lt;BuilderCommitment, (DaProposal&lt;TYPES&gt;, usize)&gt;,
 
     <span class="doccomment">/// quorum_proposal_payload_commit to quorum_proposal
     </span><span class="kw">pub </span>quorum_proposal_payload_commit_to_quorum_proposal:
@@ -1216,7 +1216,7 @@
     </span><span class="kw">fn </span>process_hotshot_transaction(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tx: Vec&lt;TYPES::Transaction&gt;);
 
     <span class="doccomment">/// process the DA proposal
-    </span><span class="kw">async fn </span>process_da_proposal(<span class="kw-2">&amp;mut </span><span class="self">self</span>, da_msg: DAProposalMessage&lt;TYPES&gt;);
+    </span><span class="kw">async fn </span>process_da_proposal(<span class="kw-2">&amp;mut </span><span class="self">self</span>, da_msg: DaProposalMessage&lt;TYPES&gt;);
 
     <span class="doccomment">/// process the quorum proposal
     </span><span class="kw">async fn </span>process_quorum_proposal(<span class="kw-2">&amp;mut </span><span class="self">self</span>, qc_msg: QCMessage&lt;TYPES&gt;);
@@ -1227,7 +1227,7 @@
     <span class="doccomment">/// spawn a clone of builder
     </span><span class="kw">async fn </span>spawn_clone(
         <span class="self">self</span>,
-        da_proposal: DAProposal&lt;TYPES&gt;,
+        da_proposal: DaProposal&lt;TYPES&gt;,
         quorum_proposal: QuorumProposal&lt;TYPES&gt;,
         leader: TYPES::SignatureKey,
         num_nodes: usize,
@@ -1311,7 +1311,7 @@
     <span class="doccomment">/// processing the DA proposal
     </span><span class="attr">#[tracing::instrument(skip_all, name = <span class="string">"process da proposal"</span>,
                                     fields(builder_built_from_proposed_block = %<span class="self">self</span>.built_from_proposed_block))]
-    </span><span class="kw">async fn </span>process_da_proposal(<span class="kw-2">&amp;mut </span><span class="self">self</span>, da_msg: DAProposalMessage&lt;TYPES&gt;) {
+    </span><span class="kw">async fn </span>process_da_proposal(<span class="kw-2">&amp;mut </span><span class="self">self</span>, da_msg: DaProposalMessage&lt;TYPES&gt;) {
         <span class="macro">tracing::debug!</span>(
             <span class="string">"Builder Received DA message for view {:?}"</span>,
             da_msg.proposal.data.view_number
@@ -1377,7 +1377,7 @@
             </span>.da_proposal_payload_commit_to_da_proposal
             .entry(payload_builder_commitment.clone())
         {
-            <span class="kw">let </span>da_proposal_data = DAProposal {
+            <span class="kw">let </span>da_proposal_data = DaProposal {
                 encoded_transactions: encoded_txns.clone(),
                 metadata: metadata.clone(),
                 view_number,
@@ -1621,7 +1621,7 @@
                                     fields(builder_built_from_proposed_block = %<span class="self">self</span>.built_from_proposed_block))]
     </span><span class="kw">async fn </span>spawn_clone(
         <span class="kw-2">mut </span><span class="self">self</span>,
-        da_proposal: DAProposal&lt;TYPES&gt;,
+        da_proposal: DaProposal&lt;TYPES&gt;,
         quorum_proposal: QuorumProposal&lt;TYPES&gt;,
         _leader: TYPES::SignatureKey,
         total_nodes: usize,
@@ -1911,7 +1911,7 @@
                     da = <span class="self">self</span>.da_proposal_receiver.next() =&gt; {
                         <span class="kw">match </span>da {
                             <span class="prelude-val">Some</span>(da) =&gt; {
-                                <span class="kw">if let </span>MessageType::DAProposalMessage(rda_msg) = da {
+                                <span class="kw">if let </span>MessageType::DaProposalMessage(rda_msg) = da {
                                     <span class="macro">tracing::debug!</span>(<span class="string">"Received da proposal msg in builder {:?}:\n {:?}"</span>, <span class="self">self</span>.built_from_proposed_block, rda_msg.proposal.data.view_number);
                                     <span class="self">self</span>.process_da_proposal(rda_msg).<span class="kw">await</span>;
                                 }
@@ -1971,7 +1971,7 @@
 </span><span class="kw">pub enum </span>MessageType&lt;TYPES: NodeType&gt; {
     TransactionMessage(TransactionMessage&lt;TYPES&gt;),
     DecideMessage(DecideMessage&lt;TYPES&gt;),
-    DAProposalMessage(DAProposalMessage&lt;TYPES&gt;),
+    DaProposalMessage(DaProposalMessage&lt;TYPES&gt;),
     QCMessage(QCMessage&lt;TYPES&gt;),
     RequestMessage(RequestMessage),
 }

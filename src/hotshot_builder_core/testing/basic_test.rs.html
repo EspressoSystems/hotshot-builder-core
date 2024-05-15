@@ -395,7 +395,7 @@
 <a href="#393" id="393">393</a>
 </pre></div><pre class="rust"><code><span class="kw">pub use </span>hotshot::traits::election::static_committee::GeneralStaticCommittee;
 <span class="kw">pub use </span>hotshot_types::{
-    data::{DAProposal, Leaf, QuorumProposal, ViewNumber},
+    data::{DaProposal, Leaf, QuorumProposal, ViewNumber},
     message::Proposal,
     signature_key::{BLSPrivKey, BLSPubKey},
     simple_certificate::{QuorumCertificate, SimpleCertificate, SuccessThreshold},
@@ -432,7 +432,7 @@
     };
 
     <span class="kw">use </span><span class="kw">crate</span>::builder_state::{
-        BuiltFromProposedBlock, DAProposalMessage, DecideMessage, QCMessage, RequestMessage,
+        BuiltFromProposedBlock, DaProposalMessage, DecideMessage, QCMessage, RequestMessage,
         TransactionMessage, TransactionSource,
     };
     <span class="kw">use </span><span class="kw">crate</span>::service::GlobalState;
@@ -510,7 +510,7 @@
         <span class="comment">// to store all the sent messages
         </span><span class="kw">let </span><span class="kw-2">mut </span>stx_msgs: Vec&lt;TransactionMessage&lt;TestTypes&gt;&gt; = Vec::new();
         <span class="kw">let </span><span class="kw-2">mut </span>sdecide_msgs: Vec&lt;DecideMessage&lt;TestTypes&gt;&gt; = Vec::new();
-        <span class="kw">let </span><span class="kw-2">mut </span>sda_msgs: Vec&lt;DAProposalMessage&lt;TestTypes&gt;&gt; = Vec::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>sda_msgs: Vec&lt;DaProposalMessage&lt;TestTypes&gt;&gt; = Vec::new();
         <span class="kw">let </span><span class="kw-2">mut </span>sqc_msgs: Vec&lt;QCMessage&lt;TestTypes&gt;&gt; = Vec::new();
         <span class="attr">#[allow(clippy::type_complexity)]
         </span><span class="kw">let </span><span class="kw-2">mut </span>sreq_msgs: Vec&lt;(
@@ -534,7 +534,7 @@
             };
 
             <span class="comment">// Prepare the DA proposal message
-            </span><span class="kw">let </span>da_proposal = DAProposal {
+            </span><span class="kw">let </span>da_proposal = DaProposal {
                 encoded_transactions: encoded_transactions.clone().into(),
                 metadata: TestMetadata,
                 view_number: ViewNumber::new(i <span class="kw">as </span>u64),
@@ -549,7 +549,7 @@
             )
             .expect(<span class="string">"Failed to sign encoded tx hash while preparing da proposal"</span>);
 
-            <span class="kw">let </span>sda_msg = DAProposalMessage::&lt;TestTypes&gt; {
+            <span class="kw">let </span>sda_msg = DaProposalMessage::&lt;TestTypes&gt; {
                 proposal: Proposal {
                     data: da_proposal,
                     signature: da_signature.clone(),
@@ -693,7 +693,7 @@
                 .<span class="kw">await
                 </span>.unwrap();
             da_sender
-                .broadcast(MessageType::DAProposalMessage(sda_msg.clone()))
+                .broadcast(MessageType::DaProposalMessage(sda_msg.clone()))
                 .<span class="kw">await
                 </span>.unwrap();
             qc_sender

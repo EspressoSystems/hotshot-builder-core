@@ -1035,7 +1035,7 @@
 };
 <span class="kw">use </span>hotshot_types::{
     constants::Version01,
-    data::{DAProposal, Leaf, QuorumProposal},
+    data::{DaProposal, Leaf, QuorumProposal},
     event::EventType,
     message::Proposal,
     traits::{
@@ -1050,7 +1050,7 @@
 };
 
 <span class="kw">use </span><span class="kw">crate</span>::builder_state::{
-    BuildBlockInfo, DAProposalMessage, DecideMessage, QCMessage, TransactionMessage,
+    BuildBlockInfo, DaProposalMessage, DecideMessage, QCMessage, TransactionMessage,
     TransactionSource,
 };
 <span class="kw">use </span><span class="kw">crate</span>::builder_state::{MessageType, RequestMessage, ResponseMessage};
@@ -1805,7 +1805,7 @@ Running Non-Permissioned Builder Service
                             .<span class="kw">await</span>;
                     }
                     <span class="comment">// DA proposal event
-                    </span>BuilderEventType::HotshotDAProposal { proposal, sender } =&gt; {
+                    </span>BuilderEventType::HotshotDaProposal { proposal, sender } =&gt; {
                         <span class="comment">// get the leader for current view
                         </span><span class="kw">let </span>leader = membership.get_leader(proposal.data.view_number);
                         <span class="comment">// get the committee mstatked node count
@@ -1898,7 +1898,7 @@ Running Permissioned Builder Service
                             .<span class="kw">await</span>;
                     }
                     <span class="comment">// DA proposal event
-                    </span>EventType::DAProposal { proposal, sender } =&gt; {
+                    </span>EventType::DaProposal { proposal, sender } =&gt; {
                         <span class="comment">// get the leader for current view
                         </span><span class="kw">let </span>leader = hotshot_handle.get_leader(proposal.data.view_number).<span class="kw">await</span>;
                         <span class="comment">// get the committee staked node count
@@ -1926,13 +1926,13 @@ Utility functions to handle the hotshot events
 */
 </span><span class="kw">async fn </span>handle_da_event&lt;Types: NodeType&gt;(
     da_channel_sender: <span class="kw-2">&amp;</span>BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
-    da_proposal: Proposal&lt;Types, DAProposal&lt;Types&gt;&gt;,
+    da_proposal: Proposal&lt;Types, DaProposal&lt;Types&gt;&gt;,
     sender: &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey,
     leader: &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey,
     total_nodes: NonZeroUsize,
 ) {
     <span class="macro">tracing::debug!</span>(
-        <span class="string">"DAProposal: Leader: {:?} for the view: {:?}"</span>,
+        <span class="string">"DaProposal: Leader: {:?} for the view: {:?}"</span>,
         leader,
         da_proposal.data.view_number
     );
@@ -1941,7 +1941,7 @@ Utility functions to handle the hotshot events
     </span><span class="kw">let </span>encoded_txns_hash = Sha256::digest(<span class="kw-2">&amp;</span>da_proposal.data.encoded_transactions);
     <span class="comment">// check if the sender is the leader and the signature is valid; if yes, broadcast the DA proposal
     </span><span class="kw">if </span>leader == sender &amp;&amp; sender.validate(<span class="kw-2">&amp;</span>da_proposal.signature, <span class="kw-2">&amp;</span>encoded_txns_hash) {
-        <span class="kw">let </span>da_msg = DAProposalMessage::&lt;Types&gt; {
+        <span class="kw">let </span>da_msg = DaProposalMessage::&lt;Types&gt; {
             proposal: da_proposal,
             sender: leader,
             total_nodes: total_nodes.into(),
@@ -1952,7 +1952,7 @@ Utility functions to handle the hotshot events
             view_number
         );
         <span class="kw">if let </span><span class="prelude-val">Err</span>(e) = da_channel_sender
-            .broadcast(MessageType::DAProposalMessage(da_msg))
+            .broadcast(MessageType::DaProposalMessage(da_msg))
             .<span class="kw">await
         </span>{
             <span class="macro">tracing::warn!</span>(
@@ -1961,7 +1961,7 @@ Utility functions to handle the hotshot events
             );
         }
     } <span class="kw">else </span>{
-        <span class="macro">tracing::error!</span>(<span class="string">"Validation Failure on DAProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}"</span>, da_proposal.data.view_number, leader, sender);
+        <span class="macro">tracing::error!</span>(<span class="string">"Validation Failure on DaProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}"</span>, da_proposal.data.view_number, leader, sender);
     }
 }
 
