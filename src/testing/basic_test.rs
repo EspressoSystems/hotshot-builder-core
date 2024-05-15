@@ -1,6 +1,6 @@
 pub use hotshot::traits::election::static_committee::GeneralStaticCommittee;
 pub use hotshot_types::{
-    data::{DAProposal, Leaf, QuorumProposal, ViewNumber},
+    data::{DaProposal, Leaf, QuorumProposal, ViewNumber},
     message::Proposal,
     signature_key::{BLSPrivKey, BLSPubKey},
     simple_certificate::{QuorumCertificate, SimpleCertificate, SuccessThreshold},
@@ -37,7 +37,7 @@ mod tests {
     };
 
     use crate::builder_state::{
-        BuiltFromProposedBlock, DAProposalMessage, DecideMessage, QCMessage, RequestMessage,
+        BuiltFromProposedBlock, DaProposalMessage, DecideMessage, QCMessage, RequestMessage,
         TransactionMessage, TransactionSource,
     };
     use crate::service::GlobalState;
@@ -115,7 +115,7 @@ mod tests {
         // to store all the sent messages
         let mut stx_msgs: Vec<TransactionMessage<TestTypes>> = Vec::new();
         let mut sdecide_msgs: Vec<DecideMessage<TestTypes>> = Vec::new();
-        let mut sda_msgs: Vec<DAProposalMessage<TestTypes>> = Vec::new();
+        let mut sda_msgs: Vec<DaProposalMessage<TestTypes>> = Vec::new();
         let mut sqc_msgs: Vec<QCMessage<TestTypes>> = Vec::new();
         #[allow(clippy::type_complexity)]
         let mut sreq_msgs: Vec<(
@@ -139,7 +139,7 @@ mod tests {
             };
 
             // Prepare the DA proposal message
-            let da_proposal = DAProposal {
+            let da_proposal = DaProposal {
                 encoded_transactions: encoded_transactions.clone().into(),
                 metadata: TestMetadata,
                 view_number: ViewNumber::new(i as u64),
@@ -154,7 +154,7 @@ mod tests {
             )
             .expect("Failed to sign encoded tx hash while preparing da proposal");
 
-            let sda_msg = DAProposalMessage::<TestTypes> {
+            let sda_msg = DaProposalMessage::<TestTypes> {
                 proposal: Proposal {
                     data: da_proposal,
                     signature: da_signature.clone(),
@@ -298,7 +298,7 @@ mod tests {
                 .await
                 .unwrap();
             da_sender
-                .broadcast(MessageType::DAProposalMessage(sda_msg.clone()))
+                .broadcast(MessageType::DaProposalMessage(sda_msg.clone()))
                 .await
                 .unwrap();
             qc_sender
