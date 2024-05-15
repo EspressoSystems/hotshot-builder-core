@@ -1,5 +1,5 @@
 use hotshot_types::{
-    data::{DAProposal, Leaf, QuorumProposal},
+    data::{DaProposal, Leaf, QuorumProposal},
     message::Proposal,
     traits::block_contents::{BlockHeader, BlockPayload},
     traits::{
@@ -56,8 +56,8 @@ pub struct DecideMessage<TYPES: NodeType> {
 }
 /// DA Proposal Message to be put on the da proposal channel
 #[derive(Clone, Debug, PartialEq)]
-pub struct DAProposalMessage<TYPES: NodeType> {
-    pub proposal: Proposal<TYPES, DAProposal<TYPES>>,
+pub struct DaProposalMessage<TYPES: NodeType> {
+    pub proposal: Proposal<TYPES, DaProposal<TYPES>>,
     pub sender: TYPES::SignatureKey,
     pub total_nodes: usize,
 }
@@ -130,7 +130,7 @@ pub struct BuilderState<TYPES: NodeType> {
 
     /// da_proposal_payload_commit to (da_proposal, node_count)
     pub da_proposal_payload_commit_to_da_proposal:
-        HashMap<BuilderCommitment, (DAProposal<TYPES>, usize)>,
+        HashMap<BuilderCommitment, (DaProposal<TYPES>, usize)>,
 
     /// quorum_proposal_payload_commit to quorum_proposal
     pub quorum_proposal_payload_commit_to_quorum_proposal:
@@ -193,7 +193,7 @@ pub trait BuilderProgress<TYPES: NodeType> {
     fn process_hotshot_transaction(&mut self, tx: Vec<TYPES::Transaction>);
 
     /// process the DA proposal
-    async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>);
+    async fn process_da_proposal(&mut self, da_msg: DaProposalMessage<TYPES>);
 
     /// process the quorum proposal
     async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>);
@@ -204,7 +204,7 @@ pub trait BuilderProgress<TYPES: NodeType> {
     /// spawn a clone of builder
     async fn spawn_clone(
         self,
-        da_proposal: DAProposal<TYPES>,
+        da_proposal: DaProposal<TYPES>,
         quorum_proposal: QuorumProposal<TYPES>,
         leader: TYPES::SignatureKey,
         num_nodes: usize,
@@ -288,7 +288,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     /// processing the DA proposal
     #[tracing::instrument(skip_all, name = "process da proposal",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
-    async fn process_da_proposal(&mut self, da_msg: DAProposalMessage<TYPES>) {
+    async fn process_da_proposal(&mut self, da_msg: DaProposalMessage<TYPES>) {
         tracing::debug!(
             "Builder Received DA message for view {:?}",
             da_msg.proposal.data.view_number
@@ -354,7 +354,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             .da_proposal_payload_commit_to_da_proposal
             .entry(payload_builder_commitment.clone())
         {
-            let da_proposal_data = DAProposal {
+            let da_proposal_data = DaProposal {
                 encoded_transactions: encoded_txns.clone(),
                 metadata: metadata.clone(),
                 view_number,
@@ -598,7 +598,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn spawn_clone(
         mut self,
-        da_proposal: DAProposal<TYPES>,
+        da_proposal: DaProposal<TYPES>,
         quorum_proposal: QuorumProposal<TYPES>,
         _leader: TYPES::SignatureKey,
         total_nodes: usize,
@@ -888,7 +888,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     da = self.da_proposal_receiver.next() => {
                         match da {
                             Some(da) => {
-                                if let MessageType::DAProposalMessage(rda_msg) = da {
+                                if let MessageType::DaProposalMessage(rda_msg) = da {
                                     tracing::debug!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_proposed_block, rda_msg.proposal.data.view_number);
                                     self.process_da_proposal(rda_msg).await;
                                 }
@@ -948,7 +948,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 pub enum MessageType<TYPES: NodeType> {
     TransactionMessage(TransactionMessage<TYPES>),
     DecideMessage(DecideMessage<TYPES>),
-    DAProposalMessage(DAProposalMessage<TYPES>),
+    DaProposalMessage(DaProposalMessage<TYPES>),
     QCMessage(QCMessage<TYPES>),
     RequestMessage(RequestMessage),
 }

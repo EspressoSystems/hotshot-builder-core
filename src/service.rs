@@ -9,7 +9,7 @@ use hotshot_builder_api::{
 };
 use hotshot_types::{
     constants::Version01,
-    data::{DAProposal, Leaf, QuorumProposal},
+    data::{DaProposal, Leaf, QuorumProposal},
     event::EventType,
     message::Proposal,
     traits::{
@@ -24,7 +24,7 @@ use hotshot_types::{
 };
 
 use crate::builder_state::{
-    BuildBlockInfo, DAProposalMessage, DecideMessage, QCMessage, TransactionMessage,
+    BuildBlockInfo, DaProposalMessage, DecideMessage, QCMessage, TransactionMessage,
     TransactionSource,
 };
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
@@ -779,7 +779,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                             .await;
                     }
                     // DA proposal event
-                    BuilderEventType::HotshotDAProposal { proposal, sender } => {
+                    BuilderEventType::HotshotDaProposal { proposal, sender } => {
                         // get the leader for current view
                         let leader = membership.get_leader(proposal.data.view_number);
                         // get the committee mstatked node count
@@ -872,7 +872,7 @@ pub async fn run_permissioned_standalone_builder_service<
                             .await;
                     }
                     // DA proposal event
-                    EventType::DAProposal { proposal, sender } => {
+                    EventType::DaProposal { proposal, sender } => {
                         // get the leader for current view
                         let leader = hotshot_handle.get_leader(proposal.data.view_number).await;
                         // get the committee staked node count
@@ -900,13 +900,13 @@ Utility functions to handle the hotshot events
 */
 async fn handle_da_event<Types: NodeType>(
     da_channel_sender: &BroadcastSender<MessageType<Types>>,
-    da_proposal: Proposal<Types, DAProposal<Types>>,
+    da_proposal: Proposal<Types, DaProposal<Types>>,
     sender: <Types as NodeType>::SignatureKey,
     leader: <Types as NodeType>::SignatureKey,
     total_nodes: NonZeroUsize,
 ) {
     tracing::debug!(
-        "DAProposal: Leader: {:?} for the view: {:?}",
+        "DaProposal: Leader: {:?} for the view: {:?}",
         leader,
         da_proposal.data.view_number
     );
@@ -915,7 +915,7 @@ async fn handle_da_event<Types: NodeType>(
     let encoded_txns_hash = Sha256::digest(&da_proposal.data.encoded_transactions);
     // check if the sender is the leader and the signature is valid; if yes, broadcast the DA proposal
     if leader == sender && sender.validate(&da_proposal.signature, &encoded_txns_hash) {
-        let da_msg = DAProposalMessage::<Types> {
+        let da_msg = DaProposalMessage::<Types> {
             proposal: da_proposal,
             sender: leader,
             total_nodes: total_nodes.into(),
@@ -926,7 +926,7 @@ async fn handle_da_event<Types: NodeType>(
             view_number
         );
         if let Err(e) = da_channel_sender
-            .broadcast(MessageType::DAProposalMessage(da_msg))
+            .broadcast(MessageType::DaProposalMessage(da_msg))
             .await
         {
             tracing::warn!(
@@ -935,7 +935,7 @@ async fn handle_da_event<Types: NodeType>(
             );
         }
     } else {
-        tracing::error!("Validation Failure on DAProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", da_proposal.data.view_number, leader, sender);
+        tracing::error!("Validation Failure on DaProposal for view {:?}: Leader for the current view: {:?} and sender: {:?}", da_proposal.data.view_number, leader, sender);
     }
 }
 
