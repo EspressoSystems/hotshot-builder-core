@@ -130,8 +130,8 @@ mod tests {
         // generate num_test messages for each type and send it to the respective channels;
         for i in 0..num_test_messages as u32 {
             // Prepare the transaction message
-            let tx = TestTransaction(vec![i as u8]);
-            let encoded_transactions = TestTransaction::encode(&[tx.clone()]).unwrap();
+            let tx = TestTransaction::new(vec![i as u8]);
+            let encoded_transactions = TestTransaction::encode(&[tx.clone()]);
 
             let stx_msg = TransactionMessage::<TestTypes> {
                 txns: vec![tx.clone()],
