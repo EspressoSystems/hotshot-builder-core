@@ -1363,7 +1363,7 @@ Handling Builder API responses
     &gt;&gt;::Error: Display,
     <span class="kw">for</span>&lt;<span class="lifetime">'a</span>&gt; &lt;Types::SignatureKey <span class="kw">as </span>TryFrom&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>TaggedBase64&gt;&gt;::Error: Display,
 {
-    <span class="kw">async fn </span>get_available_blocks(
+    <span class="kw">async fn </span>available_blocks(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         for_parent: <span class="kw-2">&amp;</span>VidCommitment,
         view_number: u64,
@@ -1643,7 +1643,7 @@ Handling Builder API responses
             })
         }
     }
-    <span class="kw">async fn </span>get_builder_address(
+    <span class="kw">async fn </span>builder_address(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey, BuildError&gt; {
         <span class="prelude-val">Ok</span>(<span class="self">self</span>.builder_keys.<span class="number">0</span>.clone())
@@ -1807,7 +1807,7 @@ Running Non-Permissioned Builder Service
                     <span class="comment">// DA proposal event
                     </span>BuilderEventType::HotshotDaProposal { proposal, sender } =&gt; {
                         <span class="comment">// get the leader for current view
-                        </span><span class="kw">let </span>leader = membership.get_leader(proposal.data.view_number);
+                        </span><span class="kw">let </span>leader = membership.leader(proposal.data.view_number);
                         <span class="comment">// get the committee mstatked node count
                         </span><span class="kw">let </span>total_nodes = membership.total_nodes();
 
@@ -1823,7 +1823,7 @@ Running Non-Permissioned Builder Service
                     <span class="comment">// QC proposal event
                     </span>BuilderEventType::HotshotQuorumProposal { proposal, sender } =&gt; {
                         <span class="comment">// get the leader for current view
-                        </span><span class="kw">let </span>leader = membership.get_leader(proposal.data.view_number);
+                        </span><span class="kw">let </span>leader = membership.leader(proposal.data.view_number);
                         handle_qc_event(<span class="kw-2">&amp;</span>qc_sender, proposal, sender, leader).<span class="kw">await</span>;
                     }
                     <span class="kw">_ </span>=&gt; {
@@ -1870,7 +1870,7 @@ Running Permissioned Builder Service
     <span class="comment">// hotshot context handle
     </span>hotshot_handle: SystemContextHandle&lt;Types, I&gt;,
 ) {
-    <span class="kw">let </span><span class="kw-2">mut </span>event_stream = hotshot_handle.get_event_stream();
+    <span class="kw">let </span><span class="kw-2">mut </span>event_stream = hotshot_handle.event_stream();
     <span class="kw">loop </span>{
         <span class="macro">tracing::debug!</span>(<span class="string">"Waiting for events from HotShot"</span>);
         <span class="kw">match </span>event_stream.next().<span class="kw">await </span>{
@@ -1893,14 +1893,14 @@ Running Permissioned Builder Service
                         block_size,
                         ..
                     } =&gt; {
-                        <span class="kw">let </span>latest_decide_view_number = leaf_chain[<span class="number">0</span>].leaf.get_view_number();
+                        <span class="kw">let </span>latest_decide_view_number = leaf_chain[<span class="number">0</span>].leaf.view_number();
                         handle_decide_event(<span class="kw-2">&amp;</span>decide_sender, latest_decide_view_number, block_size)
                             .<span class="kw">await</span>;
                     }
                     <span class="comment">// DA proposal event
                     </span>EventType::DaProposal { proposal, sender } =&gt; {
                         <span class="comment">// get the leader for current view
-                        </span><span class="kw">let </span>leader = hotshot_handle.get_leader(proposal.data.view_number).<span class="kw">await</span>;
+                        </span><span class="kw">let </span>leader = hotshot_handle.leader(proposal.data.view_number).<span class="kw">await</span>;
                         <span class="comment">// get the committee staked node count
                         </span><span class="kw">let </span>total_nodes = hotshot_handle.total_nodes();
 
@@ -1909,7 +1909,7 @@ Running Permissioned Builder Service
                     <span class="comment">// QC proposal event
                     </span>EventType::QuorumProposal { proposal, sender } =&gt; {
                         <span class="comment">// get the leader for current view
-                        </span><span class="kw">let </span>leader = hotshot_handle.get_leader(proposal.data.view_number).<span class="kw">await</span>;
+                        </span><span class="kw">let </span>leader = hotshot_handle.leader(proposal.data.view_number).<span class="kw">await</span>;
                         handle_qc_event(<span class="kw-2">&amp;</span>qc_sender, proposal, sender, leader).<span class="kw">await</span>;
                     }
                     <span class="kw">_ </span>=&gt; {
