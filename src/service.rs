@@ -255,7 +255,7 @@ impl<Types: NodeType> GlobalState<Types> {
     ) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
         let results = txns.iter().map(|tx| tx.commit()).collect();
         let tx_msg = TransactionMessage::<Types> {
-            txns,
+            txns: Arc::new(txns),
             tx_type: TransactionSource::External,
         };
 
@@ -787,7 +787,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
 
                         handle_da_event(
                             &da_sender,
-                            proposal,
+                            Arc::new(proposal),
                             sender,
                             leader,
                             NonZeroUsize::new(total_nodes).unwrap_or(NonZeroUsize::MIN),
@@ -798,7 +798,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                     BuilderEventType::HotshotQuorumProposal { proposal, sender } => {
                         // get the leader for current view
                         let leader = membership.leader(proposal.data.view_number);
-                        handle_qc_event(&qc_sender, proposal, sender, leader).await;
+                        handle_qc_event(&qc_sender, Arc::new(proposal), sender, leader).await;
                     }
                     _ => {
                         tracing::error!("Unhandled event from Builder");
@@ -878,13 +878,20 @@ pub async fn run_permissioned_standalone_builder_service<
                         // get the committee staked node count
                         let total_nodes = hotshot_handle.total_nodes();
 
-                        handle_da_event(&da_sender, proposal, sender, leader, total_nodes).await;
+                        handle_da_event(
+                            &da_sender,
+                            Arc::new(proposal),
+                            sender,
+                            leader,
+                            total_nodes,
+                        )
+                        .await;
                     }
                     // QC proposal event
                     EventType::QuorumProposal { proposal, sender } => {
                         // get the leader for current view
                         let leader = hotshot_handle.leader(proposal.data.view_number).await;
-                        handle_qc_event(&qc_sender, proposal, sender, leader).await;
+                        handle_qc_event(&qc_sender, Arc::new(proposal), sender, leader).await;
                     }
                     _ => {
                         tracing::error!("Unhandled event from Builder: {:?}", event.event);
@@ -900,7 +907,7 @@ Utility functions to handle the hotshot events
 */
 async fn handle_da_event<Types: NodeType>(
     da_channel_sender: &BroadcastSender<MessageType<Types>>,
-    da_proposal: Proposal<Types, DaProposal<Types>>,
+    da_proposal: Arc<Proposal<Types, DaProposal<Types>>>,
     sender: <Types as NodeType>::SignatureKey,
     leader: <Types as NodeType>::SignatureKey,
     total_nodes: NonZeroUsize,
@@ -941,7 +948,7 @@ async fn handle_da_event<Types: NodeType>(
 
 async fn handle_qc_event<Types: NodeType>(
     qc_channel_sender: &BroadcastSender<MessageType<Types>>,
-    qc_proposal: Proposal<Types, QuorumProposal<Types>>,
+    qc_proposal: Arc<Proposal<Types, QuorumProposal<Types>>>,
     sender: <Types as NodeType>::SignatureKey,
     leader: <Types as NodeType>::SignatureKey,
 ) {
@@ -1008,7 +1015,7 @@ async fn handle_tx_event<Types: NodeType>(
 ) {
     // send the whole txn batch to the tx_sender, might get duplicate transactions but builder needs to filter them
     let tx_msg = TransactionMessage::<Types> {
-        txns: transactions,
+        txns: Arc::new(transactions),
         tx_type: TransactionSource::HotShot,
     };
     tracing::debug!(

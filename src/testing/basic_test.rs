@@ -134,7 +134,7 @@ mod tests {
             let encoded_transactions = TestTransaction::encode(&[tx.clone()]);
 
             let stx_msg = TransactionMessage::<TestTypes> {
-                txns: vec![tx.clone()],
+                txns: Arc::new(vec![tx.clone()]),
                 tx_type: TransactionSource::HotShot,
             };
 
@@ -155,11 +155,11 @@ mod tests {
             .expect("Failed to sign encoded tx hash while preparing da proposal");
 
             let sda_msg = DaProposalMessage::<TestTypes> {
-                proposal: Proposal {
+                proposal: Arc::new(Proposal {
                     data: da_proposal,
                     signature: da_signature.clone(),
                     _pd: PhantomData,
-                },
+                }),
                 sender: pub_key,
                 total_nodes: TEST_NUM_NODES_IN_VID_COMPUTATION,
             };
@@ -255,11 +255,11 @@ mod tests {
                         ).expect("Failed to sign payload commitment while preparing QC proposal");
 
             let sqc_msg = QCMessage::<TestTypes> {
-                proposal: Proposal {
+                proposal: Arc::new(Proposal {
                     data: qc_proposal.clone(),
                     signature: qc_signature,
                     _pd: PhantomData,
-                },
+                }),
                 sender: pub_key,
             };
 
