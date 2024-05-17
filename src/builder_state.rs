@@ -5,10 +5,10 @@ use hotshot_types::{
     traits::{
         block_contents::precompute_vid_commitment,
         node_implementation::{ConsensusTime, NodeType},
+        EncodeBytes,
     },
     utils::BuilderCommitment,
     vid::{VidCommitment, VidPrecomputeData},
-    vote::Certificate,
 };
 
 use committable::{Commitment, Committable};
@@ -301,9 +301,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // To handle both cases, we can have the bootstrap builder running,
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
         // check the presence of da_msg.proposal.data.view_number-1 in the spawned_builder_states list
-        if self.built_from_proposed_block.view_number.get_u64()
-            == self.bootstrap_view_number.get_u64()
-            && (da_msg.proposal.data.view_number.get_u64() == 0
+        if self.built_from_proposed_block.view_number.u64() == self.bootstrap_view_number.u64()
+            && (da_msg.proposal.data.view_number.u64() == 0
                 || !self
                     .global_state
                     .read_arc()
@@ -319,8 +318,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             handled_by_bootstrap = true;
         }
         // Do the validation check
-        else if da_msg.proposal.data.view_number.get_u64()
-            != self.built_from_proposed_block.view_number.get_u64() + 1
+        else if da_msg.proposal.data.view_number.u64()
+            != self.built_from_proposed_block.view_number.u64() + 1
         {
             tracing::debug!("View number is not equal to built_from_view + 1, so returning");
             return;
@@ -423,9 +422,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // To handle both cases, we can have the bootstrap builder running,
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
         // check the presence of da_msg.proposal.data.view_number-1 in the spawned_builder_states
-        if self.built_from_proposed_block.view_number.get_u64()
-            == self.bootstrap_view_number.get_u64()
-            && (qc_msg.proposal.data.view_number.get_u64() == 0
+        if self.built_from_proposed_block.view_number.u64() == self.bootstrap_view_number.u64()
+            && (qc_msg.proposal.data.view_number.u64() == 0
                 || !self
                     .global_state
                     .read_arc()
@@ -438,11 +436,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             handled_by_bootstrap = true;
         } else if qc_msg.proposal.data.justify_qc.view_number
             != self.built_from_proposed_block.view_number
-            || (qc_msg.proposal.data.justify_qc.get_data().leaf_commit
+            || (qc_msg.proposal.data.justify_qc.data.leaf_commit
                 != self.built_from_proposed_block.leaf_commit)
         {
             tracing::debug!("Either View number {:?} or leaf commit{:?} from justify qc does not match the built-in info {:?}, so returning",
-            qc_msg.proposal.data.justify_qc.view_number, qc_msg.proposal.data.justify_qc.get_data().leaf_commit, self.built_from_proposed_block);
+            qc_msg.proposal.data.justify_qc.view_number, qc_msg.proposal.data.justify_qc.data.leaf_commit, self.built_from_proposed_block);
             return;
         }
 
@@ -515,29 +513,27 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // the special value can be 0 itself, or a view number 0 is also right answer
         let _block_size = decide_msg.block_size;
         let latest_leaf_view_number = decide_msg.latest_decide_view_number;
-        let latest_leaf_view_number_as_i64 = latest_leaf_view_number.get_u64() as i64;
+        let latest_leaf_view_number_as_i64 = latest_leaf_view_number.u64() as i64;
 
         // Garbage collection
         // Keep the builder states stay active till their built in view + BUFFER_VIEW_NUM
-        if self.built_from_proposed_block.view_number.get_u64()
-            == self.bootstrap_view_number.get_u64()
-        {
+        if self.built_from_proposed_block.view_number.u64() == self.bootstrap_view_number.u64() {
             // required to convert to prevent underflow on u64's
             let last_bootstrap_garbage_collected_as_i64 = self
                 .last_bootstrap_garbage_collected_decided_seen_view_num
-                .get_u64() as i64;
+                .u64() as i64;
 
             if (latest_leaf_view_number_as_i64 - last_bootstrap_garbage_collected_as_i64)
                 >= 2 * self.buffer_view_num_count as i64
             {
                 tracing::info!(
                     "Bootstrapped builder state garbage collected for view number {:?}",
-                    latest_leaf_view_number.get_u64()
+                    latest_leaf_view_number.u64()
                 );
 
                 let to_be_garbage_collected_view_num =
                     <<TYPES as NodeType>::Time as ConsensusTime>::new(
-                        latest_leaf_view_number.get_u64() - self.buffer_view_num_count,
+                        latest_leaf_view_number.u64() - self.buffer_view_num_count,
                     );
 
                 let to_garbage_collect: HashSet<(VidCommitment, BuilderCommitment, TYPES::Time)> =
@@ -580,7 +576,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 //return Some(Status::ShouldContinue);
             }
         } else if self.built_from_proposed_block.view_number < latest_leaf_view_number {
-            tracing::info!("Task view is less than the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.get_u64(), self.built_from_proposed_block.view_number.get_u64());
+            tracing::info!("Task view is less than the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.u64(), self.built_from_proposed_block.view_number.u64());
             self.global_state.write_arc().await.remove_handles(
                 &self.built_from_proposed_block.vid_commitment,
                 self.builder_commitments.clone(),
@@ -704,17 +700,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 requested_view_number,
             ));
 
-            let encoded_txns: Vec<u8> = payload
-                .encode()
-                .inspect_err(|e| {
-                    tracing::error!(
-                        "Failed to encode block payload for parent {:?}@{:?}: {e}",
-                        matching_vid,
-                        requested_view_number
-                    )
-                })
-                .ok()?
-                .to_vec();
+            let encoded_txns: Vec<u8> = payload.encode().to_vec();
             let block_size: u64 = encoded_txns.len() as u64;
             let offered_fee: u64 = self.base_fee * block_size;
 
@@ -760,8 +746,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // If a spawned clone is active then it will handle the request, otherwise the bootstrapped builder will handle
         if (requested_vid_commitment == self.built_from_proposed_block.vid_commitment
             && requested_view_number == self.built_from_proposed_block.view_number)
-            || (self.built_from_proposed_block.view_number.get_u64()
-                == self.bootstrap_view_number.get_u64())
+            || (self.built_from_proposed_block.view_number.u64()
+                == self.bootstrap_view_number.u64())
         {
             tracing::info!(
                 "Request handled by builder with view {:?} for (parent {:?}, view_num: {:?})",
