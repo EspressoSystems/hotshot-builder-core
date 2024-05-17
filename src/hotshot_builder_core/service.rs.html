@@ -1024,6 +1024,13 @@
 <a href="#1022" id="1022">1022</a>
 <a href="#1023" id="1023">1023</a>
 <a href="#1024" id="1024">1024</a>
+<a href="#1025" id="1025">1025</a>
+<a href="#1026" id="1026">1026</a>
+<a href="#1027" id="1027">1027</a>
+<a href="#1028" id="1028">1028</a>
+<a href="#1029" id="1029">1029</a>
+<a href="#1030" id="1030">1030</a>
+<a href="#1031" id="1031">1031</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::SystemContextHandle,
@@ -1281,7 +1288,7 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Commitment&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Transaction&gt;&gt;, BuildError&gt; {
         <span class="kw">let </span>results = txns.iter().map(|tx| tx.commit()).collect();
         <span class="kw">let </span>tx_msg = TransactionMessage::&lt;Types&gt; {
-            txns,
+            txns: Arc::new(txns),
             tx_type: TransactionSource::External,
         };
 
@@ -1813,7 +1820,7 @@ Running Non-Permissioned Builder Service
 
                         handle_da_event(
                             <span class="kw-2">&amp;</span>da_sender,
-                            proposal,
+                            Arc::new(proposal),
                             sender,
                             leader,
                             NonZeroUsize::new(total_nodes).unwrap_or(NonZeroUsize::MIN),
@@ -1824,7 +1831,7 @@ Running Non-Permissioned Builder Service
                     </span>BuilderEventType::HotshotQuorumProposal { proposal, sender } =&gt; {
                         <span class="comment">// get the leader for current view
                         </span><span class="kw">let </span>leader = membership.leader(proposal.data.view_number);
-                        handle_qc_event(<span class="kw-2">&amp;</span>qc_sender, proposal, sender, leader).<span class="kw">await</span>;
+                        handle_qc_event(<span class="kw-2">&amp;</span>qc_sender, Arc::new(proposal), sender, leader).<span class="kw">await</span>;
                     }
                     <span class="kw">_ </span>=&gt; {
                         <span class="macro">tracing::error!</span>(<span class="string">"Unhandled event from Builder"</span>);
@@ -1904,13 +1911,20 @@ Running Permissioned Builder Service
                         <span class="comment">// get the committee staked node count
                         </span><span class="kw">let </span>total_nodes = hotshot_handle.total_nodes();
 
-                        handle_da_event(<span class="kw-2">&amp;</span>da_sender, proposal, sender, leader, total_nodes).<span class="kw">await</span>;
+                        handle_da_event(
+                            <span class="kw-2">&amp;</span>da_sender,
+                            Arc::new(proposal),
+                            sender,
+                            leader,
+                            total_nodes,
+                        )
+                        .<span class="kw">await</span>;
                     }
                     <span class="comment">// QC proposal event
                     </span>EventType::QuorumProposal { proposal, sender } =&gt; {
                         <span class="comment">// get the leader for current view
                         </span><span class="kw">let </span>leader = hotshot_handle.leader(proposal.data.view_number).<span class="kw">await</span>;
-                        handle_qc_event(<span class="kw-2">&amp;</span>qc_sender, proposal, sender, leader).<span class="kw">await</span>;
+                        handle_qc_event(<span class="kw-2">&amp;</span>qc_sender, Arc::new(proposal), sender, leader).<span class="kw">await</span>;
                     }
                     <span class="kw">_ </span>=&gt; {
                         <span class="macro">tracing::error!</span>(<span class="string">"Unhandled event from Builder: {:?}"</span>, event.event);
@@ -1926,7 +1940,7 @@ Utility functions to handle the hotshot events
 */
 </span><span class="kw">async fn </span>handle_da_event&lt;Types: NodeType&gt;(
     da_channel_sender: <span class="kw-2">&amp;</span>BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
-    da_proposal: Proposal&lt;Types, DaProposal&lt;Types&gt;&gt;,
+    da_proposal: Arc&lt;Proposal&lt;Types, DaProposal&lt;Types&gt;&gt;&gt;,
     sender: &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey,
     leader: &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey,
     total_nodes: NonZeroUsize,
@@ -1967,7 +1981,7 @@ Utility functions to handle the hotshot events
 
 <span class="kw">async fn </span>handle_qc_event&lt;Types: NodeType&gt;(
     qc_channel_sender: <span class="kw-2">&amp;</span>BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
-    qc_proposal: Proposal&lt;Types, QuorumProposal&lt;Types&gt;&gt;,
+    qc_proposal: Arc&lt;Proposal&lt;Types, QuorumProposal&lt;Types&gt;&gt;&gt;,
     sender: &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey,
     leader: &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey,
 ) {
@@ -2034,7 +2048,7 @@ Utility functions to handle the hotshot events
 ) {
     <span class="comment">// send the whole txn batch to the tx_sender, might get duplicate transactions but builder needs to filter them
     </span><span class="kw">let </span>tx_msg = TransactionMessage::&lt;Types&gt; {
-        txns: transactions,
+        txns: Arc::new(transactions),
         tx_type: TransactionSource::HotShot,
     };
     <span class="macro">tracing::debug!</span>(
