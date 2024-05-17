@@ -337,7 +337,7 @@ where
     >>::Error: Display,
     for<'a> <Types::SignatureKey as TryFrom<&'a TaggedBase64>>::Error: Display,
 {
-    async fn get_available_blocks(
+    async fn available_blocks(
         &self,
         for_parent: &VidCommitment,
         view_number: u64,
@@ -617,7 +617,7 @@ where
             })
         }
     }
-    async fn get_builder_address(
+    async fn builder_address(
         &self,
     ) -> Result<<Types as NodeType>::BuilderSignatureKey, BuildError> {
         Ok(self.builder_keys.0.clone())
@@ -781,7 +781,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                     // DA proposal event
                     BuilderEventType::HotshotDaProposal { proposal, sender } => {
                         // get the leader for current view
-                        let leader = membership.get_leader(proposal.data.view_number);
+                        let leader = membership.leader(proposal.data.view_number);
                         // get the committee mstatked node count
                         let total_nodes = membership.total_nodes();
 
@@ -797,7 +797,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                     // QC proposal event
                     BuilderEventType::HotshotQuorumProposal { proposal, sender } => {
                         // get the leader for current view
-                        let leader = membership.get_leader(proposal.data.view_number);
+                        let leader = membership.leader(proposal.data.view_number);
                         handle_qc_event(&qc_sender, proposal, sender, leader).await;
                     }
                     _ => {
@@ -844,7 +844,7 @@ pub async fn run_permissioned_standalone_builder_service<
     // hotshot context handle
     hotshot_handle: SystemContextHandle<Types, I>,
 ) {
-    let mut event_stream = hotshot_handle.get_event_stream();
+    let mut event_stream = hotshot_handle.event_stream();
     loop {
         tracing::debug!("Waiting for events from HotShot");
         match event_stream.next().await {
@@ -867,14 +867,14 @@ pub async fn run_permissioned_standalone_builder_service<
                         block_size,
                         ..
                     } => {
-                        let latest_decide_view_number = leaf_chain[0].leaf.get_view_number();
+                        let latest_decide_view_number = leaf_chain[0].leaf.view_number();
                         handle_decide_event(&decide_sender, latest_decide_view_number, block_size)
                             .await;
                     }
                     // DA proposal event
                     EventType::DaProposal { proposal, sender } => {
                         // get the leader for current view
-                        let leader = hotshot_handle.get_leader(proposal.data.view_number).await;
+                        let leader = hotshot_handle.leader(proposal.data.view_number).await;
                         // get the committee staked node count
                         let total_nodes = hotshot_handle.total_nodes();
 
@@ -883,7 +883,7 @@ pub async fn run_permissioned_standalone_builder_service<
                     // QC proposal event
                     EventType::QuorumProposal { proposal, sender } => {
                         // get the leader for current view
-                        let leader = hotshot_handle.get_leader(proposal.data.view_number).await;
+                        let leader = hotshot_handle.leader(proposal.data.view_number).await;
                         handle_qc_event(&qc_sender, proposal, sender, leader).await;
                     }
                     _ => {

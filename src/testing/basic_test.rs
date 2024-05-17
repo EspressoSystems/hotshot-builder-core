@@ -211,17 +211,14 @@ mod tests {
                         leaf_commit: leaf.commit(),
                     };
 
-                    let previous_qc_view_number = sqc_msgs[(i - 1) as usize]
-                        .proposal
-                        .data
-                        .view_number
-                        .get_u64();
+                    let previous_qc_view_number =
+                        sqc_msgs[(i - 1) as usize].proposal.data.view_number.u64();
                     let view_number = if previous_qc_view_number == 0
-                        && previous_justify_qc.view_number.get_u64() == 0
+                        && previous_justify_qc.view_number.u64() == 0
                     {
                         ViewNumber::new(0)
                     } else {
-                        ViewNumber::new(1 + previous_justify_qc.view_number.get_u64())
+                        ViewNumber::new(1 + previous_justify_qc.view_number.u64())
                     };
                     // form a justify qc
                     SimpleCertificate::<TestTypes, QuorumData<TestTypes>, SuccessThreshold> {
@@ -286,7 +283,7 @@ mod tests {
             };
 
             let sdecide_msg = DecideMessage::<TestTypes> {
-                latest_decide_view_number: leaf.get_view_number(),
+                latest_decide_view_number: leaf.view_number(),
                 block_size: Some(encoded_transactions.len() as u64),
             };
 
