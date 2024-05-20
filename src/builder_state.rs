@@ -3,7 +3,6 @@ use hotshot_types::{
     message::Proposal,
     traits::block_contents::{BlockHeader, BlockPayload},
     traits::{
-        block_contents::precompute_vid_commitment,
         node_implementation::{ConsensusTime, NodeType},
         EncodeBytes,
     },
@@ -83,6 +82,8 @@ pub struct BuildBlockInfo<TYPES: NodeType> {
     pub block_payload: TYPES::BlockPayload,
     pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
     pub vid_receiver: UnboundedReceiver<(VidCommitment, VidPrecomputeData)>,
+    pub vid_sender: UnboundedSender<(VidCommitment, VidPrecomputeData)>,
+    pub vid_num_nodes: usize,
 }
 
 /// Response Message to be put on the response channel
@@ -702,15 +703,9 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // stored while processing the DA Proposal
             let vid_num_nodes = self.total_nodes.get();
 
-            // spawn a task to calculate the VID commitment, and pass the handle to the global state
+            // get the sender and receiver for the VID computation
             // later global state can await on it before replying to the proposer
             let (unbounded_sender, unbounded_receiver) = unbounded();
-            #[allow(unused_must_use)]
-            async_spawn(async move {
-                let (vidc, pre_compute_data) =
-                    precompute_vid_commitment(&encoded_txns, vid_num_nodes);
-                unbounded_sender.send((vidc, pre_compute_data)).await;
-            });
 
             tracing::info!(
                 "Builder view num {:?}, building block with {:?} txns, with builder hash {:?}",
@@ -726,6 +721,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 block_payload: payload,
                 metadata,
                 vid_receiver: unbounded_receiver,
+                vid_sender: unbounded_sender,
+                vid_num_nodes,
             })
         } else {
             tracing::warn!("build block, returning None");

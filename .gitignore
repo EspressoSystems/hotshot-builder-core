@@ -18,3 +18,5 @@ Cargo.lock
 
 /target*
 /.vscode
+/vsc
+.DS_Store

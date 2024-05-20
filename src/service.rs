@@ -13,11 +13,12 @@ use hotshot_types::{
     event::EventType,
     message::Proposal,
     traits::{
-        block_contents::BlockPayload,
+        block_contents::{precompute_vid_commitment, BlockPayload},
         consensus_api::ConsensusApi,
         election::Membership,
         node_implementation::{ConsensusTime, NodeType},
         signature_key::{BuilderSignatureKey, SignatureKey},
+        EncodeBytes,
     },
     utils::BuilderCommitment,
     vid::{VidCommitment, VidPrecomputeData},
@@ -32,7 +33,10 @@ use crate::WaitAndKeep;
 use anyhow::anyhow;
 use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
-use async_compatibility_layer::{art::async_timeout, channel::unbounded};
+use async_compatibility_layer::{
+    art::async_timeout,
+    channel::{unbounded, UnboundedSender},
+};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use committable::{Commitment, Committable};
@@ -52,12 +56,20 @@ use std::{fmt::Display, time::Instant};
 use tagged_base64::TaggedBase64;
 use tide_disco::{method::ReadState, Url};
 
+#[cfg(async_executor_impl = "async-std")]
+use async_std::task::spawn_blocking;
+
+#[cfg(async_executor_impl = "tokio")]
+use tokio::task::{spawn_blocking, JoinHandle};
+
 // It holds all the necessary information for a block
 #[derive(Debug)]
 pub struct BlockInfo<Types: NodeType> {
     pub block_payload: Types::BlockPayload,
     pub metadata: <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
     pub vid_receiver: Arc<RwLock<WaitAndKeep<(VidCommitment, VidPrecomputeData)>>>,
+    pub vid_sender: Arc<RwLock<UnboundedSender<(VidCommitment, VidPrecomputeData)>>>,
+    pub vid_num_nodes: usize,
     pub offered_fee: u64,
 }
 
@@ -164,6 +176,8 @@ impl<Types: NodeType> GlobalState<Types> {
                 vid_receiver: Arc::new(RwLock::new(WaitAndKeep::Wait(
                     build_block_info.vid_receiver,
                 ))),
+                vid_sender: Arc::new(RwLock::new(build_block_info.vid_sender)),
+                vid_num_nodes: build_block_info.vid_num_nodes,
                 offered_fee: build_block_info.offered_fee,
             });
 
@@ -520,6 +534,15 @@ where
             .block_hash_to_block
             .get(&(block_hash.clone(), view_num))
         {
+            // spawn blocking task to get the vid commitment
+            let encoded_txns: Vec<u8> = block_info.block_payload.encode().to_vec();
+            calculate_vid_commitment(
+                encoded_txns,
+                block_info.vid_num_nodes,
+                block_info.vid_sender.clone(),
+            )
+            .await;
+
             // sign over the builder commitment, as the proposer can computer it based on provide block_payload
             // and the metata data
             let response_block_hash = block_info
@@ -1028,4 +1051,29 @@ async fn handle_tx_event<Types: NodeType>(
     {
         tracing::warn!("Error {e}, failed to send transactions to the builder states");
     }
+}
+
+// calculate the vid commitment and the precompute data based on the encoded transactions and number of nodes
+// handles the case of both async and tokio executors
+async fn calculate_vid_commitment(
+    encoded_transactions: Vec<u8>,
+    vid_num_nodes: usize,
+    unbounded_sender: Arc<RwLock<UnboundedSender<(VidCommitment, VidPrecomputeData)>>>,
+) {
+    let vid_commitment_precompute =
+        spawn_blocking(move || precompute_vid_commitment(&encoded_transactions, vid_num_nodes))
+            .await;
+    #[cfg(async_executor_impl = "tokio")]
+    // Tokio's JoinHandle's `Output` is `Result<T, JoinError>`, while in async-std it's just `T`
+    // Unwrap here will just propagate any panic from the spawned task, it's not a new place we can panic.
+    let vid_commitment_precompute = vid_commitment_precompute.unwrap();
+
+    unbounded_sender
+        .write()
+        .await
+        .send((vid_commitment_precompute.0, vid_commitment_precompute.1))
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!("Error sending vid commitment and precompute data: {:?}", e)
+        });
 }
