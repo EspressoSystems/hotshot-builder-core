@@ -443,7 +443,7 @@ where
                         continue;
                     }
                     Ok(recv_attempt) => {
-                        if let Err(e) = recv_attempt {
+                        if let Err(ref e) = recv_attempt {
                             tracing::error!(%e, "Channel closed while getting available blocks for parent {:?}", req_msg.requested_vid_commitment);
                         }
                         break recv_attempt.map_err(|_| BuildError::Error {

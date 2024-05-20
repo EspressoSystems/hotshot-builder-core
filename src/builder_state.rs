@@ -28,7 +28,7 @@ use futures::StreamExt;
 #[cfg(async_executor_impl = "async-std")]
 use async_std::task::spawn_blocking;
 #[cfg(async_executor_impl = "tokio")]
-use tokio::task::{spawn_blocking, JoinHandle};
+use tokio::task::spawn_blocking;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
@@ -721,10 +721,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             #[allow(unused_must_use)]
             async_spawn(async move {
                 if let Ok(TriggerStatus::Start) = trigger_recv.recv().await {
-                    let (vidc, pre_compute_data) = spawn_blocking(move || {
+                    let join_handle = spawn_blocking(move || {
                         precompute_vid_commitment(&encoded_txns, vid_num_nodes)
-                    })
-                    .await;
+                    });
+                    #[cfg(async_executor_impl = "tokio")]
+                    let (vidc, pre_compute_data) = join_handle.await.unwrap();
+                    #[cfg(async_executor_impl = "async-std")]
+                    let (vidc, pre_compute_data) = join_handle.await;
                     unbounded_sender.send((vidc, pre_compute_data)).await;
                 }
             });
