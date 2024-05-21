@@ -1031,6 +1031,14 @@
 <a href="#1029" id="1029">1029</a>
 <a href="#1030" id="1030">1030</a>
 <a href="#1031" id="1031">1031</a>
+<a href="#1032" id="1032">1032</a>
+<a href="#1033" id="1033">1033</a>
+<a href="#1034" id="1034">1034</a>
+<a href="#1035" id="1035">1035</a>
+<a href="#1036" id="1036">1036</a>
+<a href="#1037" id="1037">1037</a>
+<a href="#1038" id="1038">1038</a>
+<a href="#1039" id="1039">1039</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::SystemContextHandle,
@@ -1058,14 +1066,17 @@
 
 <span class="kw">use </span><span class="kw">crate</span>::builder_state::{
     BuildBlockInfo, DaProposalMessage, DecideMessage, QCMessage, TransactionMessage,
-    TransactionSource,
+    TransactionSource, TriggerStatus,
 };
 <span class="kw">use </span><span class="kw">crate</span>::builder_state::{MessageType, RequestMessage, ResponseMessage};
 <span class="kw">use </span><span class="kw">crate</span>::WaitAndKeep;
 <span class="kw">use </span>anyhow::anyhow;
 <span class="kw">use </span>async_broadcast::Sender <span class="kw">as </span>BroadcastSender;
 <span class="kw">pub use </span>async_broadcast::{broadcast, RecvError, TryRecvError};
-<span class="kw">use </span>async_compatibility_layer::{art::async_timeout, channel::unbounded};
+<span class="kw">use </span>async_compatibility_layer::{
+    art::async_timeout,
+    channel::{unbounded, OneShotSender},
+};
 <span class="kw">use </span>async_lock::RwLock;
 <span class="kw">use </span>async_trait::async_trait;
 <span class="kw">use </span>committable::{Commitment, Committable};
@@ -1090,6 +1101,7 @@
 </span><span class="kw">pub struct </span>BlockInfo&lt;Types: NodeType&gt; {
     <span class="kw">pub </span>block_payload: Types::BlockPayload,
     <span class="kw">pub </span>metadata: &lt;&lt;Types <span class="kw">as </span>NodeType&gt;::BlockPayload <span class="kw">as </span>BlockPayload&gt;::Metadata,
+    <span class="kw">pub </span>vid_trigger: Arc&lt;RwLock&lt;<span class="prelude-ty">Option</span>&lt;OneShotSender&lt;TriggerStatus&gt;&gt;&gt;&gt;,
     <span class="kw">pub </span>vid_receiver: Arc&lt;RwLock&lt;WaitAndKeep&lt;(VidCommitment, VidPrecomputeData)&gt;&gt;&gt;,
     <span class="kw">pub </span>offered_fee: u64,
 }
@@ -1194,6 +1206,7 @@
             .or_insert_with(|| BlockInfo {
                 block_payload: build_block_info.block_payload,
                 metadata: build_block_info.metadata,
+                vid_trigger: Arc::new(RwLock::new(<span class="prelude-val">Some</span>(build_block_info.vid_trigger))),
                 vid_receiver: Arc::new(RwLock::new(WaitAndKeep::Wait(
                     build_block_info.vid_receiver,
                 ))),
@@ -1471,7 +1484,7 @@ Handling Builder API responses
                         <span class="kw">continue</span>;
                     }
                     <span class="prelude-val">Ok</span>(recv_attempt) =&gt; {
-                        <span class="kw">if let </span><span class="prelude-val">Err</span>(e) = recv_attempt {
+                        <span class="kw">if let </span><span class="prelude-val">Err</span>(<span class="kw-2">ref </span>e) = recv_attempt {
                             <span class="macro">tracing::error!</span>(%e, <span class="string">"Channel closed while getting available blocks for parent {:?}"</span>, req_msg.requested_vid_commitment);
                         }
                         <span class="kw">break </span>recv_attempt.map_err(|<span class="kw">_</span>| BuildError::Error {
@@ -1553,6 +1566,9 @@ Handling Builder API responses
             </span>.block_hash_to_block
             .get(<span class="kw-2">&amp;</span>(block_hash.clone(), view_num))
         {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(trigger_writer) = block_info.vid_trigger.write().<span class="kw">await</span>.take() {
+                trigger_writer.send(TriggerStatus::Start);
+            }
             <span class="comment">// sign over the builder commitment, as the proposer can computer it based on provide block_payload
             // and the metata data
             </span><span class="kw">let </span>response_block_hash = block_info
