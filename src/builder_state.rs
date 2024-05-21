@@ -165,9 +165,6 @@ pub struct BuilderState<TYPES: NodeType> {
     /// locally spawned builder Commitements
     pub builder_commitments: HashSet<(VidCommitment, BuilderCommitment, TYPES::Time)>,
 
-    /// number of view to buffer before garbage collect
-    pub buffer_view_num_count: u64,
-
     /// timeout for maximising the txns in the block
     pub maximize_txn_capture_timeout: Duration,
 
@@ -901,7 +898,6 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         req_receiver: BroadcastReceiver<MessageType<TYPES>>,
         global_state: Arc<RwLock<GlobalState<TYPES>>>,
         num_nodes: NonZeroUsize,
-        buffer_view_num_count: u64,
         maximize_txn_capture_timeout: Duration,
         base_fee: u64,
         instance_state: Arc<TYPES::InstanceState>,
@@ -921,7 +917,6 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             global_state,
             builder_commitments: HashSet::new(),
             total_nodes: num_nodes,
-            buffer_view_num_count,
             maximize_txn_capture_timeout,
             base_fee,
             instance_state,
@@ -943,7 +938,6 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             global_state: self.global_state.clone(),
             builder_commitments: self.builder_commitments.clone(),
             total_nodes: self.total_nodes,
-            buffer_view_num_count: self.buffer_view_num_count,
             maximize_txn_capture_timeout: self.maximize_txn_capture_timeout,
             base_fee: self.base_fee,
             instance_state: self.instance_state.clone(),
