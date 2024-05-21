@@ -344,7 +344,6 @@ mod tests {
                 bootstrap_receiver,
                 arc_rwlock_global_state_clone,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
-                10,                        // buffer view count
                 Duration::from_millis(10), // max time to wait for non-zero txn block
                 0,                         // base fee
                 Arc::new(TestInstanceState {}),
