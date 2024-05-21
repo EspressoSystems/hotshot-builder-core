@@ -109,8 +109,6 @@ pub struct GlobalState<Types: NodeType> {
     // scheduled GC by view number
     pub view_to_cleanup_targets: BTreeMap<Types::Time, BuilderStatesInfo<Types>>,
 
-    pub bootstrap_sender: BroadcastSender<MessageType<Types>>,
-
     // sending a transaction from the hotshot/private mempool to the builder states
     // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
     pub tx_sender: BroadcastSender<MessageType<Types>>,
@@ -120,6 +118,9 @@ pub struct GlobalState<Types: NodeType> {
 
     /// number of view to buffer before garbage collect
     pub buffer_view_num_count: u64,
+
+    /// Max view num
+    pub highest_view_num_builder_id: (VidCommitment, Types::Time),
 }
 
 impl<Types: NodeType> GlobalState<Types> {
@@ -141,11 +142,27 @@ impl<Types: NodeType> GlobalState<Types> {
             block_hash_to_block: Default::default(),
             spawned_builder_states,
             view_to_cleanup_targets: Default::default(),
-            bootstrap_sender,
             tx_sender,
             last_garbage_collected_view_num,
             buffer_view_num_count,
             builder_state_to_last_built_block: Default::default(),
+            highest_view_num_builder_id: (bootstrapped_builder_state_id, bootstrapped_view_num),
+        }
+    }
+
+    pub fn register_builder_state(
+        &mut self,
+        vid_commmit: VidCommitment,
+        view_num: Types::Time,
+        request_sender: BroadcastSender<MessageType<Types>>,
+    ) {
+        // register the builder state
+        self.spawned_builder_states
+            .insert((vid_commmit, view_num), request_sender);
+
+        // keep track of the max view number
+        if view_num > self.highest_view_num_builder_id.1 {
+            self.highest_view_num_builder_id = (vid_commmit, view_num);
         }
     }
 
@@ -178,10 +195,10 @@ impl<Types: NodeType> GlobalState<Types> {
         builder_vid_commitment: &VidCommitment,
         block_hashes: HashSet<(VidCommitment, BuilderCommitment, Types::Time)>,
         on_decide_view: Types::Time,
-        bootstrap: bool,
+        highest_view_num: bool,
     ) {
         // remove the builder commitment from the spawned builder states
-        if !bootstrap {
+        if !highest_view_num {
             // remove everything from the spawned builder states when view_num <= on_decide_view
             self.spawned_builder_states
                 .retain(|(_vid, view_num), _channel| view_num > &on_decide_view);
@@ -268,7 +285,7 @@ impl<Types: NodeType> GlobalState<Types> {
             })
     }
 
-    pub fn get_channel_for_builder_or_bootstrap(
+    pub fn get_channel_for_matching_builder_or_highest_view_buider(
         &self,
         key: &(VidCommitment, Types::Time),
     ) -> &BroadcastSender<MessageType<Types>> {
@@ -276,11 +293,14 @@ impl<Types: NodeType> GlobalState<Types> {
             channel
         } else {
             tracing::info!(
-                "failed to recover builder for parent {:?}@{:?}, using bootstrap",
+                "failed to recover builder for parent {:?}@{:?}, using higest view num builder",
                 key.0,
                 key.1
             );
-            &self.bootstrap_sender
+            // get the sender for the highest view number builder
+            self.spawned_builder_states
+                .get(&self.highest_view_num_builder_id)
+                .expect("failed to recover highest view num builder")
         }
     }
 
@@ -360,7 +380,7 @@ where
 
         let view_num = <<Types as NodeType>::Time as ConsensusTime>::new(view_number);
         // check in the local spawned builder states, if it doesn't exist it means there could be two cases
-        // it has been sent to garbed collected, or never exists, in later case let bootstrapped build a block for it
+        // it has been sent to garbed collected, or never exists, in later case let higest view num builder state build a block for it
         let just_return_with_this = {
             //let global_state = self.global_state.read_arc().await;
             if self
@@ -397,7 +417,7 @@ where
                 .global_state
                 .read_arc()
                 .await
-                .get_channel_for_builder_or_bootstrap(&(*for_parent, view_num))
+                .get_channel_for_matching_builder_or_highest_view_buider(&(*for_parent, view_num))
                 .broadcast(MessageType::RequestMessage(req_msg.clone()))
                 .await
             {
