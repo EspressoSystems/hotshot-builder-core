@@ -25,14 +25,17 @@ use hotshot_types::{
 
 use crate::builder_state::{
     BuildBlockInfo, DaProposalMessage, DecideMessage, QCMessage, TransactionMessage,
-    TransactionSource,
+    TransactionSource, TriggerStatus,
 };
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use crate::WaitAndKeep;
 use anyhow::anyhow;
 use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
-use async_compatibility_layer::{art::async_timeout, channel::unbounded};
+use async_compatibility_layer::{
+    art::async_timeout,
+    channel::{unbounded, OneShotSender},
+};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use committable::{Commitment, Committable};
@@ -57,6 +60,7 @@ use tide_disco::{method::ReadState, Url};
 pub struct BlockInfo<Types: NodeType> {
     pub block_payload: Types::BlockPayload,
     pub metadata: <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
+    pub vid_trigger: Arc<RwLock<Option<OneShotSender<TriggerStatus>>>>,
     pub vid_receiver: Arc<RwLock<WaitAndKeep<(VidCommitment, VidPrecomputeData)>>>,
     pub offered_fee: u64,
 }
@@ -161,6 +165,7 @@ impl<Types: NodeType> GlobalState<Types> {
             .or_insert_with(|| BlockInfo {
                 block_payload: build_block_info.block_payload,
                 metadata: build_block_info.metadata,
+                vid_trigger: Arc::new(RwLock::new(Some(build_block_info.vid_trigger))),
                 vid_receiver: Arc::new(RwLock::new(WaitAndKeep::Wait(
                     build_block_info.vid_receiver,
                 ))),
@@ -438,7 +443,7 @@ where
                         continue;
                     }
                     Ok(recv_attempt) => {
-                        if let Err(e) = recv_attempt {
+                        if let Err(ref e) = recv_attempt {
                             tracing::error!(%e, "Channel closed while getting available blocks for parent {:?}", req_msg.requested_vid_commitment);
                         }
                         break recv_attempt.map_err(|_| BuildError::Error {
@@ -520,6 +525,9 @@ where
             .block_hash_to_block
             .get(&(block_hash.clone(), view_num))
         {
+            if let Some(trigger_writer) = block_info.vid_trigger.write().await.take() {
+                trigger_writer.send(TriggerStatus::Start);
+            }
             // sign over the builder commitment, as the proposer can computer it based on provide block_payload
             // and the metata data
             let response_block_hash = block_info

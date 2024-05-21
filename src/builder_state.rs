@@ -17,13 +17,18 @@ use crate::service::GlobalState;
 use async_broadcast::broadcast;
 use async_broadcast::Receiver as BroadcastReceiver;
 use async_broadcast::Sender as BroadcastSender;
-use async_compatibility_layer::art::async_sleep;
-use async_compatibility_layer::channel::{unbounded, UnboundedSender};
+use async_compatibility_layer::channel::{oneshot, unbounded, UnboundedSender};
+use async_compatibility_layer::{art::async_sleep, channel::OneShotSender};
 use async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use core::panic;
 use futures::StreamExt;
+
+#[cfg(async_executor_impl = "async-std")]
+use async_std::task::spawn_blocking;
+#[cfg(async_executor_impl = "tokio")]
+use tokio::task::spawn_blocking;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
@@ -74,6 +79,11 @@ pub struct RequestMessage {
     pub requested_view_number: u64,
     pub response_channel: UnboundedSender<ResponseMessage>,
 }
+pub enum TriggerStatus {
+    Start,
+    Exit,
+}
+
 /// Response Message to be put on the response channel
 #[derive(Debug)]
 pub struct BuildBlockInfo<TYPES: NodeType> {
@@ -82,6 +92,7 @@ pub struct BuildBlockInfo<TYPES: NodeType> {
     pub offered_fee: u64,
     pub block_payload: TYPES::BlockPayload,
     pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
+    pub vid_trigger: OneShotSender<TriggerStatus>,
     pub vid_receiver: UnboundedReceiver<(VidCommitment, VidPrecomputeData)>,
 }
 
@@ -702,14 +713,23 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // stored while processing the DA Proposal
             let vid_num_nodes = self.total_nodes.get();
 
+            let (trigger_send, trigger_recv) = oneshot();
+
             // spawn a task to calculate the VID commitment, and pass the handle to the global state
             // later global state can await on it before replying to the proposer
             let (unbounded_sender, unbounded_receiver) = unbounded();
             #[allow(unused_must_use)]
             async_spawn(async move {
-                let (vidc, pre_compute_data) =
-                    precompute_vid_commitment(&encoded_txns, vid_num_nodes);
-                unbounded_sender.send((vidc, pre_compute_data)).await;
+                if let Ok(TriggerStatus::Start) = trigger_recv.recv().await {
+                    let join_handle = spawn_blocking(move || {
+                        precompute_vid_commitment(&encoded_txns, vid_num_nodes)
+                    });
+                    #[cfg(async_executor_impl = "tokio")]
+                    let (vidc, pre_compute_data) = join_handle.await.unwrap();
+                    #[cfg(async_executor_impl = "async-std")]
+                    let (vidc, pre_compute_data) = join_handle.await;
+                    unbounded_sender.send((vidc, pre_compute_data)).await;
+                }
             });
 
             tracing::info!(
@@ -725,6 +745,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 offered_fee,
                 block_payload: payload,
                 metadata,
+                vid_trigger: trigger_send,
                 vid_receiver: unbounded_receiver,
             })
         } else {
