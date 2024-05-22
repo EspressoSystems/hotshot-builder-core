@@ -176,15 +176,6 @@ pub struct BuilderState<TYPES: NodeType> {
     /// locally spawned builder Commitements
     pub builder_commitments: HashSet<(VidCommitment, BuilderCommitment, TYPES::Time)>,
 
-    /// bootstrapped view number
-    pub bootstrap_view_number: TYPES::Time,
-
-    /// last bootstrap garbage collected decided seen view_num
-    pub last_bootstrap_garbage_collected_decided_seen_view_num: TYPES::Time,
-
-    /// number of view to buffer before garbage collect
-    pub buffer_view_num_count: u64,
-
     /// timeout for maximising the txns in the block
     pub maximize_txn_capture_timeout: Duration,
 
@@ -306,14 +297,20 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             da_msg.proposal.data.view_number
         );
 
-        let mut handled_by_bootstrap = false;
         // Two cases to handle:
         // Case 1: Bootstrapping phase
         // Case 2: No intended builder state exist
-        // To handle both cases, we can have the bootstrap builder running,
+        // To handle both cases, we can have the highest view number builder state running
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
         // check the presence of da_msg.proposal.data.view_number-1 in the spawned_builder_states list
-        if self.built_from_proposed_block.view_number.u64() == self.bootstrap_view_number.u64()
+        if self.built_from_proposed_block.view_number.u64()
+            == self
+                .global_state
+                .read_arc()
+                .await
+                .highest_view_num_builder_id
+                .1
+                .u64()
             && (da_msg.proposal.data.view_number.u64() == 0
                 || !self
                     .global_state
@@ -323,20 +320,24 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         &(da_msg.proposal.data.view_number - 1),
                     ))
         {
-            tracing::info!("DA Proposal handled by bootstrapped builder state");
-
-            // if we are bootstrapping and we spawn a clone, we can assume in the healthy version of we can just zero out
-            // da_proposal to filter out the bootstrapping state and zero out the case
-            handled_by_bootstrap = true;
+            tracing::info!(
+                "DA Proposal for view {:?} handled by highest view {:?} builder state",
+                da_msg.proposal.data.view_number,
+                self.built_from_proposed_block.view_number
+            );
         }
-        // Do the validation check
+        // Do the validation check for the correct builder state then
         else if da_msg.proposal.data.view_number.u64()
             != self.built_from_proposed_block.view_number.u64() + 1
         {
-            tracing::debug!("View number is not equal to built_from_view + 1, so returning");
+            tracing::debug!(
+                "DA Proposal view number{:?} is not equal to built_from_view + 1, so returning",
+                da_msg.proposal.data.view_number
+            );
             return;
         }
 
+        // If the respective builder state exists to handle the request
         let da_proposal = da_msg.proposal.clone();
         let sender = &da_msg.sender;
 
@@ -393,12 +394,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                             req_sender,
                         )
                         .await;
-
-                    // if bootstrap in spawning it, then empty out its txns (part of GC)
-                    if handled_by_bootstrap {
-                        self.tx_hash_to_available_txns.clear();
-                        self.timestamp_to_tx.clear();
-                    }
                 } else {
                     tracing::debug!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers");
                 }
@@ -420,14 +415,20 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             qc_msg.proposal.data.view_number
         );
 
-        let mut handled_by_bootstrap = false;
         // Two cases to handle:
         // Case 1: Bootstrapping phase
         // Case 2: No intended builder state exist
-        // To handle both cases, we can have the bootstrap builder running,
+        // To handle both cases, we can have the highest view number builder state running
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
-        // check the presence of da_msg.proposal.data.view_number-1 in the spawned_builder_states
-        if self.built_from_proposed_block.view_number.u64() == self.bootstrap_view_number.u64()
+        // check the presence of quorum_proposal.data.view_number-1 in the spawned_builder_states list
+        if self.built_from_proposed_block.view_number.u64()
+            == self
+                .global_state
+                .read_arc()
+                .await
+                .highest_view_num_builder_id
+                .1
+                .u64()
             && (qc_msg.proposal.data.view_number.u64() == 0
                 || !self
                     .global_state
@@ -437,8 +438,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         &(qc_msg.proposal.data.view_number - 1),
                     ))
         {
-            tracing::info!("QC Proposal handled by bootstrapped builder state");
-            handled_by_bootstrap = true;
+            tracing::info!(
+                "QC Proposal for view {:?} handled by highest view {:?} builder state",
+                qc_msg.proposal.data.view_number,
+                self.built_from_proposed_block.view_number
+            );
         } else if qc_msg.proposal.data.justify_qc.view_number
             != self.built_from_proposed_block.view_number
             || (qc_msg.proposal.data.justify_qc.data.leaf_commit
@@ -492,12 +496,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                             req_sender,
                         )
                         .await;
-
-                    // if handled by bootstrap, then empty out its txns (part of GC)
-                    if handled_by_bootstrap {
-                        self.tx_hash_to_available_txns.clear();
-                        self.timestamp_to_tx.clear();
-                    }
                 } else {
                     tracing::debug!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers");
                 }
@@ -513,73 +511,29 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     #[tracing::instrument(skip_all, name = "process decide event",
                                    fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn process_decide_event(&mut self, decide_msg: DecideMessage<TYPES>) -> Option<Status> {
-        // special clone already launched the clone, then exit
-        // if you haven't launched the clone, then you don't exit, you need atleast one clone to function properly
-        // the special value can be 0 itself, or a view number 0 is also right answer
+        // Exit out all the builder states if their built_from_proposed_block.view_number is less than the latest_decide_view_number
+        // The only exception is that we want to keep the highest view number builder state active to ensure that
+        // we have a builder state to handle the incoming DA and QC proposals
         let _block_size = decide_msg.block_size;
         let latest_leaf_view_number = decide_msg.latest_decide_view_number;
-        let latest_leaf_view_number_as_i64 = latest_leaf_view_number.u64() as i64;
 
         // Garbage collection
         // Keep the builder states stay active till their built in view + BUFFER_VIEW_NUM
-        if self.built_from_proposed_block.view_number.u64() == self.bootstrap_view_number.u64() {
-            // required to convert to prevent underflow on u64's
-            let last_bootstrap_garbage_collected_as_i64 = self
-                .last_bootstrap_garbage_collected_decided_seen_view_num
-                .u64() as i64;
+        if self.built_from_proposed_block.view_number.u64()
+            == self
+                .global_state
+                .read_arc()
+                .await
+                .highest_view_num_builder_id
+                .1
+                .u64()
+        {
+            tracing::info!(
+                "Task view {:?} is not exiting as it has the highest view",
+                self.built_from_proposed_block.view_number.u64()
+            );
 
-            if (latest_leaf_view_number_as_i64 - last_bootstrap_garbage_collected_as_i64)
-                >= 2 * self.buffer_view_num_count as i64
-            {
-                tracing::info!(
-                    "Bootstrapped builder state garbage collected for view number {:?}",
-                    latest_leaf_view_number.u64()
-                );
-
-                let to_be_garbage_collected_view_num =
-                    <<TYPES as NodeType>::Time as ConsensusTime>::new(
-                        latest_leaf_view_number.u64() - self.buffer_view_num_count,
-                    );
-
-                let to_garbage_collect: HashSet<(VidCommitment, BuilderCommitment, TYPES::Time)> =
-                    self.builder_commitments
-                        .iter()
-                        .filter(|&(_, _, view_number)| {
-                            (*view_number) <= to_be_garbage_collected_view_num
-                        })
-                        .cloned()
-                        .collect();
-
-                self.global_state.write_arc().await.remove_handles(
-                    &self.built_from_proposed_block.vid_commitment,
-                    to_garbage_collect,
-                    latest_leaf_view_number,
-                    true,
-                );
-
-                // Remove builder commitments for older views
-                self.builder_commitments.retain(|(_, _, view_number)| {
-                    (*view_number) > to_be_garbage_collected_view_num
-                });
-
-                self.da_proposal_payload_commit_to_da_proposal.retain(
-                    |_builder_commitment, (da_proposal, _node_count)| {
-                        da_proposal.data.view_number > to_be_garbage_collected_view_num
-                    },
-                );
-
-                self.quorum_proposal_payload_commit_to_quorum_proposal
-                    .retain(|_builder_commitment, quorum_proposal| {
-                        quorum_proposal.data.view_number > to_be_garbage_collected_view_num
-                    });
-
-                // update the last_bootstrap_garbage_collected_decided_seen_view_num
-                self.last_bootstrap_garbage_collected_decided_seen_view_num =
-                    to_be_garbage_collected_view_num;
-
-                // Not return from here, needs leaf cleaning also
-                //return Some(Status::ShouldContinue);
-            }
+            return Some(Status::ShouldContinue);
         } else if self.built_from_proposed_block.view_number < latest_leaf_view_number {
             tracing::info!("Task view is less than the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.u64(), self.built_from_proposed_block.view_number.u64());
             self.global_state.write_arc().await.remove_handles(
@@ -631,17 +585,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             });
 
         // register the spawned builder state to spawned_builder_states in the global state
-        self.global_state
-            .write_arc()
-            .await
-            .spawned_builder_states
-            .insert(
-                (
-                    self.built_from_proposed_block.vid_commitment,
-                    self.built_from_proposed_block.view_number,
-                ),
-                req_sender,
-            );
+        self.global_state.write_arc().await.register_builder_state(
+            self.built_from_proposed_block.vid_commitment,
+            self.built_from_proposed_block.view_number,
+            req_sender,
+        );
 
         self.event_loop();
     }
@@ -758,11 +706,17 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let requested_vid_commitment = req.requested_vid_commitment;
         let requested_view_number =
             <<TYPES as NodeType>::Time as ConsensusTime>::new(req.requested_view_number);
-        // If a spawned clone is active then it will handle the request, otherwise the bootstrapped builder will handle
+        // If a spawned clone is active then it will handle the request, otherwise the highest view num builder will handle
         if (requested_vid_commitment == self.built_from_proposed_block.vid_commitment
             && requested_view_number == self.built_from_proposed_block.view_number)
             || (self.built_from_proposed_block.view_number.u64()
-                == self.bootstrap_view_number.u64())
+                == self
+                    .global_state
+                    .read_arc()
+                    .await
+                    .highest_view_num_builder_id
+                    .1
+                    .u64())
         {
             tracing::info!(
                 "Request handled by builder with view {:?} for (parent {:?}, view_num: {:?})",
@@ -965,8 +919,6 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         req_receiver: BroadcastReceiver<MessageType<TYPES>>,
         global_state: Arc<RwLock<GlobalState<TYPES>>>,
         num_nodes: NonZeroUsize,
-        bootstrap_view_number: TYPES::Time,
-        buffer_view_num_count: u64,
         maximize_txn_capture_timeout: Duration,
         base_fee: u64,
         instance_state: Arc<TYPES::InstanceState>,
@@ -986,9 +938,6 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             global_state,
             builder_commitments: HashSet::new(),
             total_nodes: num_nodes,
-            bootstrap_view_number,
-            last_bootstrap_garbage_collected_decided_seen_view_num: bootstrap_view_number,
-            buffer_view_num_count,
             maximize_txn_capture_timeout,
             base_fee,
             instance_state,
@@ -1010,10 +959,6 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             global_state: self.global_state.clone(),
             builder_commitments: self.builder_commitments.clone(),
             total_nodes: self.total_nodes,
-            bootstrap_view_number: self.bootstrap_view_number,
-            last_bootstrap_garbage_collected_decided_seen_view_num: self
-                .last_bootstrap_garbage_collected_decided_seen_view_num,
-            buffer_view_num_count: self.buffer_view_num_count,
             maximize_txn_capture_timeout: self.maximize_txn_capture_timeout,
             base_fee: self.base_fee,
             instance_state: self.instance_state.clone(),

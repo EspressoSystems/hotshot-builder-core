@@ -344,8 +344,6 @@ mod tests {
                 bootstrap_receiver,
                 arc_rwlock_global_state_clone,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
-                ViewNumber::new(0),
-                10,                        // buffer view count
                 Duration::from_millis(10), // max time to wait for non-zero txn block
                 0,                         // base fee
                 Arc::new(TestInstanceState {}),
@@ -359,20 +357,20 @@ mod tests {
 
         // go through the request messages in sreq_msgs and send the request message
         for req_msg in sreq_msgs.iter() {
-            task::sleep(std::time::Duration::from_secs(1)).await;
+            task::sleep(std::time::Duration::from_millis(100)).await;
             arc_rwlock_global_state
                 .read_arc()
                 .await
-                .get_channel_for_builder_or_bootstrap(&req_msg.1)
+                .get_channel_for_matching_builder_or_highest_view_buider(&req_msg.1)
                 .broadcast(req_msg.2.clone())
                 .await
                 .unwrap();
         }
 
-        task::sleep(std::time::Duration::from_secs(2)).await;
+        task::sleep(std::time::Duration::from_millis(1000)).await;
         // go through the decide messages in s_decide_msgs and send the request message
         for decide_msg in sdecide_msgs.iter() {
-            task::sleep(std::time::Duration::from_secs(1)).await;
+            task::sleep(std::time::Duration::from_millis(100)).await;
             decide_sender
                 .broadcast(MessageType::DecideMessage(decide_msg.clone()))
                 .await
