@@ -137,7 +137,7 @@ pub struct BuilderState<TYPES: NodeType> {
     >,
 
     /// Included txs set while building blocks
-    pub included_txns: HashSet<Commitment<TYPES::Transaction>>,
+    pub included_txns: HashMap<Commitment<TYPES::Transaction>, TxTimeStamp>,
 
     /// da_proposal_payload_commit to (da_proposal, node_count)
     #[allow(clippy::type_complexity)]
@@ -239,7 +239,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             let tx_hash = tx.commit();
             tracing::debug!("Transaction hash: {:?}", tx_hash);
             if self.tx_hash_to_available_txns.contains_key(&tx_hash)
-                || self.included_txns.contains(&tx_hash)
+                || self.included_txns.contains_key(&tx_hash)
             {
                 tracing::debug!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
             } else {
@@ -270,7 +270,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // HOTSHOT MEMPOOL TRANSACTION PROCESSING
             // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
             if self.tx_hash_to_available_txns.contains_key(&tx_hash)
-                || self.included_txns.contains(&tx_hash)
+                || self.included_txns.contains_key(&tx_hash)
             {
                 tracing::debug!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
             } else {
@@ -579,10 +579,21 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             .for_each(|txn| {
                 if let Entry::Occupied(txn_info) = self.tx_hash_to_available_txns.entry(*txn) {
                     self.timestamp_to_tx.remove(&txn_info.get().0);
-                    self.included_txns.insert(*txn);
+                    self.included_txns.insert(*txn_info.key(), txn_info.get().0);
                     txn_info.remove_entry();
                 }
             });
+
+        // clear the txns from included txns which are older than current timestamp by 3 secs
+        let current_timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or(Duration::new(0, 0))
+            .as_nanos();
+
+        let cutoff_time = current_timestamp - Duration::from_secs(3).as_nanos();
+
+        self.included_txns
+            .retain(|_txn, timestamp| *timestamp > cutoff_time);
 
         // register the spawned builder state to spawned_builder_states in the global state
         self.global_state.write_arc().await.register_builder_state(
@@ -926,7 +937,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
             tx_hash_to_available_txns: HashMap::new(),
-            included_txns: HashSet::new(),
+            included_txns: HashMap::new(),
             built_from_proposed_block,
             tx_receiver,
             decide_receiver,
