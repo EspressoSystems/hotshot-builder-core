@@ -30,11 +30,14 @@ use async_std::task::spawn_blocking;
 #[cfg(async_executor_impl = "tokio")]
 use tokio::task::spawn_blocking;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
 use std::time::SystemTime;
+use std::{
+    cmp::max,
+    collections::{BTreeMap, HashMap, HashSet},
+};
 use std::{cmp::PartialEq, num::NonZeroUsize};
 use std::{collections::hash_map::Entry, time::Duration};
 
@@ -771,7 +774,9 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 }
             }
         } else {
-            tracing::debug!("Builder {:?} Requested Builder commitment does not match the built_from_view, so ignoring it", self.built_from_proposed_block.view_number);
+            tracing::debug!(
+                "Builder {:?} Requested Builder commitment does not match the built_from_view, so ignoring it",
+                 self.built_from_proposed_block.view_number);
         }
     }
     #[tracing::instrument(skip_all, name = "event loop",
@@ -780,8 +785,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let _builder_handle = async_spawn(async move {
             loop {
                 tracing::debug!("Builder event loop");
-                // read all the available txns from the channel and process them
+                // read and process up to 1/4 of the channel capacity of available txns
+                let mut message_counter = 0;
+                let max_loop_count = max(self.tx_receiver.capacity() / 4, 1);
                 while let Ok(tx) = self.tx_receiver.try_recv() {
+                    if message_counter >= max_loop_count {
+                        break;
+                    }
+                    message_counter += 1;
                     if let MessageType::TransactionMessage(rtx_msg) = tx {
                         tracing::debug!(
                             "Received ({:?}) txns msg in builder {:?}",
