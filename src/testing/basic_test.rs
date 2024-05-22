@@ -347,6 +347,7 @@ mod tests {
                 Duration::from_millis(10), // max time to wait for non-zero txn block
                 0,                         // base fee
                 Arc::new(TestInstanceState {}),
+                Duration::from_secs(3600), // duration for txn garbage collection
             );
 
             //builder_state.event_loop().await;

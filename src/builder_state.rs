@@ -136,8 +136,14 @@ pub struct BuilderState<TYPES: NodeType> {
         (TxTimeStamp, TYPES::Transaction, TransactionSource),
     >,
 
-    /// Included txs set while building blocks
-    pub included_txns: HashMap<Commitment<TYPES::Transaction>, TxTimeStamp>,
+    /// Recent included txs set while building blocks
+    pub included_txns: HashSet<Commitment<TYPES::Transaction>>,
+
+    /// Old txs to be garbage collected
+    pub included_txns_old: HashSet<Commitment<TYPES::Transaction>>,
+
+    /// Expiring txs to be garbage collected
+    pub included_txns_expiring: HashSet<Commitment<TYPES::Transaction>>,
 
     /// da_proposal_payload_commit to (da_proposal, node_count)
     #[allow(clippy::type_complexity)]
@@ -184,6 +190,12 @@ pub struct BuilderState<TYPES: NodeType> {
 
     /// instance state to enfoce max_block_size
     pub instance_state: Arc<TYPES::InstanceState>,
+
+    /// txn garbage collection every duration time
+    pub txn_garbage_collect_duration: Duration,
+
+    /// time of next garbage collection for txns
+    pub next_txn_garbage_collect_time: Instant,
 }
 
 /// Trait to hold the helper functions for the builder
@@ -239,7 +251,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             let tx_hash = tx.commit();
             tracing::debug!("Transaction hash: {:?}", tx_hash);
             if self.tx_hash_to_available_txns.contains_key(&tx_hash)
-                || self.included_txns.contains_key(&tx_hash)
+                || self.included_txns.contains(&tx_hash) || self.included_txns_old.contains(&tx_hash) || self.included_txns_expiring.contains(&tx_hash)
             {
                 tracing::debug!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
             } else {
@@ -270,7 +282,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             // HOTSHOT MEMPOOL TRANSACTION PROCESSING
             // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
             if self.tx_hash_to_available_txns.contains_key(&tx_hash)
-                || self.included_txns.contains_key(&tx_hash)
+            || self.included_txns.contains(&tx_hash) || self.included_txns_old.contains(&tx_hash) || self.included_txns_expiring.contains(&tx_hash)
             {
                 tracing::debug!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
             } else {
@@ -579,21 +591,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             .for_each(|txn| {
                 if let Entry::Occupied(txn_info) = self.tx_hash_to_available_txns.entry(*txn) {
                     self.timestamp_to_tx.remove(&txn_info.get().0);
-                    self.included_txns.insert(*txn_info.key(), txn_info.get().0);
+                    self.included_txns.insert(*txn);
                     txn_info.remove_entry();
                 }
             });
-
-        // clear the txns from included txns which are older than current timestamp by 3 secs
-        let current_timestamp = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or(Duration::new(0, 0))
-            .as_nanos();
-
-        let cutoff_time = current_timestamp - Duration::from_secs(3).as_nanos();
-
-        self.included_txns
-            .retain(|_txn, timestamp| *timestamp > cutoff_time);
 
         // register the spawned builder state to spawned_builder_states in the global state
         self.global_state.write_arc().await.register_builder_state(
@@ -933,11 +934,14 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         maximize_txn_capture_timeout: Duration,
         base_fee: u64,
         instance_state: Arc<TYPES::InstanceState>,
+        txn_garbage_collect_duration: Duration,
     ) -> Self {
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
             tx_hash_to_available_txns: HashMap::new(),
-            included_txns: HashMap::new(),
+            included_txns: HashSet::new(),
+            included_txns_old: HashSet::new(),
+            included_txns_expiring: HashSet::new(),
             built_from_proposed_block,
             tx_receiver,
             decide_receiver,
@@ -952,13 +956,33 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             maximize_txn_capture_timeout,
             base_fee,
             instance_state,
+            txn_garbage_collect_duration,
+            next_txn_garbage_collect_time: Instant::now() + txn_garbage_collect_duration,
         }
     }
     pub fn clone_with_receiver(&self, req_receiver: BroadcastReceiver<MessageType<TYPES>>) -> Self {
+        // if current time is greater than or equal to next_txn_time, then garbage collect
+        let mut included_txns = self.included_txns.clone();
+        let mut included_txns_old = self.included_txns_old.clone();
+        let mut included_txns_expiring = self.included_txns_expiring.clone();
+        let mut next_txn_garbage_collect_time = self.next_txn_garbage_collect_time;
+
+        // txn garbage collection
+        if Instant::now() >= self.next_txn_garbage_collect_time {
+            included_txns_expiring = included_txns_old.clone();
+            included_txns_old = included_txns.clone();
+            included_txns.clear();
+
+            next_txn_garbage_collect_time =
+                self.next_txn_garbage_collect_time + self.txn_garbage_collect_duration;
+        }
+
         BuilderState {
             timestamp_to_tx: self.timestamp_to_tx.clone(),
             tx_hash_to_available_txns: self.tx_hash_to_available_txns.clone(),
-            included_txns: self.included_txns.clone(),
+            included_txns,
+            included_txns_old,
+            included_txns_expiring,
             built_from_proposed_block: self.built_from_proposed_block.clone(),
             tx_receiver: self.tx_receiver.clone(),
             decide_receiver: self.decide_receiver.clone(),
@@ -973,6 +997,8 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             maximize_txn_capture_timeout: self.maximize_txn_capture_timeout,
             base_fee: self.base_fee,
             instance_state: self.instance_state.clone(),
+            txn_garbage_collect_duration: self.txn_garbage_collect_duration,
+            next_txn_garbage_collect_time,
         }
     }
 }
