@@ -1039,6 +1039,26 @@
 <a href="#1037" id="1037">1037</a>
 <a href="#1038" id="1038">1038</a>
 <a href="#1039" id="1039">1039</a>
+<a href="#1040" id="1040">1040</a>
+<a href="#1041" id="1041">1041</a>
+<a href="#1042" id="1042">1042</a>
+<a href="#1043" id="1043">1043</a>
+<a href="#1044" id="1044">1044</a>
+<a href="#1045" id="1045">1045</a>
+<a href="#1046" id="1046">1046</a>
+<a href="#1047" id="1047">1047</a>
+<a href="#1048" id="1048">1048</a>
+<a href="#1049" id="1049">1049</a>
+<a href="#1050" id="1050">1050</a>
+<a href="#1051" id="1051">1051</a>
+<a href="#1052" id="1052">1052</a>
+<a href="#1053" id="1053">1053</a>
+<a href="#1054" id="1054">1054</a>
+<a href="#1055" id="1055">1055</a>
+<a href="#1056" id="1056">1056</a>
+<a href="#1057" id="1057">1057</a>
+<a href="#1058" id="1058">1058</a>
+<a href="#1059" id="1059">1059</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::SystemContextHandle,
@@ -1154,8 +1174,6 @@
     <span class="comment">// scheduled GC by view number
     </span><span class="kw">pub </span>view_to_cleanup_targets: BTreeMap&lt;Types::Time, BuilderStatesInfo&lt;Types&gt;&gt;,
 
-    <span class="kw">pub </span>bootstrap_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
-
     <span class="comment">// sending a transaction from the hotshot/private mempool to the builder states
     // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
     </span><span class="kw">pub </span>tx_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
@@ -1165,6 +1183,9 @@
 
     <span class="doccomment">/// number of view to buffer before garbage collect
     </span><span class="kw">pub </span>buffer_view_num_count: u64,
+
+    <span class="doccomment">/// Max view num
+    </span><span class="kw">pub </span>highest_view_num_builder_id: (VidCommitment, Types::Time),
 }
 
 <span class="kw">impl</span>&lt;Types: NodeType&gt; GlobalState&lt;Types&gt; {
@@ -1186,11 +1207,27 @@
             block_hash_to_block: Default::default(),
             spawned_builder_states,
             view_to_cleanup_targets: Default::default(),
-            bootstrap_sender,
             tx_sender,
             last_garbage_collected_view_num,
             buffer_view_num_count,
             builder_state_to_last_built_block: Default::default(),
+            highest_view_num_builder_id: (bootstrapped_builder_state_id, bootstrapped_view_num),
+        }
+    }
+
+    <span class="kw">pub fn </span>register_builder_state(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        vid_commmit: VidCommitment,
+        view_num: Types::Time,
+        request_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
+    ) {
+        <span class="comment">// register the builder state
+        </span><span class="self">self</span>.spawned_builder_states
+            .insert((vid_commmit, view_num), request_sender);
+
+        <span class="comment">// keep track of the max view number
+        </span><span class="kw">if </span>view_num &gt; <span class="self">self</span>.highest_view_num_builder_id.<span class="number">1 </span>{
+            <span class="self">self</span>.highest_view_num_builder_id = (vid_commmit, view_num);
         }
     }
 
@@ -1224,10 +1261,10 @@
         builder_vid_commitment: <span class="kw-2">&amp;</span>VidCommitment,
         block_hashes: HashSet&lt;(VidCommitment, BuilderCommitment, Types::Time)&gt;,
         on_decide_view: Types::Time,
-        bootstrap: bool,
+        highest_view_num: bool,
     ) {
         <span class="comment">// remove the builder commitment from the spawned builder states
-        </span><span class="kw">if </span>!bootstrap {
+        </span><span class="kw">if </span>!highest_view_num {
             <span class="comment">// remove everything from the spawned builder states when view_num &lt;= on_decide_view
             </span><span class="self">self</span>.spawned_builder_states
                 .retain(|(_vid, view_num), _channel| view_num &gt; <span class="kw-2">&amp;</span>on_decide_view);
@@ -1314,7 +1351,7 @@
             })
     }
 
-    <span class="kw">pub fn </span>get_channel_for_builder_or_bootstrap(
+    <span class="kw">pub fn </span>get_channel_for_matching_builder_or_highest_view_buider(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         key: <span class="kw-2">&amp;</span>(VidCommitment, Types::Time),
     ) -&gt; <span class="kw-2">&amp;</span>BroadcastSender&lt;MessageType&lt;Types&gt;&gt; {
@@ -1322,11 +1359,14 @@
             channel
         } <span class="kw">else </span>{
             <span class="macro">tracing::info!</span>(
-                <span class="string">"failed to recover builder for parent {:?}@{:?}, using bootstrap"</span>,
+                <span class="string">"failed to recover builder for parent {:?}@{:?}, using higest view num builder"</span>,
                 key.<span class="number">0</span>,
                 key.<span class="number">1
             </span>);
-            <span class="kw-2">&amp;</span><span class="self">self</span>.bootstrap_sender
+            <span class="comment">// get the sender for the highest view number builder
+            </span><span class="self">self</span>.spawned_builder_states
+                .get(<span class="kw-2">&amp;</span><span class="self">self</span>.highest_view_num_builder_id)
+                .expect(<span class="string">"failed to recover highest view num builder"</span>)
         }
     }
 
@@ -1406,7 +1446,7 @@ Handling Builder API responses
 
         <span class="kw">let </span>view_num = &lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Time <span class="kw">as </span>ConsensusTime&gt;::new(view_number);
         <span class="comment">// check in the local spawned builder states, if it doesn't exist it means there could be two cases
-        // it has been sent to garbed collected, or never exists, in later case let bootstrapped build a block for it
+        // it has been sent to garbed collected, or never exists, in later case let higest view num builder state build a block for it
         </span><span class="kw">let </span>just_return_with_this = {
             <span class="comment">//let global_state = self.global_state.read_arc().await;
             </span><span class="kw">if </span><span class="self">self
@@ -1443,7 +1483,7 @@ Handling Builder API responses
                 </span>.global_state
                 .read_arc()
                 .<span class="kw">await
-                </span>.get_channel_for_builder_or_bootstrap(<span class="kw-2">&amp;</span>(<span class="kw-2">*</span>for_parent, view_num))
+                </span>.get_channel_for_matching_builder_or_highest_view_buider(<span class="kw-2">&amp;</span>(<span class="kw-2">*</span>for_parent, view_num))
                 .broadcast(MessageType::RequestMessage(req_msg.clone()))
                 .<span class="kw">await
             </span>{

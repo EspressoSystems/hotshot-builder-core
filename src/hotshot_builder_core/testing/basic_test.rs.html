@@ -388,8 +388,6 @@
 <a href="#386" id="386">386</a>
 <a href="#387" id="387">387</a>
 <a href="#388" id="388">388</a>
-<a href="#389" id="389">389</a>
-<a href="#390" id="390">390</a>
 </pre></div><pre class="rust"><code><span class="kw">pub use </span>hotshot::traits::election::static_committee::GeneralStaticCommittee;
 <span class="kw">pub use </span>hotshot_types::{
     data::{DaProposal, Leaf, QuorumProposal, ViewNumber},
@@ -736,9 +734,7 @@
                 bootstrap_receiver,
                 arc_rwlock_global_state_clone,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
-                ViewNumber::new(<span class="number">0</span>),
-                <span class="number">10</span>,                        <span class="comment">// buffer view count
-                </span>Duration::from_millis(<span class="number">10</span>), <span class="comment">// max time to wait for non-zero txn block
+                Duration::from_millis(<span class="number">10</span>), <span class="comment">// max time to wait for non-zero txn block
                 </span><span class="number">0</span>,                         <span class="comment">// base fee
                 </span>Arc::new(TestInstanceState {}),
             );
@@ -751,20 +747,20 @@
 
         <span class="comment">// go through the request messages in sreq_msgs and send the request message
         </span><span class="kw">for </span>req_msg <span class="kw">in </span>sreq_msgs.iter() {
-            task::sleep(std::time::Duration::from_secs(<span class="number">1</span>)).<span class="kw">await</span>;
+            task::sleep(std::time::Duration::from_millis(<span class="number">100</span>)).<span class="kw">await</span>;
             arc_rwlock_global_state
                 .read_arc()
                 .<span class="kw">await
-                </span>.get_channel_for_builder_or_bootstrap(<span class="kw-2">&amp;</span>req_msg.<span class="number">1</span>)
+                </span>.get_channel_for_matching_builder_or_highest_view_buider(<span class="kw-2">&amp;</span>req_msg.<span class="number">1</span>)
                 .broadcast(req_msg.<span class="number">2</span>.clone())
                 .<span class="kw">await
                 </span>.unwrap();
         }
 
-        task::sleep(std::time::Duration::from_secs(<span class="number">2</span>)).<span class="kw">await</span>;
+        task::sleep(std::time::Duration::from_millis(<span class="number">1000</span>)).<span class="kw">await</span>;
         <span class="comment">// go through the decide messages in s_decide_msgs and send the request message
         </span><span class="kw">for </span>decide_msg <span class="kw">in </span>sdecide_msgs.iter() {
-            task::sleep(std::time::Duration::from_secs(<span class="number">1</span>)).<span class="kw">await</span>;
+            task::sleep(std::time::Duration::from_millis(<span class="number">100</span>)).<span class="kw">await</span>;
             decide_sender
                 .broadcast(MessageType::DecideMessage(decide_msg.clone()))
                 .<span class="kw">await

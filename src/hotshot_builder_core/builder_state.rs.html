@@ -967,61 +967,6 @@
 <a href="#965" id="965">965</a>
 <a href="#966" id="966">966</a>
 <a href="#967" id="967">967</a>
-<a href="#968" id="968">968</a>
-<a href="#969" id="969">969</a>
-<a href="#970" id="970">970</a>
-<a href="#971" id="971">971</a>
-<a href="#972" id="972">972</a>
-<a href="#973" id="973">973</a>
-<a href="#974" id="974">974</a>
-<a href="#975" id="975">975</a>
-<a href="#976" id="976">976</a>
-<a href="#977" id="977">977</a>
-<a href="#978" id="978">978</a>
-<a href="#979" id="979">979</a>
-<a href="#980" id="980">980</a>
-<a href="#981" id="981">981</a>
-<a href="#982" id="982">982</a>
-<a href="#983" id="983">983</a>
-<a href="#984" id="984">984</a>
-<a href="#985" id="985">985</a>
-<a href="#986" id="986">986</a>
-<a href="#987" id="987">987</a>
-<a href="#988" id="988">988</a>
-<a href="#989" id="989">989</a>
-<a href="#990" id="990">990</a>
-<a href="#991" id="991">991</a>
-<a href="#992" id="992">992</a>
-<a href="#993" id="993">993</a>
-<a href="#994" id="994">994</a>
-<a href="#995" id="995">995</a>
-<a href="#996" id="996">996</a>
-<a href="#997" id="997">997</a>
-<a href="#998" id="998">998</a>
-<a href="#999" id="999">999</a>
-<a href="#1000" id="1000">1000</a>
-<a href="#1001" id="1001">1001</a>
-<a href="#1002" id="1002">1002</a>
-<a href="#1003" id="1003">1003</a>
-<a href="#1004" id="1004">1004</a>
-<a href="#1005" id="1005">1005</a>
-<a href="#1006" id="1006">1006</a>
-<a href="#1007" id="1007">1007</a>
-<a href="#1008" id="1008">1008</a>
-<a href="#1009" id="1009">1009</a>
-<a href="#1010" id="1010">1010</a>
-<a href="#1011" id="1011">1011</a>
-<a href="#1012" id="1012">1012</a>
-<a href="#1013" id="1013">1013</a>
-<a href="#1014" id="1014">1014</a>
-<a href="#1015" id="1015">1015</a>
-<a href="#1016" id="1016">1016</a>
-<a href="#1017" id="1017">1017</a>
-<a href="#1018" id="1018">1018</a>
-<a href="#1019" id="1019">1019</a>
-<a href="#1020" id="1020">1020</a>
-<a href="#1021" id="1021">1021</a>
-<a href="#1022" id="1022">1022</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DaProposal, Leaf, QuorumProposal},
     message::Proposal,
@@ -1200,15 +1145,6 @@
     <span class="doccomment">/// locally spawned builder Commitements
     </span><span class="kw">pub </span>builder_commitments: HashSet&lt;(VidCommitment, BuilderCommitment, TYPES::Time)&gt;,
 
-    <span class="doccomment">/// bootstrapped view number
-    </span><span class="kw">pub </span>bootstrap_view_number: TYPES::Time,
-
-    <span class="doccomment">/// last bootstrap garbage collected decided seen view_num
-    </span><span class="kw">pub </span>last_bootstrap_garbage_collected_decided_seen_view_num: TYPES::Time,
-
-    <span class="doccomment">/// number of view to buffer before garbage collect
-    </span><span class="kw">pub </span>buffer_view_num_count: u64,
-
     <span class="doccomment">/// timeout for maximising the txns in the block
     </span><span class="kw">pub </span>maximize_txn_capture_timeout: Duration,
 
@@ -1330,14 +1266,20 @@
             da_msg.proposal.data.view_number
         );
 
-        <span class="kw">let </span><span class="kw-2">mut </span>handled_by_bootstrap = <span class="bool-val">false</span>;
         <span class="comment">// Two cases to handle:
         // Case 1: Bootstrapping phase
         // Case 2: No intended builder state exist
-        // To handle both cases, we can have the bootstrap builder running,
+        // To handle both cases, we can have the highest view number builder state running
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
         // check the presence of da_msg.proposal.data.view_number-1 in the spawned_builder_states list
-        </span><span class="kw">if </span><span class="self">self</span>.built_from_proposed_block.view_number.u64() == <span class="self">self</span>.bootstrap_view_number.u64()
+        </span><span class="kw">if </span><span class="self">self</span>.built_from_proposed_block.view_number.u64()
+            == <span class="self">self
+                </span>.global_state
+                .read_arc()
+                .<span class="kw">await
+                </span>.highest_view_num_builder_id
+                .<span class="number">1
+                </span>.u64()
             &amp;&amp; (da_msg.proposal.data.view_number.u64() == <span class="number">0
                 </span>|| !<span class="self">self
                     </span>.global_state
@@ -1347,21 +1289,25 @@
                         <span class="kw-2">&amp;</span>(da_msg.proposal.data.view_number - <span class="number">1</span>),
                     ))
         {
-            <span class="macro">tracing::info!</span>(<span class="string">"DA Proposal handled by bootstrapped builder state"</span>);
-
-            <span class="comment">// if we are bootstrapping and we spawn a clone, we can assume in the healthy version of we can just zero out
-            // da_proposal to filter out the bootstrapping state and zero out the case
-            </span>handled_by_bootstrap = <span class="bool-val">true</span>;
+            <span class="macro">tracing::info!</span>(
+                <span class="string">"DA Proposal for view {:?} handled by highest view {:?} builder state"</span>,
+                da_msg.proposal.data.view_number,
+                <span class="self">self</span>.built_from_proposed_block.view_number
+            );
         }
-        <span class="comment">// Do the validation check
+        <span class="comment">// Do the validation check for the correct builder state then
         </span><span class="kw">else if </span>da_msg.proposal.data.view_number.u64()
             != <span class="self">self</span>.built_from_proposed_block.view_number.u64() + <span class="number">1
         </span>{
-            <span class="macro">tracing::debug!</span>(<span class="string">"View number is not equal to built_from_view + 1, so returning"</span>);
+            <span class="macro">tracing::debug!</span>(
+                <span class="string">"DA Proposal view number{:?} is not equal to built_from_view + 1, so returning"</span>,
+                da_msg.proposal.data.view_number
+            );
             <span class="kw">return</span>;
         }
 
-        <span class="kw">let </span>da_proposal = da_msg.proposal.clone();
+        <span class="comment">// If the respective builder state exists to handle the request
+        </span><span class="kw">let </span>da_proposal = da_msg.proposal.clone();
         <span class="kw">let </span>sender = <span class="kw-2">&amp;</span>da_msg.sender;
 
         <span class="comment">// get the view number and encoded txns from the da_proposal_data
@@ -1417,12 +1363,6 @@
                             req_sender,
                         )
                         .<span class="kw">await</span>;
-
-                    <span class="comment">// if bootstrap in spawning it, then empty out its txns (part of GC)
-                    </span><span class="kw">if </span>handled_by_bootstrap {
-                        <span class="self">self</span>.tx_hash_to_available_txns.clear();
-                        <span class="self">self</span>.timestamp_to_tx.clear();
-                    }
                 } <span class="kw">else </span>{
                     <span class="macro">tracing::debug!</span>(<span class="string">"Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers"</span>);
                 }
@@ -1444,14 +1384,20 @@
             qc_msg.proposal.data.view_number
         );
 
-        <span class="kw">let </span><span class="kw-2">mut </span>handled_by_bootstrap = <span class="bool-val">false</span>;
         <span class="comment">// Two cases to handle:
         // Case 1: Bootstrapping phase
         // Case 2: No intended builder state exist
-        // To handle both cases, we can have the bootstrap builder running,
+        // To handle both cases, we can have the highest view number builder state running
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
-        // check the presence of da_msg.proposal.data.view_number-1 in the spawned_builder_states
-        </span><span class="kw">if </span><span class="self">self</span>.built_from_proposed_block.view_number.u64() == <span class="self">self</span>.bootstrap_view_number.u64()
+        // check the presence of quorum_proposal.data.view_number-1 in the spawned_builder_states list
+        </span><span class="kw">if </span><span class="self">self</span>.built_from_proposed_block.view_number.u64()
+            == <span class="self">self
+                </span>.global_state
+                .read_arc()
+                .<span class="kw">await
+                </span>.highest_view_num_builder_id
+                .<span class="number">1
+                </span>.u64()
             &amp;&amp; (qc_msg.proposal.data.view_number.u64() == <span class="number">0
                 </span>|| !<span class="self">self
                     </span>.global_state
@@ -1461,8 +1407,11 @@
                         <span class="kw-2">&amp;</span>(qc_msg.proposal.data.view_number - <span class="number">1</span>),
                     ))
         {
-            <span class="macro">tracing::info!</span>(<span class="string">"QC Proposal handled by bootstrapped builder state"</span>);
-            handled_by_bootstrap = <span class="bool-val">true</span>;
+            <span class="macro">tracing::info!</span>(
+                <span class="string">"QC Proposal for view {:?} handled by highest view {:?} builder state"</span>,
+                qc_msg.proposal.data.view_number,
+                <span class="self">self</span>.built_from_proposed_block.view_number
+            );
         } <span class="kw">else if </span>qc_msg.proposal.data.justify_qc.view_number
             != <span class="self">self</span>.built_from_proposed_block.view_number
             || (qc_msg.proposal.data.justify_qc.data.leaf_commit
@@ -1516,12 +1465,6 @@
                             req_sender,
                         )
                         .<span class="kw">await</span>;
-
-                    <span class="comment">// if handled by bootstrap, then empty out its txns (part of GC)
-                    </span><span class="kw">if </span>handled_by_bootstrap {
-                        <span class="self">self</span>.tx_hash_to_available_txns.clear();
-                        <span class="self">self</span>.timestamp_to_tx.clear();
-                    }
                 } <span class="kw">else </span>{
                     <span class="macro">tracing::debug!</span>(<span class="string">"Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers"</span>);
                 }
@@ -1537,73 +1480,29 @@
     </span><span class="attr">#[tracing::instrument(skip_all, name = <span class="string">"process decide event"</span>,
                                    fields(builder_built_from_proposed_block = %<span class="self">self</span>.built_from_proposed_block))]
     </span><span class="kw">async fn </span>process_decide_event(<span class="kw-2">&amp;mut </span><span class="self">self</span>, decide_msg: DecideMessage&lt;TYPES&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Status&gt; {
-        <span class="comment">// special clone already launched the clone, then exit
-        // if you haven't launched the clone, then you don't exit, you need atleast one clone to function properly
-        // the special value can be 0 itself, or a view number 0 is also right answer
+        <span class="comment">// Exit out all the builder states if their built_from_proposed_block.view_number is less than the latest_decide_view_number
+        // The only exception is that we want to keep the highest view number builder state active to ensure that
+        // we have a builder state to handle the incoming DA and QC proposals
         </span><span class="kw">let </span>_block_size = decide_msg.block_size;
         <span class="kw">let </span>latest_leaf_view_number = decide_msg.latest_decide_view_number;
-        <span class="kw">let </span>latest_leaf_view_number_as_i64 = latest_leaf_view_number.u64() <span class="kw">as </span>i64;
 
         <span class="comment">// Garbage collection
         // Keep the builder states stay active till their built in view + BUFFER_VIEW_NUM
-        </span><span class="kw">if </span><span class="self">self</span>.built_from_proposed_block.view_number.u64() == <span class="self">self</span>.bootstrap_view_number.u64() {
-            <span class="comment">// required to convert to prevent underflow on u64's
-            </span><span class="kw">let </span>last_bootstrap_garbage_collected_as_i64 = <span class="self">self
-                </span>.last_bootstrap_garbage_collected_decided_seen_view_num
-                .u64() <span class="kw">as </span>i64;
+        </span><span class="kw">if </span><span class="self">self</span>.built_from_proposed_block.view_number.u64()
+            == <span class="self">self
+                </span>.global_state
+                .read_arc()
+                .<span class="kw">await
+                </span>.highest_view_num_builder_id
+                .<span class="number">1
+                </span>.u64()
+        {
+            <span class="macro">tracing::info!</span>(
+                <span class="string">"Task view {:?} is not exiting as it has the highest view"</span>,
+                <span class="self">self</span>.built_from_proposed_block.view_number.u64()
+            );
 
-            <span class="kw">if </span>(latest_leaf_view_number_as_i64 - last_bootstrap_garbage_collected_as_i64)
-                &gt;= <span class="number">2 </span>* <span class="self">self</span>.buffer_view_num_count <span class="kw">as </span>i64
-            {
-                <span class="macro">tracing::info!</span>(
-                    <span class="string">"Bootstrapped builder state garbage collected for view number {:?}"</span>,
-                    latest_leaf_view_number.u64()
-                );
-
-                <span class="kw">let </span>to_be_garbage_collected_view_num =
-                    &lt;&lt;TYPES <span class="kw">as </span>NodeType&gt;::Time <span class="kw">as </span>ConsensusTime&gt;::new(
-                        latest_leaf_view_number.u64() - <span class="self">self</span>.buffer_view_num_count,
-                    );
-
-                <span class="kw">let </span>to_garbage_collect: HashSet&lt;(VidCommitment, BuilderCommitment, TYPES::Time)&gt; =
-                    <span class="self">self</span>.builder_commitments
-                        .iter()
-                        .filter(|<span class="kw-2">&amp;</span>(<span class="kw">_</span>, <span class="kw">_</span>, view_number)| {
-                            (<span class="kw-2">*</span>view_number) &lt;= to_be_garbage_collected_view_num
-                        })
-                        .cloned()
-                        .collect();
-
-                <span class="self">self</span>.global_state.write_arc().<span class="kw">await</span>.remove_handles(
-                    <span class="kw-2">&amp;</span><span class="self">self</span>.built_from_proposed_block.vid_commitment,
-                    to_garbage_collect,
-                    latest_leaf_view_number,
-                    <span class="bool-val">true</span>,
-                );
-
-                <span class="comment">// Remove builder commitments for older views
-                </span><span class="self">self</span>.builder_commitments.retain(|(<span class="kw">_</span>, <span class="kw">_</span>, view_number)| {
-                    (<span class="kw-2">*</span>view_number) &gt; to_be_garbage_collected_view_num
-                });
-
-                <span class="self">self</span>.da_proposal_payload_commit_to_da_proposal.retain(
-                    |_builder_commitment, (da_proposal, _node_count)| {
-                        da_proposal.data.view_number &gt; to_be_garbage_collected_view_num
-                    },
-                );
-
-                <span class="self">self</span>.quorum_proposal_payload_commit_to_quorum_proposal
-                    .retain(|_builder_commitment, quorum_proposal| {
-                        quorum_proposal.data.view_number &gt; to_be_garbage_collected_view_num
-                    });
-
-                <span class="comment">// update the last_bootstrap_garbage_collected_decided_seen_view_num
-                </span><span class="self">self</span>.last_bootstrap_garbage_collected_decided_seen_view_num =
-                    to_be_garbage_collected_view_num;
-
-                <span class="comment">// Not return from here, needs leaf cleaning also
-                //return Some(Status::ShouldContinue);
-            </span>}
+            <span class="kw">return </span><span class="prelude-val">Some</span>(Status::ShouldContinue);
         } <span class="kw">else if </span><span class="self">self</span>.built_from_proposed_block.view_number &lt; latest_leaf_view_number {
             <span class="macro">tracing::info!</span>(<span class="string">"Task view is less than the currently decided leaf view {:?}; exiting builder state for view {:?}"</span>, latest_leaf_view_number.u64(), <span class="self">self</span>.built_from_proposed_block.view_number.u64());
             <span class="self">self</span>.global_state.write_arc().<span class="kw">await</span>.remove_handles(
@@ -1655,17 +1554,11 @@
             });
 
         <span class="comment">// register the spawned builder state to spawned_builder_states in the global state
-        </span><span class="self">self</span>.global_state
-            .write_arc()
-            .<span class="kw">await
-            </span>.spawned_builder_states
-            .insert(
-                (
-                    <span class="self">self</span>.built_from_proposed_block.vid_commitment,
-                    <span class="self">self</span>.built_from_proposed_block.view_number,
-                ),
-                req_sender,
-            );
+        </span><span class="self">self</span>.global_state.write_arc().<span class="kw">await</span>.register_builder_state(
+            <span class="self">self</span>.built_from_proposed_block.vid_commitment,
+            <span class="self">self</span>.built_from_proposed_block.view_number,
+            req_sender,
+        );
 
         <span class="self">self</span>.event_loop();
     }
@@ -1782,11 +1675,17 @@
         <span class="kw">let </span>requested_vid_commitment = req.requested_vid_commitment;
         <span class="kw">let </span>requested_view_number =
             &lt;&lt;TYPES <span class="kw">as </span>NodeType&gt;::Time <span class="kw">as </span>ConsensusTime&gt;::new(req.requested_view_number);
-        <span class="comment">// If a spawned clone is active then it will handle the request, otherwise the bootstrapped builder will handle
+        <span class="comment">// If a spawned clone is active then it will handle the request, otherwise the highest view num builder will handle
         </span><span class="kw">if </span>(requested_vid_commitment == <span class="self">self</span>.built_from_proposed_block.vid_commitment
             &amp;&amp; requested_view_number == <span class="self">self</span>.built_from_proposed_block.view_number)
             || (<span class="self">self</span>.built_from_proposed_block.view_number.u64()
-                == <span class="self">self</span>.bootstrap_view_number.u64())
+                == <span class="self">self
+                    </span>.global_state
+                    .read_arc()
+                    .<span class="kw">await
+                    </span>.highest_view_num_builder_id
+                    .<span class="number">1
+                    </span>.u64())
         {
             <span class="macro">tracing::info!</span>(
                 <span class="string">"Request handled by builder with view {:?} for (parent {:?}, view_num: {:?})"</span>,
@@ -1989,8 +1888,6 @@
         req_receiver: BroadcastReceiver&lt;MessageType&lt;TYPES&gt;&gt;,
         global_state: Arc&lt;RwLock&lt;GlobalState&lt;TYPES&gt;&gt;&gt;,
         num_nodes: NonZeroUsize,
-        bootstrap_view_number: TYPES::Time,
-        buffer_view_num_count: u64,
         maximize_txn_capture_timeout: Duration,
         base_fee: u64,
         instance_state: Arc&lt;TYPES::InstanceState&gt;,
@@ -2010,9 +1907,6 @@
             global_state,
             builder_commitments: HashSet::new(),
             total_nodes: num_nodes,
-            bootstrap_view_number,
-            last_bootstrap_garbage_collected_decided_seen_view_num: bootstrap_view_number,
-            buffer_view_num_count,
             maximize_txn_capture_timeout,
             base_fee,
             instance_state,
@@ -2034,10 +1928,6 @@
             global_state: <span class="self">self</span>.global_state.clone(),
             builder_commitments: <span class="self">self</span>.builder_commitments.clone(),
             total_nodes: <span class="self">self</span>.total_nodes,
-            bootstrap_view_number: <span class="self">self</span>.bootstrap_view_number,
-            last_bootstrap_garbage_collected_decided_seen_view_num: <span class="self">self
-                </span>.last_bootstrap_garbage_collected_decided_seen_view_num,
-            buffer_view_num_count: <span class="self">self</span>.buffer_view_num_count,
             maximize_txn_capture_timeout: <span class="self">self</span>.maximize_txn_capture_timeout,
             base_fee: <span class="self">self</span>.base_fee,
             instance_state: <span class="self">self</span>.instance_state.clone(),
