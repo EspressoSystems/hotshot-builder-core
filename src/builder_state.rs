@@ -969,8 +969,8 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
 
         // txn garbage collection
         if Instant::now() >= self.next_txn_garbage_collect_time {
-            included_txns_expiring = included_txns_old.clone();
-            included_txns_old = included_txns.clone();
+            included_txns_expiring.clone_from(&included_txns_old);
+            included_txns_old.clone_from(&included_txns);
             included_txns.clear();
 
             next_txn_garbage_collect_time =
