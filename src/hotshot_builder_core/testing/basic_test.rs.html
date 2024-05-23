@@ -388,6 +388,7 @@
 <a href="#386" id="386">386</a>
 <a href="#387" id="387">387</a>
 <a href="#388" id="388">388</a>
+<a href="#389" id="389">389</a>
 </pre></div><pre class="rust"><code><span class="kw">pub use </span>hotshot::traits::election::static_committee::GeneralStaticCommittee;
 <span class="kw">pub use </span>hotshot_types::{
     data::{DaProposal, Leaf, QuorumProposal, ViewNumber},
@@ -737,7 +738,8 @@
                 Duration::from_millis(<span class="number">10</span>), <span class="comment">// max time to wait for non-zero txn block
                 </span><span class="number">0</span>,                         <span class="comment">// base fee
                 </span>Arc::new(TestInstanceState {}),
-            );
+                Duration::from_secs(<span class="number">3600</span>), <span class="comment">// duration for txn garbage collection
+            </span>);
 
             <span class="comment">//builder_state.event_loop().await;
             </span>builder_state.event_loop();
