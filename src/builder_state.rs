@@ -961,21 +961,27 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         }
     }
     pub fn clone_with_receiver(&self, req_receiver: BroadcastReceiver<MessageType<TYPES>>) -> Self {
-        // if current time is greater than or equal to next_txn_time, then garbage collect
-        let mut included_txns = self.included_txns.clone();
-        let mut included_txns_old = self.included_txns_old.clone();
-        let mut included_txns_expiring = self.included_txns_expiring.clone();
-        let mut next_txn_garbage_collect_time = self.next_txn_garbage_collect_time;
-
-        // txn garbage collection
-        if Instant::now() >= self.next_txn_garbage_collect_time {
-            included_txns_expiring.clone_from(&included_txns_old);
-            included_txns_old.clone_from(&included_txns);
-            included_txns.clear();
-
-            next_txn_garbage_collect_time =
-                self.next_txn_garbage_collect_time + self.txn_garbage_collect_duration;
-        }
+        // Handle the garbage collection of txns
+        let (
+            included_txns,
+            included_txns_old,
+            included_txns_expiring,
+            next_txn_garbage_collect_time,
+        ) = if Instant::now() >= self.next_txn_garbage_collect_time {
+            (
+                HashSet::new(),
+                self.included_txns.clone(),
+                self.included_txns_old.clone(),
+                Instant::now() + self.txn_garbage_collect_duration,
+            )
+        } else {
+            (
+                self.included_txns.clone(),
+                self.included_txns_old.clone(),
+                self.included_txns_expiring.clone(),
+                self.next_txn_garbage_collect_time,
+            )
+        };
 
         BuilderState {
             timestamp_to_tx: self.timestamp_to_tx.clone(),
