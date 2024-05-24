@@ -779,7 +779,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     fn event_loop(mut self) {
         let _builder_handle = async_spawn(async move {
             loop {
-                tracing::debug!("Builder event loop");
+                tracing::info!(
+                    "Builder{:?} event loop",
+                    self.built_from_proposed_block.view_number
+                );
                 // read all the available txns from the channel and process them
                 while let Ok(tx) = self.tx_receiver.try_recv() {
                     if let MessageType::TransactionMessage(rtx_msg) = tx {
@@ -870,7 +873,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match decide {
                             Some(decide) => {
                                 if let MessageType::DecideMessage(rdecide_msg) = decide {
-                                    tracing::debug!("Received decide msg in builder {:?}:\n {:?} from index", self.built_from_proposed_block, rdecide_msg);
+                                    tracing::debug!("Received decide msg in builder {:?}:\n {:?} from index", self.built_from_proposed_block, rdecide_msg.latest_decide_view_number);
                                     let decide_status = self.process_decide_event(rdecide_msg).await;
                                     match decide_status{
                                         Some(Status::ShouldExit) => {

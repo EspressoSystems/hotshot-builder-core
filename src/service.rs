@@ -1,3 +1,4 @@
+use clap::Error;
 use hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::SystemContextHandle,
@@ -545,9 +546,23 @@ where
             .block_hash_to_block
             .get(&(block_hash.clone(), view_num))
         {
+            tracing::info!(
+                "Trying sending vid trigger info for {:?}@{:?}",
+                block_hash,
+                view_num
+            );
+
             if let Some(trigger_writer) = block_info.vid_trigger.write().await.take() {
+                tracing::info!("Sending vid trigger for {:?}@{:?}", block_hash, view_num);
                 trigger_writer.send(TriggerStatus::Start);
+                tracing::info!("Sent vid trigger for {:?}@{:?}", block_hash, view_num);
             }
+            tracing::info!(
+                "Done Trying sending vid trigger info for {:?}@{:?}",
+                block_hash,
+                view_num
+            );
+
             // sign over the builder commitment, as the proposer can computer it based on provide block_payload
             // and the metata data
             let response_block_hash = block_info
@@ -607,37 +622,82 @@ where
             .block_hash_to_block
             .get(&(block_hash.clone(), view_num))
         {
-            tracing::debug!("Waiting for vid commitment for block {:?}", block_hash);
-            let (vid_commitment, vid_precompute_data) =
-                block_info.vid_receiver.write().await.get().await?;
-            let signature_over_vid_commitment =
-                <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
-                    &sign_key,
-                    vid_commitment.as_ref(),
-                )
-                .expect("Claim block header input message signing failed");
+            tracing::info!("Waiting for vid commitment for block {:?}", block_hash);
 
-            let signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
-                &sign_key,
-                block_info.offered_fee,
-                &block_info.metadata,
-                &vid_commitment,
-            )
-            .expect("Claim block header input fee signing failed");
+            let timeout_after = Instant::now() + self.max_api_waiting_time;
+            let check_duration = self.max_api_waiting_time / 10;
 
-            let response = AvailableBlockHeaderInput::<Types> {
-                vid_commitment,
-                vid_precompute_data,
-                fee_signature: signature_over_fee_info,
-                message_signature: signature_over_vid_commitment,
-                sender: pub_key.clone(),
+            let response_received = loop {
+                match async_timeout(check_duration, block_info.vid_receiver.write().await.get())
+                    .await
+                {
+                    Err(toe) => {
+                        if Instant::now() >= timeout_after {
+                            tracing::warn!(
+                                "Couldn't get vid commitment in time for block {:?}",
+                                block_hash
+                            );
+                            break Err(BuildError::Error {
+                                message: "Couldn't get vid commitment in time".to_string(),
+                            });
+                        }
+                        continue;
+                    }
+                    Ok(recv_attempt) => {
+                        if let Err(ref e) = recv_attempt {
+                            tracing::error!(
+                                "Channel closed while getting vid commitment for block {:?}",
+                                block_hash
+                            );
+                        }
+                        break recv_attempt.map_err(|_| BuildError::Error {
+                            message: "channel unexpectedly closed".to_string(),
+                        });
+                    }
+                }
             };
-            tracing::info!(
+
+            // let (vid_commitment, vid_precompute_data) =
+            //     await?;
+
+            tracing::info!("Got vid commitment for block {:?}", block_hash);
+            if !response_received.is_err() {
+                let (vid_commitment, vid_precompute_data) = response_received.unwrap();
+                // sign over the vid commitment
+                let signature_over_vid_commitment =
+                    <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
+                        &sign_key,
+                        vid_commitment.as_ref(),
+                    )
+                    .expect("Claim block header input message signing failed");
+
+                let signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
+                    &sign_key,
+                    block_info.offered_fee,
+                    &block_info.metadata,
+                    &vid_commitment,
+                )
+                .expect("Claim block header input fee signing failed");
+
+                let response = AvailableBlockHeaderInput::<Types> {
+                    vid_commitment,
+                    vid_precompute_data,
+                    fee_signature: signature_over_fee_info,
+                    message_signature: signature_over_vid_commitment,
+                    sender: pub_key.clone(),
+                };
+                tracing::info!(
                 "Sending Claim Block Header Input response for (block_hash {:?}, view_num: {:?})",
                 block_hash,
                 view_number
             );
-            Ok(response)
+                Ok(response)
+            } else {
+                tracing::warn!("Claim Block Header Input not found");
+                Err(BuildError::Error {
+                    message: "Block Header not found".to_string(),
+                })
+            }
         } else {
             tracing::warn!("Claim Block Header Input not found");
             Err(BuildError::Error {
@@ -657,7 +717,7 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
         &self,
         txns: Vec<<Types as NodeType>::Transaction>,
     ) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
-        tracing::debug!("Submitting transaction to the builder states{:?}", txns);
+        // tracing::debug!("Submitting transaction to the builder states{:?}", txns);
         let response = self
             .global_state
             .read_arc()
@@ -665,10 +725,10 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
             .submit_client_txns(txns)
             .await;
 
-        tracing::debug!(
-            "Transaction submitted to the builder states, sending response: {:?}",
-            response
-        );
+        // tracing::debug!(
+        //     "Transaction submitted to the builder states, sending response: {:?}",
+        //     response
+        // );
 
         response
     }
