@@ -59,7 +59,7 @@ use tide_disco::{method::ReadState, Url};
 #[derive(Debug)]
 pub struct BlockInfo<Types: NodeType> {
     pub block_payload: Types::BlockPayload,
-    pub metadata: <<Types as NodeType>::BlockPayload as BlockPayload>::Metadata,
+    pub metadata: <<Types as NodeType>::BlockPayload as BlockPayload<Types>>::Metadata,
     pub vid_trigger: Arc<RwLock<Option<OneShotSender<TriggerStatus>>>>,
     pub vid_receiver: Arc<RwLock<WaitAndKeep<(VidCommitment, VidPrecomputeData)>>>,
     pub offered_fee: u64,

@@ -94,7 +94,7 @@ pub struct BuildBlockInfo<TYPES: NodeType> {
     pub block_size: u64,
     pub offered_fee: u64,
     pub block_payload: TYPES::BlockPayload,
-    pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
+    pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload<TYPES>>::Metadata,
     pub vid_trigger: OneShotSender<TriggerStatus>,
     pub vid_receiver: UnboundedReceiver<(VidCommitment, VidPrecomputeData)>,
 }
@@ -193,6 +193,8 @@ pub struct BuilderState<TYPES: NodeType> {
 
     /// instance state to enfoce max_block_size
     pub instance_state: Arc<TYPES::InstanceState>,
+
+    pub validated_state: Arc<TYPES::ValidatedState>,
 
     /// txn garbage collection every duration time
     pub txn_garbage_collect_duration: Duration,
@@ -367,7 +369,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
         // form a block payload from the encoded transactions
         let block_payload =
-            <TYPES::BlockPayload as BlockPayload>::from_bytes(encoded_txns, metadata);
+            <TYPES::BlockPayload as BlockPayload<TYPES>>::from_bytes(encoded_txns, metadata);
         // get the builder commitment from the block payload
         let payload_builder_commitment = block_payload.builder_commitment(metadata);
 
@@ -584,7 +586,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
         self.built_from_proposed_block.leaf_commit = leaf.commit();
 
-        let payload = <TYPES::BlockPayload as BlockPayload>::from_bytes(
+        let payload = <TYPES::BlockPayload as BlockPayload<TYPES>>::from_bytes(
             &da_proposal.data.encoded_transactions,
             quorum_proposal.data.block_header.metadata(),
         );
@@ -649,14 +651,17 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             }
         }
 
-        if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
-            self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
-                self.tx_hash_to_available_txns
-                    .get(tx_hash)
-                    .map(|(_ts, tx, _source)| tx.clone())
-            }),
-            &self.instance_state,
-        ) {
+        if let Ok((payload, metadata)) =
+            <TYPES::BlockPayload as BlockPayload<TYPES>>::from_transactions(
+                self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
+                    self.tx_hash_to_available_txns
+                        .get(tx_hash)
+                        .map(|(_ts, tx, _source)| tx.clone())
+                }),
+                &self.validated_state,
+                &self.instance_state,
+            )
+        {
             let builder_hash = payload.builder_commitment(&metadata);
             // count the number of txns
             let txn_count = payload.num_transactions(&metadata);
@@ -945,6 +950,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         maximize_txn_capture_timeout: Duration,
         base_fee: u64,
         instance_state: Arc<TYPES::InstanceState>,
+        validated_state: Arc<TYPES::ValidatedState>,
         txn_garbage_collect_duration: Duration,
     ) -> Self {
         BuilderState {
@@ -967,6 +973,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             maximize_txn_capture_timeout,
             base_fee,
             instance_state,
+            validated_state,
             txn_garbage_collect_duration,
             next_txn_garbage_collect_time: Instant::now() + txn_garbage_collect_duration,
         }
@@ -1014,6 +1021,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             maximize_txn_capture_timeout: self.maximize_txn_capture_timeout,
             base_fee: self.base_fee,
             instance_state: self.instance_state.clone(),
+            validated_state: self.validated_state.clone(),
             txn_garbage_collect_duration: self.txn_garbage_collect_duration,
             next_txn_garbage_collect_time,
         }

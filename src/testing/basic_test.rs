@@ -167,11 +167,13 @@ mod tests {
             // Prepare the QC proposal message
             // calculate the vid commitment over the encoded_transactions
 
-            let (block_payload, metadata) = <TestBlockPayload as BlockPayload>::from_transactions(
-                vec![tx.clone()],
-                &TestInstanceState {},
-            )
-            .unwrap();
+            let (block_payload, metadata) =
+                <TestBlockPayload as BlockPayload<TestTypes>>::from_transactions(
+                    vec![tx.clone()],
+                    &TestValidatedState::default(),
+                    &TestInstanceState {},
+                )
+                .unwrap();
 
             tracing::debug!(
                 "Encoded transactions: {:?} Num nodes:{}",
@@ -186,7 +188,9 @@ mod tests {
                 block_payload_commitment
             );
 
-            let builder_commitment = block_payload.builder_commitment(&metadata);
+            let builder_commitment = <TestBlockPayload as hotshot_types::traits::BlockPayload<
+                TestTypes,
+            >>::builder_commitment(&block_payload, &metadata);
 
             let block_header = TestBlockHeader {
                 block_number: i as u64,
@@ -268,7 +272,7 @@ mod tests {
             let leaf = match i {
                 0 => Leaf::genesis(&TestInstanceState {}),
                 _ => {
-                    let block_payload = BlockPayload::from_bytes(
+                    let block_payload = BlockPayload::<TestTypes>::from_bytes(
                         &encoded_transactions,
                         <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
                             &qc_proposal.block_header,
@@ -347,6 +351,7 @@ mod tests {
                 Duration::from_millis(10), // max time to wait for non-zero txn block
                 0,                         // base fee
                 Arc::new(TestInstanceState {}),
+                Arc::new(TestValidatedState::default()),
                 Duration::from_secs(3600), // duration for txn garbage collection
             );
 
