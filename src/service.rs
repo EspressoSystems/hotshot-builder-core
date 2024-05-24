@@ -1,4 +1,3 @@
-use clap::Error;
 use hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::SystemContextHandle,
@@ -631,7 +630,7 @@ where
                 match async_timeout(check_duration, block_info.vid_receiver.write().await.get())
                     .await
                 {
-                    Err(toe) => {
+                    Err(_toe) => {
                         if Instant::now() >= timeout_after {
                             tracing::warn!(
                                 "Couldn't get vid commitment in time for block {:?}",
@@ -644,7 +643,7 @@ where
                         continue;
                     }
                     Ok(recv_attempt) => {
-                        if let Err(ref e) = recv_attempt {
+                        if let Err(ref _e) = recv_attempt {
                             tracing::error!(
                                 "Channel closed while getting vid commitment for block {:?}",
                                 block_hash
@@ -661,7 +660,7 @@ where
             //     await?;
 
             tracing::info!("Got vid commitment for block {:?}", block_hash);
-            if !response_received.is_err() {
+            if response_received.is_ok() {
                 let (vid_commitment, vid_precompute_data) = response_received.unwrap();
                 // sign over the vid commitment
                 let signature_over_vid_commitment =
@@ -725,10 +724,10 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
             .submit_client_txns(txns)
             .await;
 
-        // tracing::debug!(
-        //     "Transaction submitted to the builder states, sending response: {:?}",
-        //     response
-        // );
+        tracing::debug!(
+            "Transaction submitted to the builder states, sending response: {:?}",
+            response
+        );
 
         response
     }
