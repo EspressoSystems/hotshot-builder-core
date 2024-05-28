@@ -824,6 +824,33 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     }
                 }
 
+                // the builder will respond immediately based off the state before seeing it's block B being proposed for the parent view v.
+                // Thus, it may include duplicate transactions from view v in view v+1.
+                // It would be better to wait a configurable amount of time to see if we get a DA proposal before responding,
+                // just like we wait a configurable amount of time for transactions to arrive before proposing an empty block.
+                let timeout_after = Instant::now() + self.maximize_txn_capture_timeout;
+                let sleep_interval = self.maximize_txn_capture_timeout / 10;
+                loop {
+                    if let Ok(MessageType::DaProposalMessage(rda_msg)) =
+                        self.da_proposal_receiver.try_recv()
+                    {
+                        tracing::debug!(
+                            "Received da proposal msg in builder {:?}:\n {:?}",
+                            self.built_from_proposed_block,
+                            rda_msg.proposal.data.view_number
+                        );
+                        self.process_da_proposal(rda_msg).await;
+
+                        break;
+                    }
+                    // if would timeout before next wake, return
+                    if Instant::now() + sleep_interval > timeout_after {
+                        break;
+                    }
+
+                    async_sleep(sleep_interval).await;
+                }
+
                 futures::select! {
                     req = self.req_receiver.next() => {
                         tracing::debug!("Received request msg in builder {:?}: {:?}", self.built_from_proposed_block.view_number, req);
