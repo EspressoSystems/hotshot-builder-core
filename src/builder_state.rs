@@ -393,6 +393,15 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             .da_proposal_payload_commit_to_da_proposal
             .entry(payload_builder_commitment.clone())
         {
+            // clear out the txns from the available txns and timestamp_to_tx maps since they are included in da proposal
+            da_proposal_info.txn_commitments.iter().for_each(|txn| {
+                if let Entry::Occupied(txn_info) = self.tx_hash_to_available_txns.entry(*txn) {
+                    self.timestamp_to_tx.remove(&txn_info.get().0);
+                    self.included_txns.insert(*txn);
+                    txn_info.remove_entry();
+                }
+            });
+
             // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
             if let Entry::Occupied(qc_proposal) = self
                 .quorum_proposal_payload_commit_to_quorum_proposal
@@ -653,6 +662,33 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             }
         }
 
+        // the builder will respond immediately based off the state before seeing it's block B being proposed for the parent view v.
+        // Thus, it may include duplicate transactions from view v in view v+1.
+        // It would be better to wait a configurable amount of time to see if we get a DA proposal before responding,
+        // just like we wait a configurable amount of time for transactions to arrive before proposing an empty block.
+        let timeout_after = Instant::now() + self.maximize_txn_capture_timeout;
+        let sleep_interval = self.maximize_txn_capture_timeout / 10;
+        loop {
+            if let Ok(MessageType::DaProposalMessage(rda_msg)) =
+                self.da_proposal_receiver.try_recv()
+            {
+                tracing::debug!(
+                    "Received da proposal msg in builder {:?}:\n {:?}",
+                    self.built_from_proposed_block,
+                    rda_msg.proposal.data.view_number
+                );
+                self.process_da_proposal(rda_msg).await;
+
+                break;
+            }
+            // if would timeout before next wake, return
+            if Instant::now() + sleep_interval > timeout_after {
+                break;
+            }
+
+            async_sleep(sleep_interval).await;
+        }
+
         if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
             self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
                 self.tx_hash_to_available_txns
@@ -822,33 +858,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         }
                         tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
                     }
-                }
-
-                // the builder will respond immediately based off the state before seeing it's block B being proposed for the parent view v.
-                // Thus, it may include duplicate transactions from view v in view v+1.
-                // It would be better to wait a configurable amount of time to see if we get a DA proposal before responding,
-                // just like we wait a configurable amount of time for transactions to arrive before proposing an empty block.
-                let timeout_after = Instant::now() + self.maximize_txn_capture_timeout;
-                let sleep_interval = self.maximize_txn_capture_timeout / 10;
-                loop {
-                    if let Ok(MessageType::DaProposalMessage(rda_msg)) =
-                        self.da_proposal_receiver.try_recv()
-                    {
-                        tracing::debug!(
-                            "Received da proposal msg in builder {:?}:\n {:?}",
-                            self.built_from_proposed_block,
-                            rda_msg.proposal.data.view_number
-                        );
-                        self.process_da_proposal(rda_msg).await;
-
-                        break;
-                    }
-                    // if would timeout before next wake, return
-                    if Instant::now() + sleep_interval > timeout_after {
-                        break;
-                    }
-
-                    async_sleep(sleep_interval).await;
                 }
 
                 futures::select! {
