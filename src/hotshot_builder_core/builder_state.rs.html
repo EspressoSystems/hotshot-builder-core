@@ -1021,6 +1021,10 @@
 <a href="#1019" id="1019">1019</a>
 <a href="#1020" id="1020">1020</a>
 <a href="#1021" id="1021">1021</a>
+<a href="#1022" id="1022">1022</a>
+<a href="#1023" id="1023">1023</a>
+<a href="#1024" id="1024">1024</a>
+<a href="#1025" id="1025">1025</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DaProposal, Leaf, QuorumProposal},
     message::Proposal,
@@ -1151,6 +1155,13 @@
     }
 }
 
+<span class="attr">#[derive(Debug, Clone)]
+</span><span class="kw">pub struct </span>DAProposalInfo&lt;TYPES: NodeType&gt; {
+    <span class="kw">pub </span>view_number: TYPES::Time,
+    <span class="kw">pub </span>txn_commitments: Vec&lt;Commitment&lt;TYPES::Transaction&gt;&gt;,
+    <span class="kw">pub </span>num_nodes: usize,
+}
+
 <span class="attr">#[derive(Debug)]
 </span><span class="kw">pub struct </span>BuilderState&lt;TYPES: NodeType&gt; {
     <span class="doccomment">/// timestamp to tx hash, used for ordering for the transactions
@@ -1174,7 +1185,7 @@
     <span class="doccomment">/// da_proposal_payload_commit to (da_proposal, node_count)
     </span><span class="attr">#[allow(clippy::type_complexity)]
     </span><span class="kw">pub </span>da_proposal_payload_commit_to_da_proposal:
-        HashMap&lt;BuilderCommitment, (Arc&lt;Proposal&lt;TYPES, DaProposal&lt;TYPES&gt;&gt;&gt;, usize)&gt;,
+        HashMap&lt;BuilderCommitment, Arc&lt;DAProposalInfo&lt;TYPES&gt;&gt;&gt;,
 
     <span class="doccomment">/// quorum_proposal_payload_commit to quorum_proposal
     </span><span class="kw">pub </span>quorum_proposal_payload_commit_to_quorum_proposal:
@@ -1245,10 +1256,9 @@
     <span class="doccomment">/// spawn a clone of builder
     </span><span class="kw">async fn </span>spawn_clone(
         <span class="self">self</span>,
-        da_proposal: Arc&lt;Proposal&lt;TYPES, DaProposal&lt;TYPES&gt;&gt;&gt;,
+        da_proposal: Arc&lt;DAProposalInfo&lt;TYPES&gt;&gt;,
         quorum_proposal: Arc&lt;Proposal&lt;TYPES, QuorumProposal&lt;TYPES&gt;&gt;&gt;,
         leader: TYPES::SignatureKey,
-        num_nodes: usize,
         req_sender: BroadcastSender&lt;MessageType&lt;TYPES&gt;&gt;,
     );
 
@@ -1399,6 +1409,13 @@
             payload_builder_commitment
         );
 
+        <span class="comment">// form the DA proposal info
+        </span><span class="kw">let </span>da_proposal_info = DAProposalInfo {
+            view_number,
+            txn_commitments: block_payload.transaction_commitments(metadata).to_vec(),
+            num_nodes: total_nodes,
+        };
+
         <span class="kw">if let </span>std::collections::hash_map::Entry::Vacant(e) = <span class="self">self
             </span>.da_proposal_payload_commit_to_da_proposal
             .entry(payload_builder_commitment.clone())
@@ -1423,12 +1440,12 @@
                         .remove(<span class="kw-2">&amp;</span>payload_builder_commitment.clone());
 
                     <span class="kw">let </span>(req_sender, req_receiver) = broadcast(<span class="self">self</span>.req_receiver.capacity());
+
                     <span class="self">self</span>.clone_with_receiver(req_receiver)
                         .spawn_clone(
-                            da_proposal,
+                            Arc::new(da_proposal_info),
                             qc_proposal,
                             sender.clone(),
-                            total_nodes,
                             req_sender,
                         )
                         .<span class="kw">await</span>;
@@ -1436,7 +1453,7 @@
                     <span class="macro">tracing::debug!</span>(<span class="string">"Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers"</span>);
                 }
             } <span class="kw">else </span>{
-                e.insert((da_proposal, total_nodes));
+                e.insert(Arc::new(da_proposal_info));
             }
         } <span class="kw">else </span>{
             <span class="macro">tracing::debug!</span>(<span class="string">"Payload commitment already exists in the da_proposal_payload_commit_to_da_proposal hashmap, so ignoring it"</span>);
@@ -1511,14 +1528,13 @@
                 </span>.da_proposal_payload_commit_to_da_proposal
                 .entry(payload_builder_commitment.clone())
             {
-                <span class="kw">let </span>(da_proposal, total_nodes) = da_proposal.remove();
-
+                <span class="kw">let </span>da_proposal_info = da_proposal.remove();
                 <span class="comment">// remove the entry from the da_proposal_payload_commit_to_da_proposal hashmap
                 </span><span class="self">self</span>.da_proposal_payload_commit_to_da_proposal
                     .remove(<span class="kw-2">&amp;</span>payload_builder_commitment);
 
                 <span class="comment">// also make sure we clone for the same view number( check incase payload commitments are same)
-                </span><span class="kw">if </span>da_proposal.data.view_number == view_number {
+                </span><span class="kw">if </span>da_proposal_info.view_number == view_number {
                     <span class="macro">tracing::info!</span>(
                         <span class="string">"Spawning a clone from process QC proposal for view number: {:?}"</span>,
                         view_number
@@ -1527,10 +1543,9 @@
                     <span class="kw">let </span>(req_sender, req_receiver) = broadcast(<span class="self">self</span>.req_receiver.capacity());
                     <span class="self">self</span>.clone_with_receiver(req_receiver)
                         .spawn_clone(
-                            da_proposal,
+                            da_proposal_info,
                             qc_proposal.clone(),
                             sender.clone(),
-                            total_nodes,
                             req_sender,
                         )
                         .<span class="kw">await</span>;
@@ -1591,13 +1606,13 @@
                                     fields(builder_built_from_proposed_block = %<span class="self">self</span>.built_from_proposed_block))]
     </span><span class="kw">async fn </span>spawn_clone(
         <span class="kw-2">mut </span><span class="self">self</span>,
-        da_proposal: Arc&lt;Proposal&lt;TYPES, DaProposal&lt;TYPES&gt;&gt;&gt;,
+        da_proposal_info: Arc&lt;DAProposalInfo&lt;TYPES&gt;&gt;,
         quorum_proposal: Arc&lt;Proposal&lt;TYPES, QuorumProposal&lt;TYPES&gt;&gt;&gt;,
         _leader: TYPES::SignatureKey,
-        total_nodes: usize,
         req_sender: BroadcastSender&lt;MessageType&lt;TYPES&gt;&gt;,
     ) {
-        <span class="self">self</span>.total_nodes = NonZeroUsize::new(total_nodes).unwrap_or(<span class="self">self</span>.total_nodes);
+        <span class="self">self</span>.total_nodes =
+            NonZeroUsize::new(da_proposal_info.num_nodes).unwrap_or(<span class="self">self</span>.total_nodes);
         <span class="self">self</span>.built_from_proposed_block.view_number = quorum_proposal.data.view_number;
         <span class="self">self</span>.built_from_proposed_block.vid_commitment =
             quorum_proposal.data.block_header.payload_commitment();
@@ -1607,20 +1622,13 @@
 
         <span class="self">self</span>.built_from_proposed_block.leaf_commit = leaf.commit();
 
-        <span class="kw">let </span>payload = &lt;TYPES::BlockPayload <span class="kw">as </span>BlockPayload&gt;::from_bytes(
-            <span class="kw-2">&amp;</span>da_proposal.data.encoded_transactions,
-            quorum_proposal.data.block_header.metadata(),
-        );
-        payload
-            .transaction_commitments(quorum_proposal.data.block_header.metadata())
-            .iter()
-            .for_each(|txn| {
-                <span class="kw">if let </span>Entry::Occupied(txn_info) = <span class="self">self</span>.tx_hash_to_available_txns.entry(<span class="kw-2">*</span>txn) {
-                    <span class="self">self</span>.timestamp_to_tx.remove(<span class="kw-2">&amp;</span>txn_info.get().<span class="number">0</span>);
-                    <span class="self">self</span>.included_txns.insert(<span class="kw-2">*</span>txn);
-                    txn_info.remove_entry();
-                }
-            });
+        da_proposal_info.txn_commitments.iter().for_each(|txn| {
+            <span class="kw">if let </span>Entry::Occupied(txn_info) = <span class="self">self</span>.tx_hash_to_available_txns.entry(<span class="kw-2">*</span>txn) {
+                <span class="self">self</span>.timestamp_to_tx.remove(<span class="kw-2">&amp;</span>txn_info.get().<span class="number">0</span>);
+                <span class="self">self</span>.included_txns.insert(<span class="kw-2">*</span>txn);
+                txn_info.remove_entry();
+            }
+        });
 
         <span class="comment">// register the spawned builder state to spawned_builder_states in the global state
         </span><span class="self">self</span>.global_state.write_arc().<span class="kw">await</span>.register_builder_state(
