@@ -128,6 +128,13 @@ impl<TYPES: NodeType> std::fmt::Display for BuiltFromProposedBlock<TYPES> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct DAProposalInfo<TYPES: NodeType> {
+    pub view_number: TYPES::Time,
+    pub txn_commitments: Vec<Commitment<TYPES::Transaction>>,
+    pub num_nodes: usize,
+}
+
 #[derive(Debug)]
 pub struct BuilderState<TYPES: NodeType> {
     /// timestamp to tx hash, used for ordering for the transactions
@@ -151,7 +158,7 @@ pub struct BuilderState<TYPES: NodeType> {
     /// da_proposal_payload_commit to (da_proposal, node_count)
     #[allow(clippy::type_complexity)]
     pub da_proposal_payload_commit_to_da_proposal:
-        HashMap<BuilderCommitment, (Arc<Proposal<TYPES, DaProposal<TYPES>>>, usize)>,
+        HashMap<BuilderCommitment, Arc<DAProposalInfo<TYPES>>>,
 
     /// quorum_proposal_payload_commit to quorum_proposal
     pub quorum_proposal_payload_commit_to_quorum_proposal:
@@ -222,10 +229,9 @@ pub trait BuilderProgress<TYPES: NodeType> {
     /// spawn a clone of builder
     async fn spawn_clone(
         self,
-        da_proposal: Arc<Proposal<TYPES, DaProposal<TYPES>>>,
+        da_proposal: Arc<DAProposalInfo<TYPES>>,
         quorum_proposal: Arc<Proposal<TYPES, QuorumProposal<TYPES>>>,
         leader: TYPES::SignatureKey,
-        num_nodes: usize,
         req_sender: BroadcastSender<MessageType<TYPES>>,
     );
 
@@ -376,6 +382,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             payload_builder_commitment
         );
 
+        // form the DA proposal info
+        let da_proposal_info = DAProposalInfo {
+            view_number,
+            txn_commitments: block_payload.transaction_commitments(metadata).to_vec(),
+            num_nodes: total_nodes,
+        };
+
         if let std::collections::hash_map::Entry::Vacant(e) = self
             .da_proposal_payload_commit_to_da_proposal
             .entry(payload_builder_commitment.clone())
@@ -400,12 +413,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .remove(&payload_builder_commitment.clone());
 
                     let (req_sender, req_receiver) = broadcast(self.req_receiver.capacity());
+
                     self.clone_with_receiver(req_receiver)
                         .spawn_clone(
-                            da_proposal,
+                            Arc::new(da_proposal_info),
                             qc_proposal,
                             sender.clone(),
-                            total_nodes,
                             req_sender,
                         )
                         .await;
@@ -413,7 +426,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     tracing::debug!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers");
                 }
             } else {
-                e.insert((da_proposal, total_nodes));
+                e.insert(Arc::new(da_proposal_info));
             }
         } else {
             tracing::debug!("Payload commitment already exists in the da_proposal_payload_commit_to_da_proposal hashmap, so ignoring it");
@@ -488,14 +501,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 .da_proposal_payload_commit_to_da_proposal
                 .entry(payload_builder_commitment.clone())
             {
-                let (da_proposal, total_nodes) = da_proposal.remove();
-
+                let da_proposal_info = da_proposal.remove();
                 // remove the entry from the da_proposal_payload_commit_to_da_proposal hashmap
                 self.da_proposal_payload_commit_to_da_proposal
                     .remove(&payload_builder_commitment);
 
                 // also make sure we clone for the same view number( check incase payload commitments are same)
-                if da_proposal.data.view_number == view_number {
+                if da_proposal_info.view_number == view_number {
                     tracing::info!(
                         "Spawning a clone from process QC proposal for view number: {:?}",
                         view_number
@@ -504,10 +516,9 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                     let (req_sender, req_receiver) = broadcast(self.req_receiver.capacity());
                     self.clone_with_receiver(req_receiver)
                         .spawn_clone(
-                            da_proposal,
+                            da_proposal_info,
                             qc_proposal.clone(),
                             sender.clone(),
-                            total_nodes,
                             req_sender,
                         )
                         .await;
@@ -568,13 +579,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn spawn_clone(
         mut self,
-        da_proposal: Arc<Proposal<TYPES, DaProposal<TYPES>>>,
+        da_proposal_info: Arc<DAProposalInfo<TYPES>>,
         quorum_proposal: Arc<Proposal<TYPES, QuorumProposal<TYPES>>>,
         _leader: TYPES::SignatureKey,
-        total_nodes: usize,
         req_sender: BroadcastSender<MessageType<TYPES>>,
     ) {
-        self.total_nodes = NonZeroUsize::new(total_nodes).unwrap_or(self.total_nodes);
+        self.total_nodes =
+            NonZeroUsize::new(da_proposal_info.num_nodes).unwrap_or(self.total_nodes);
         self.built_from_proposed_block.view_number = quorum_proposal.data.view_number;
         self.built_from_proposed_block.vid_commitment =
             quorum_proposal.data.block_header.payload_commitment();
@@ -584,20 +595,13 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
         self.built_from_proposed_block.leaf_commit = leaf.commit();
 
-        let payload = <TYPES::BlockPayload as BlockPayload>::from_bytes(
-            &da_proposal.data.encoded_transactions,
-            quorum_proposal.data.block_header.metadata(),
-        );
-        payload
-            .transaction_commitments(quorum_proposal.data.block_header.metadata())
-            .iter()
-            .for_each(|txn| {
-                if let Entry::Occupied(txn_info) = self.tx_hash_to_available_txns.entry(*txn) {
-                    self.timestamp_to_tx.remove(&txn_info.get().0);
-                    self.included_txns.insert(*txn);
-                    txn_info.remove_entry();
-                }
-            });
+        da_proposal_info.txn_commitments.iter().for_each(|txn| {
+            if let Entry::Occupied(txn_info) = self.tx_hash_to_available_txns.entry(*txn) {
+                self.timestamp_to_tx.remove(&txn_info.get().0);
+                self.included_txns.insert(*txn);
+                txn_info.remove_entry();
+            }
+        });
 
         // register the spawned builder state to spawned_builder_states in the global state
         self.global_state.write_arc().await.register_builder_state(
