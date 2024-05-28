@@ -656,12 +656,14 @@ where
                 }
             };
 
-            // let (vid_commitment, vid_precompute_data) =
-            //     await?;
-
-            tracing::info!("Got vid commitment for block {:?}", block_hash);
+            tracing::info!(
+                "Got vid commitment for block {:?}@{:?}",
+                block_hash,
+                view_number
+            );
             if response_received.is_ok() {
                 let (vid_commitment, vid_precompute_data) = response_received.unwrap();
+
                 // sign over the vid commitment
                 let signature_over_vid_commitment =
                     <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
@@ -716,7 +718,11 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
         &self,
         txns: Vec<<Types as NodeType>::Transaction>,
     ) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
-        // tracing::debug!("Submitting transaction to the builder states{:?}", txns);
+        tracing::debug!(
+            "Submitting {:?} transactions to the builder states{:?}",
+            txns.len(),
+            txns.iter().map(|txn| txn.commit()).collect::<Vec<_>>()
+        );
         let response = self
             .global_state
             .read_arc()
@@ -825,13 +831,6 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
     hotshot_events_api_url: Url,
 ) -> Result<(), anyhow::Error> {
     // connection to the events stream
-    // mut subscribed_events: surf_disco::socket::Connection<
-    //     BuilderEvent<Types>,
-    //     surf_disco::socket::Unsupported,
-    //     EventStreamError,
-    //     vbs::version::StaticVersion<0, 1>,
-    // >,
-
     let connected = connect_to_events_service(hotshot_events_api_url.clone()).await;
     if connected.is_none() {
         return Err(anyhow!(
