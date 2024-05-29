@@ -928,7 +928,7 @@ pub async fn run_permissioned_standalone_builder_service<
     decide_sender: BroadcastSender<MessageType<Types>>,
 
     // hotshot context handle
-    hotshot_handle: SystemContextHandle<Types, I>,
+    hotshot_handle: Arc<SystemContextHandle<Types, I>>,
 ) {
     let mut event_stream = hotshot_handle.event_stream();
     loop {
