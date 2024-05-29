@@ -1025,6 +1025,9 @@
 <a href="#1023" id="1023">1023</a>
 <a href="#1024" id="1024">1024</a>
 <a href="#1025" id="1025">1025</a>
+<a href="#1026" id="1026">1026</a>
+<a href="#1027" id="1027">1027</a>
+<a href="#1028" id="1028">1028</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DaProposal, Leaf, QuorumProposal},
     message::Proposal,
@@ -1827,7 +1830,10 @@
     </span><span class="kw">fn </span>event_loop(<span class="kw-2">mut </span><span class="self">self</span>) {
         <span class="kw">let </span>_builder_handle = async_spawn(<span class="kw">async move </span>{
             <span class="kw">loop </span>{
-                <span class="macro">tracing::debug!</span>(<span class="string">"Builder event loop"</span>);
+                <span class="macro">tracing::info!</span>(
+                    <span class="string">"Builder{:?} event loop"</span>,
+                    <span class="self">self</span>.built_from_proposed_block.view_number
+                );
                 <span class="comment">// read and process up to 1/4 of the channel capacity of available txns
                 </span><span class="kw">let </span><span class="kw-2">mut </span>message_counter = <span class="number">0</span>;
                 <span class="kw">let </span>max_loop_count = max(<span class="self">self</span>.tx_receiver.capacity() / <span class="number">4</span>, <span class="number">1</span>);
@@ -1911,7 +1917,7 @@
                         <span class="kw">match </span>qc {
                             <span class="prelude-val">Some</span>(qc) =&gt; {
                                 <span class="kw">if let </span>MessageType::QCMessage(rqc_msg) = qc {
-                                    <span class="macro">tracing::debug!</span>(<span class="string">"Received qc msg in builder {:?}:\n {:?} from index"</span>, <span class="self">self</span>.built_from_proposed_block, rqc_msg.proposal.data.view_number);
+                                    <span class="macro">tracing::debug!</span>(<span class="string">"Received qc msg in builder {:?}:\n {:?} for view "</span>, <span class="self">self</span>.built_from_proposed_block, rqc_msg.proposal.data.view_number);
                                     <span class="self">self</span>.process_quorum_proposal(rqc_msg).<span class="kw">await</span>;
                                 }
                             }
@@ -1924,7 +1930,7 @@
                         <span class="kw">match </span>decide {
                             <span class="prelude-val">Some</span>(decide) =&gt; {
                                 <span class="kw">if let </span>MessageType::DecideMessage(rdecide_msg) = decide {
-                                    <span class="macro">tracing::debug!</span>(<span class="string">"Received decide msg in builder {:?}:\n {:?} from index"</span>, <span class="self">self</span>.built_from_proposed_block, rdecide_msg);
+                                    <span class="macro">tracing::debug!</span>(<span class="string">"Received decide msg in builder {:?}:\n {:?} for view "</span>, <span class="self">self</span>.built_from_proposed_block, rdecide_msg.latest_decide_view_number);
                                     <span class="kw">let </span>decide_status = <span class="self">self</span>.process_decide_event(rdecide_msg).<span class="kw">await</span>;
                                     <span class="kw">match </span>decide_status{
                                         <span class="prelude-val">Some</span>(Status::ShouldExit) =&gt; {

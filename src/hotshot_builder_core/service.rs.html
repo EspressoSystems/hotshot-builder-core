@@ -1059,6 +1059,64 @@
 <a href="#1057" id="1057">1057</a>
 <a href="#1058" id="1058">1058</a>
 <a href="#1059" id="1059">1059</a>
+<a href="#1060" id="1060">1060</a>
+<a href="#1061" id="1061">1061</a>
+<a href="#1062" id="1062">1062</a>
+<a href="#1063" id="1063">1063</a>
+<a href="#1064" id="1064">1064</a>
+<a href="#1065" id="1065">1065</a>
+<a href="#1066" id="1066">1066</a>
+<a href="#1067" id="1067">1067</a>
+<a href="#1068" id="1068">1068</a>
+<a href="#1069" id="1069">1069</a>
+<a href="#1070" id="1070">1070</a>
+<a href="#1071" id="1071">1071</a>
+<a href="#1072" id="1072">1072</a>
+<a href="#1073" id="1073">1073</a>
+<a href="#1074" id="1074">1074</a>
+<a href="#1075" id="1075">1075</a>
+<a href="#1076" id="1076">1076</a>
+<a href="#1077" id="1077">1077</a>
+<a href="#1078" id="1078">1078</a>
+<a href="#1079" id="1079">1079</a>
+<a href="#1080" id="1080">1080</a>
+<a href="#1081" id="1081">1081</a>
+<a href="#1082" id="1082">1082</a>
+<a href="#1083" id="1083">1083</a>
+<a href="#1084" id="1084">1084</a>
+<a href="#1085" id="1085">1085</a>
+<a href="#1086" id="1086">1086</a>
+<a href="#1087" id="1087">1087</a>
+<a href="#1088" id="1088">1088</a>
+<a href="#1089" id="1089">1089</a>
+<a href="#1090" id="1090">1090</a>
+<a href="#1091" id="1091">1091</a>
+<a href="#1092" id="1092">1092</a>
+<a href="#1093" id="1093">1093</a>
+<a href="#1094" id="1094">1094</a>
+<a href="#1095" id="1095">1095</a>
+<a href="#1096" id="1096">1096</a>
+<a href="#1097" id="1097">1097</a>
+<a href="#1098" id="1098">1098</a>
+<a href="#1099" id="1099">1099</a>
+<a href="#1100" id="1100">1100</a>
+<a href="#1101" id="1101">1101</a>
+<a href="#1102" id="1102">1102</a>
+<a href="#1103" id="1103">1103</a>
+<a href="#1104" id="1104">1104</a>
+<a href="#1105" id="1105">1105</a>
+<a href="#1106" id="1106">1106</a>
+<a href="#1107" id="1107">1107</a>
+<a href="#1108" id="1108">1108</a>
+<a href="#1109" id="1109">1109</a>
+<a href="#1110" id="1110">1110</a>
+<a href="#1111" id="1111">1111</a>
+<a href="#1112" id="1112">1112</a>
+<a href="#1113" id="1113">1113</a>
+<a href="#1114" id="1114">1114</a>
+<a href="#1115" id="1115">1115</a>
+<a href="#1116" id="1116">1116</a>
+<a href="#1117" id="1117">1117</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::SystemContextHandle,
@@ -1606,9 +1664,23 @@ Handling Builder API responses
             </span>.block_hash_to_block
             .get(<span class="kw-2">&amp;</span>(block_hash.clone(), view_num))
         {
+            <span class="macro">tracing::info!</span>(
+                <span class="string">"Trying sending vid trigger info for {:?}@{:?}"</span>,
+                block_hash,
+                view_num
+            );
+
             <span class="kw">if let </span><span class="prelude-val">Some</span>(trigger_writer) = block_info.vid_trigger.write().<span class="kw">await</span>.take() {
+                <span class="macro">tracing::info!</span>(<span class="string">"Sending vid trigger for {:?}@{:?}"</span>, block_hash, view_num);
                 trigger_writer.send(TriggerStatus::Start);
+                <span class="macro">tracing::info!</span>(<span class="string">"Sent vid trigger for {:?}@{:?}"</span>, block_hash, view_num);
             }
+            <span class="macro">tracing::info!</span>(
+                <span class="string">"Done Trying sending vid trigger info for {:?}@{:?}"</span>,
+                block_hash,
+                view_num
+            );
+
             <span class="comment">// sign over the builder commitment, as the proposer can computer it based on provide block_payload
             // and the metata data
             </span><span class="kw">let </span>response_block_hash = block_info
@@ -1668,37 +1740,84 @@ Handling Builder API responses
             </span>.block_hash_to_block
             .get(<span class="kw-2">&amp;</span>(block_hash.clone(), view_num))
         {
-            <span class="macro">tracing::debug!</span>(<span class="string">"Waiting for vid commitment for block {:?}"</span>, block_hash);
-            <span class="kw">let </span>(vid_commitment, vid_precompute_data) =
-                block_info.vid_receiver.write().<span class="kw">await</span>.get().<span class="kw">await</span><span class="question-mark">?</span>;
-            <span class="kw">let </span>signature_over_vid_commitment =
-                &lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey::sign_builder_message(
-                    <span class="kw-2">&amp;</span>sign_key,
-                    vid_commitment.as_ref(),
-                )
-                .expect(<span class="string">"Claim block header input message signing failed"</span>);
+            <span class="macro">tracing::info!</span>(<span class="string">"Waiting for vid commitment for block {:?}"</span>, block_hash);
 
-            <span class="kw">let </span>signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
-                <span class="kw-2">&amp;</span>sign_key,
-                block_info.offered_fee,
-                <span class="kw-2">&amp;</span>block_info.metadata,
-                <span class="kw-2">&amp;</span>vid_commitment,
-            )
-            .expect(<span class="string">"Claim block header input fee signing failed"</span>);
+            <span class="kw">let </span>timeout_after = Instant::now() + <span class="self">self</span>.max_api_waiting_time;
+            <span class="kw">let </span>check_duration = <span class="self">self</span>.max_api_waiting_time / <span class="number">10</span>;
 
-            <span class="kw">let </span>response = AvailableBlockHeaderInput::&lt;Types&gt; {
-                vid_commitment,
-                vid_precompute_data,
-                fee_signature: signature_over_fee_info,
-                message_signature: signature_over_vid_commitment,
-                sender: pub_key.clone(),
+            <span class="kw">let </span>response_received = <span class="kw">loop </span>{
+                <span class="kw">match </span>async_timeout(check_duration, block_info.vid_receiver.write().<span class="kw">await</span>.get())
+                    .<span class="kw">await
+                </span>{
+                    <span class="prelude-val">Err</span>(_toe) =&gt; {
+                        <span class="kw">if </span>Instant::now() &gt;= timeout_after {
+                            <span class="macro">tracing::warn!</span>(
+                                <span class="string">"Couldn't get vid commitment in time for block {:?}"</span>,
+                                block_hash
+                            );
+                            <span class="kw">break </span><span class="prelude-val">Err</span>(BuildError::Error {
+                                message: <span class="string">"Couldn't get vid commitment in time"</span>.to_string(),
+                            });
+                        }
+                        <span class="kw">continue</span>;
+                    }
+                    <span class="prelude-val">Ok</span>(recv_attempt) =&gt; {
+                        <span class="kw">if let </span><span class="prelude-val">Err</span>(<span class="kw-2">ref </span>_e) = recv_attempt {
+                            <span class="macro">tracing::error!</span>(
+                                <span class="string">"Channel closed while getting vid commitment for block {:?}"</span>,
+                                block_hash
+                            );
+                        }
+                        <span class="kw">break </span>recv_attempt.map_err(|<span class="kw">_</span>| BuildError::Error {
+                            message: <span class="string">"channel unexpectedly closed"</span>.to_string(),
+                        });
+                    }
+                }
             };
+
             <span class="macro">tracing::info!</span>(
+                <span class="string">"Got vid commitment for block {:?}@{:?}"</span>,
+                block_hash,
+                view_number
+            );
+            <span class="kw">if </span>response_received.is_ok() {
+                <span class="kw">let </span>(vid_commitment, vid_precompute_data) = response_received.unwrap();
+
+                <span class="comment">// sign over the vid commitment
+                </span><span class="kw">let </span>signature_over_vid_commitment =
+                    &lt;Types <span class="kw">as </span>NodeType&gt;::BuilderSignatureKey::sign_builder_message(
+                        <span class="kw-2">&amp;</span>sign_key,
+                        vid_commitment.as_ref(),
+                    )
+                    .expect(<span class="string">"Claim block header input message signing failed"</span>);
+
+                <span class="kw">let </span>signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
+                    <span class="kw-2">&amp;</span>sign_key,
+                    block_info.offered_fee,
+                    <span class="kw-2">&amp;</span>block_info.metadata,
+                    <span class="kw-2">&amp;</span>vid_commitment,
+                )
+                .expect(<span class="string">"Claim block header input fee signing failed"</span>);
+
+                <span class="kw">let </span>response = AvailableBlockHeaderInput::&lt;Types&gt; {
+                    vid_commitment,
+                    vid_precompute_data,
+                    fee_signature: signature_over_fee_info,
+                    message_signature: signature_over_vid_commitment,
+                    sender: pub_key.clone(),
+                };
+                <span class="macro">tracing::info!</span>(
                 <span class="string">"Sending Claim Block Header Input response for (block_hash {:?}, view_num: {:?})"</span>,
                 block_hash,
                 view_number
             );
-            <span class="prelude-val">Ok</span>(response)
+                <span class="prelude-val">Ok</span>(response)
+            } <span class="kw">else </span>{
+                <span class="macro">tracing::warn!</span>(<span class="string">"Claim Block Header Input not found"</span>);
+                <span class="prelude-val">Err</span>(BuildError::Error {
+                    message: <span class="string">"Block Header not found"</span>.to_string(),
+                })
+            }
         } <span class="kw">else </span>{
             <span class="macro">tracing::warn!</span>(<span class="string">"Claim Block Header Input not found"</span>);
             <span class="prelude-val">Err</span>(BuildError::Error {
@@ -1718,7 +1837,11 @@ Handling Builder API responses
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         txns: Vec&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Transaction&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Commitment&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Transaction&gt;&gt;, BuildError&gt; {
-        <span class="macro">tracing::debug!</span>(<span class="string">"Submitting transaction to the builder states{:?}"</span>, txns);
+        <span class="macro">tracing::debug!</span>(
+            <span class="string">"Submitting {:?} transactions to the builder states{:?}"</span>,
+            txns.len(),
+            txns.iter().map(|txn| txn.commit()).collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+        );
         <span class="kw">let </span>response = <span class="self">self
             </span>.global_state
             .read_arc()
@@ -1827,13 +1950,6 @@ Running Non-Permissioned Builder Service
     </span>hotshot_events_api_url: Url,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), anyhow::Error&gt; {
     <span class="comment">// connection to the events stream
-    // mut subscribed_events: surf_disco::socket::Connection&lt;
-    //     BuilderEvent&lt;Types&gt;,
-    //     surf_disco::socket::Unsupported,
-    //     EventStreamError,
-    //     vbs::version::StaticVersion&lt;0, 1&gt;,
-    // &gt;,
-
     </span><span class="kw">let </span>connected = connect_to_events_service(hotshot_events_api_url.clone()).<span class="kw">await</span>;
     <span class="kw">if </span>connected.is_none() {
         <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">anyhow!</span>(
