@@ -167,11 +167,14 @@ mod tests {
             // Prepare the QC proposal message
             // calculate the vid commitment over the encoded_transactions
 
-            let (block_payload, metadata) = <TestBlockPayload as BlockPayload>::from_transactions(
-                vec![tx.clone()],
-                &TestInstanceState {},
-            )
-            .unwrap();
+            let (block_payload, metadata) =
+                <TestBlockPayload as BlockPayload<TestTypes>>::from_transactions(
+                    vec![tx.clone()],
+                    &TestValidatedState::default(),
+                    &TestInstanceState {},
+                )
+                .await
+                .unwrap();
 
             tracing::debug!(
                 "Encoded transactions: {:?} Num nodes:{}",
@@ -186,7 +189,11 @@ mod tests {
                 block_payload_commitment
             );
 
-            let builder_commitment = block_payload.builder_commitment(&metadata);
+            let builder_commitment =
+                <TestBlockPayload as BlockPayload<TestTypes>>::builder_commitment(
+                    &block_payload,
+                    &metadata,
+                );
 
             let block_header = TestBlockHeader {
                 block_number: i as u64,
@@ -196,7 +203,13 @@ mod tests {
             };
 
             let justify_qc = match i {
-                0 => QuorumCertificate::<TestTypes>::genesis(&TestInstanceState {}),
+                0 => {
+                    QuorumCertificate::<TestTypes>::genesis(
+                        &TestValidatedState::default(),
+                        &TestInstanceState {},
+                    )
+                    .await
+                }
                 _ => {
                     let previous_justify_qc =
                         sqc_msgs[(i - 1) as usize].proposal.data.justify_qc.clone();
@@ -266,9 +279,9 @@ mod tests {
             // Prepare the decide message
             // let qc = QuorumCertificate::<TestTypes>::genesis();
             let leaf = match i {
-                0 => Leaf::genesis(&TestInstanceState {}),
+                0 => Leaf::genesis(&TestValidatedState::default(), &TestInstanceState {}).await,
                 _ => {
-                    let block_payload = BlockPayload::from_bytes(
+                    let block_payload = BlockPayload::<TestTypes>::from_bytes(
                         &encoded_transactions,
                         <TestBlockHeader as BlockHeader<TestTypes>>::metadata(
                             &qc_proposal.block_header,
@@ -348,6 +361,7 @@ mod tests {
                 0,                         // base fee
                 Arc::new(TestInstanceState {}),
                 Duration::from_secs(3600), // duration for txn garbage collection
+                Arc::new(TestValidatedState::default()),
             );
 
             //builder_state.event_loop().await;
