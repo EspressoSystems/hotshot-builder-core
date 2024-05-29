@@ -800,7 +800,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     fn event_loop(mut self) {
         let _builder_handle = async_spawn(async move {
             loop {
-                tracing::debug!("Builder event loop");
+                tracing::info!(
+                    "Builder{:?} event loop",
+                    self.built_from_proposed_block.view_number
+                );
                 // read and process up to 1/4 of the channel capacity of available txns
                 let mut message_counter = 0;
                 let max_loop_count = max(self.tx_receiver.capacity() / 4, 1);
@@ -884,7 +887,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match qc {
                             Some(qc) => {
                                 if let MessageType::QCMessage(rqc_msg) = qc {
-                                    tracing::debug!("Received qc msg in builder {:?}:\n {:?} from index", self.built_from_proposed_block, rqc_msg.proposal.data.view_number);
+                                    tracing::debug!("Received qc msg in builder {:?}:\n {:?} for view ", self.built_from_proposed_block, rqc_msg.proposal.data.view_number);
                                     self.process_quorum_proposal(rqc_msg).await;
                                 }
                             }
@@ -897,7 +900,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match decide {
                             Some(decide) => {
                                 if let MessageType::DecideMessage(rdecide_msg) = decide {
-                                    tracing::debug!("Received decide msg in builder {:?}:\n {:?} from index", self.built_from_proposed_block, rdecide_msg);
+                                    tracing::debug!("Received decide msg in builder {:?}:\n {:?} for view ", self.built_from_proposed_block, rdecide_msg.latest_decide_view_number);
                                     let decide_status = self.process_decide_event(rdecide_msg).await;
                                     match decide_status{
                                         Some(Status::ShouldExit) => {
