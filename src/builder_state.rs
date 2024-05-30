@@ -198,7 +198,8 @@ pub struct BuilderState<TYPES: NodeType> {
     /// constant fee that the builder will offer per byte of data sequenced
     pub base_fee: u64,
 
-    /// validated state
+    /// validated state that is required for a proposal to be considered valid. Needed for the
+    /// purposes of building a valid block payload within the sequencer.
     pub validated_state: Arc<TYPES::ValidatedState>,
 
     /// instance state to enfoce max_block_size
