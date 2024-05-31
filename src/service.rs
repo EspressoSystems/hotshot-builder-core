@@ -47,7 +47,7 @@ use hotshot_events_service::{
     events_source::{BuilderEvent, BuilderEventType},
 };
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -96,13 +96,25 @@ pub struct BuilderStatesInfo<Types: NodeType> {
     pub block_ids: Vec<ProposedBlockId<Types>>,
 }
 
+#[derive(Debug)]
+pub struct ReceivedTransaction<Types: NodeType> {
+    // the transaction
+    pub tx: Types::Transaction,
+    // its hash
+    pub commit: Commitment<Types::Transaction>,
+    // its source
+    pub source: TransactionSource,
+    // received time
+    pub time_in: Instant,
+}
+
 #[allow(clippy::type_complexity)]
 #[derive(Debug)]
 pub struct GlobalState<Types: NodeType> {
     // data store for the blocks
     pub block_hash_to_block: HashMap<(BuilderCommitment, Types::Time), BlockInfo<Types>>,
 
-    // registered builer states
+    // registered builder states
     pub spawned_builder_states:
         HashMap<(VidCommitment, Types::Time), BroadcastSender<MessageType<Types>>>,
 
@@ -116,6 +128,9 @@ pub struct GlobalState<Types: NodeType> {
     // sending a transaction from the hotshot/private mempool to the builder states
     // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
     pub tx_sender: BroadcastSender<MessageType<Types>>,
+
+    // accumulate transactions in the order received
+    pub tx_queue: Arc<RwLock<VecDeque<ReceivedTransaction<Types>>>>,
 
     // last garbage collected view number
     pub last_garbage_collected_view_num: Types::Time,
@@ -132,6 +147,7 @@ impl<Types: NodeType> GlobalState<Types> {
     pub fn new(
         bootstrap_sender: BroadcastSender<MessageType<Types>>,
         tx_sender: BroadcastSender<MessageType<Types>>,
+        tx_queue: Arc<RwLock<VecDeque<ReceivedTransaction<Types>>>>,
         bootstrapped_builder_state_id: VidCommitment,
         bootstrapped_view_num: Types::Time,
         last_garbage_collected_view_num: Types::Time,
@@ -147,6 +163,7 @@ impl<Types: NodeType> GlobalState<Types> {
             spawned_builder_states,
             view_to_cleanup_targets: Default::default(),
             tx_sender,
+            tx_queue,
             last_garbage_collected_view_num,
             buffer_view_num_count,
             builder_state_to_last_built_block: Default::default(),
@@ -275,19 +292,13 @@ impl<Types: NodeType> GlobalState<Types> {
         &self,
         txns: Vec<<Types as NodeType>::Transaction>,
     ) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
-        let results = txns.iter().map(|tx| tx.commit()).collect();
-        let tx_msg = TransactionMessage::<Types> {
-            txns: Arc::new(txns),
-            tx_type: TransactionSource::External,
-        };
-
-        self.tx_sender
-            .broadcast(MessageType::TransactionMessage(tx_msg))
-            .await
-            .map(|_a| results)
-            .map_err(|_e| BuildError::Error {
-                message: "failed to send txns".to_string(),
-            })
+        handle_received_txns(
+            &self.tx_sender,
+            &self.tx_queue,
+            txns,
+            TransactionSource::External,
+        )
+        .await
     }
 
     pub fn get_channel_for_matching_builder_or_highest_view_buider(
@@ -762,6 +773,9 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
     // sending a Decide event from the hotshot to the builder states
     decide_sender: BroadcastSender<MessageType<Types>>,
 
+    // shared accumulated transactions handle
+    tx_queue: Arc<RwLock<VecDeque<ReceivedTransaction<Types>>>>,
+
     // Url to (re)connect to for the events stream
     hotshot_events_api_url: Url,
 ) -> Result<(), anyhow::Error> {
@@ -796,7 +810,16 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                     }
                     // tx event
                     BuilderEventType::HotshotTransactions { transactions } => {
-                        handle_tx_event(&tx_sender, transactions).await;
+                        if let Err(e) = handle_received_txns(
+                            &tx_sender,
+                            &tx_queue,
+                            transactions,
+                            TransactionSource::HotShot,
+                        )
+                        .await
+                        {
+                            tracing::warn!("Failed to handle transactions; {:?}", e);
+                        }
                     }
                     // decide event
                     BuilderEventType::HotshotDecide {
@@ -869,6 +892,9 @@ pub async fn run_permissioned_standalone_builder_service<
     // sending a Decide event from the hotshot to the builder states
     decide_sender: BroadcastSender<MessageType<Types>>,
 
+    // shared accumulated transactions handle
+    tx_queue: Arc<RwLock<VecDeque<ReceivedTransaction<Types>>>>,
+
     // hotshot context handle
     hotshot_handle: SystemContextHandle<Types, I>,
 ) {
@@ -887,7 +913,16 @@ pub async fn run_permissioned_standalone_builder_service<
                     }
                     // tx event
                     EventType::Transactions { transactions } => {
-                        handle_tx_event(&tx_sender, transactions).await;
+                        if let Err(e) = handle_received_txns(
+                            &tx_sender,
+                            &tx_queue,
+                            transactions,
+                            TransactionSource::HotShot,
+                        )
+                        .await
+                        {
+                            tracing::warn!("Failed to handle transactions; {:?}", e);
+                        }
                     }
                     // decide event
                     EventType::Decide {
@@ -1037,23 +1072,47 @@ async fn handle_decide_event<Types: NodeType>(
     }
 }
 
-async fn handle_tx_event<Types: NodeType>(
-    tx_channel_sender: &BroadcastSender<MessageType<Types>>,
-    transactions: Vec<Types::Transaction>,
-) {
+pub(crate) async fn handle_received_txns<Types: NodeType>(
+    tx_sender: &BroadcastSender<MessageType<Types>>,
+    tx_queue: &Arc<RwLock<VecDeque<ReceivedTransaction<Types>>>>,
+    txns: Vec<Types::Transaction>,
+    source: TransactionSource,
+) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
+    let mut results = Vec::with_capacity(txns.len());
+    // let results: Vec<Commitment<<Types as NodeType>::Transaction>> = txns.iter().map(|tx| tx.commit()).collect();
     // send the whole txn batch to the tx_sender, might get duplicate transactions but builder needs to filter them
     let tx_msg = TransactionMessage::<Types> {
-        txns: Arc::new(transactions),
-        tx_type: TransactionSource::HotShot,
+        txns: Arc::new(txns.clone()),
+        tx_type: source.clone(),
     };
+    let time_in = Instant::now();
+    let mut received_txns: VecDeque<_> = txns
+        .into_iter()
+        .map(|tx| {
+            let commit = tx.commit();
+            results.push(commit);
+            ReceivedTransaction {
+                tx,
+                source: source.clone(),
+                commit,
+                time_in,
+            }
+        })
+        .collect();
+    tx_queue.write_arc().await.append(&mut received_txns);
+
     tracing::debug!(
         "Sending txn_count ({:?}) transactions to the builder states",
         tx_msg.txns.len()
     );
-    if let Err(e) = tx_channel_sender
+    tx_sender
         .broadcast(MessageType::TransactionMessage(tx_msg))
         .await
-    {
-        tracing::warn!("Error {e}, failed to send transactions to the builder states");
-    }
+        .map(|_a| results)
+        .map_err(|e| {
+            tracing::warn!("Error {e}, failed to send transactions to the builder states");
+            BuildError::Error {
+                message: "failed to send txns".to_string(),
+            }
+        })
 }

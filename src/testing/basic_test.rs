@@ -18,6 +18,7 @@ pub use async_broadcast::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
 
     use async_compatibility_layer::channel::unbounded;
@@ -38,9 +39,9 @@ mod tests {
 
     use crate::builder_state::{
         BuiltFromProposedBlock, DaProposalMessage, DecideMessage, QCMessage, RequestMessage,
-        TransactionMessage, TransactionSource,
+        TransactionSource,
     };
-    use crate::service::GlobalState;
+    use crate::service::{handle_received_txns, GlobalState};
     use async_lock::RwLock;
     use async_std::task;
     use committable::{Commitment, CommitmentBoundsArkless, Committable};
@@ -97,7 +98,7 @@ mod tests {
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
         let (bootstrap_sender, bootstrap_receiver) =
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
-
+        let txn_queue = Arc::new(RwLock::new(VecDeque::new()));
         // generate the keys for the buidler
         let seed = [201_u8; 32];
         let (_builder_pub_key, _builder_private_key) =
@@ -106,6 +107,7 @@ mod tests {
         let global_state = GlobalState::<TestTypes>::new(
             bootstrap_sender,
             tx_sender.clone(),
+            txn_queue.clone(),
             vid_commitment(&[], 8),
             ViewNumber::new(0),
             ViewNumber::new(0),
@@ -113,7 +115,6 @@ mod tests {
         );
 
         // to store all the sent messages
-        let mut stx_msgs: Vec<TransactionMessage<TestTypes>> = Vec::new();
         let mut sdecide_msgs: Vec<DecideMessage<TestTypes>> = Vec::new();
         let mut sda_msgs: Vec<DaProposalMessage<TestTypes>> = Vec::new();
         let mut sqc_msgs: Vec<QCMessage<TestTypes>> = Vec::new();
@@ -132,11 +133,6 @@ mod tests {
             // Prepare the transaction message
             let tx = TestTransaction::new(vec![i as u8]);
             let encoded_transactions = TestTransaction::encode(&[tx.clone()]);
-
-            let stx_msg = TransactionMessage::<TestTypes> {
-                txns: Arc::new(vec![tx.clone()]),
-                tx_type: TransactionSource::HotShot,
-            };
 
             // Prepare the DA proposal message
             let da_proposal = DaProposal {
@@ -289,11 +285,15 @@ mod tests {
 
             // validate the signature before pushing the message to the builder_state channels
             // currently this step happens in the service.rs, wheneve we receiver an hotshot event
-            tracing::debug!("Sending transaction message: {:?}", stx_msg);
-            tx_sender
-                .broadcast(MessageType::TransactionMessage(stx_msg.clone()))
-                .await
-                .unwrap();
+            tracing::debug!("Sending transaction message: {:?}", tx);
+            handle_received_txns(
+                &tx_sender,
+                &txn_queue,
+                vec![tx.clone()],
+                TransactionSource::HotShot,
+            )
+            .await
+            .unwrap();
             da_sender
                 .broadcast(MessageType::DaProposalMessage(sda_msg.clone()))
                 .await
@@ -314,7 +314,6 @@ mod tests {
                 response_channel: response_sender,
             });
 
-            stx_msgs.push(stx_msg);
             sdecide_msgs.push(sdecide_msg);
             sda_msgs.push(sda_msg);
             sqc_msgs.push(sqc_msg);
