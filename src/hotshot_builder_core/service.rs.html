@@ -1178,7 +1178,7 @@
 </span><span class="attr">#[derive(Debug)]
 </span><span class="kw">pub struct </span>BlockInfo&lt;Types: NodeType&gt; {
     <span class="kw">pub </span>block_payload: Types::BlockPayload,
-    <span class="kw">pub </span>metadata: &lt;&lt;Types <span class="kw">as </span>NodeType&gt;::BlockPayload <span class="kw">as </span>BlockPayload&gt;::Metadata,
+    <span class="kw">pub </span>metadata: &lt;&lt;Types <span class="kw">as </span>NodeType&gt;::BlockPayload <span class="kw">as </span>BlockPayload&lt;Types&gt;&gt;::Metadata,
     <span class="kw">pub </span>vid_trigger: Arc&lt;RwLock&lt;<span class="prelude-ty">Option</span>&lt;OneShotSender&lt;TriggerStatus&gt;&gt;&gt;&gt;,
     <span class="kw">pub </span>vid_receiver: Arc&lt;RwLock&lt;WaitAndKeep&lt;(VidCommitment, VidPrecomputeData)&gt;&gt;&gt;,
     <span class="kw">pub </span>offered_fee: u64,
@@ -2047,7 +2047,7 @@ Running Permissioned Builder Service
     </span>decide_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
 
     <span class="comment">// hotshot context handle
-    </span>hotshot_handle: SystemContextHandle&lt;Types, I&gt;,
+    </span>hotshot_handle: Arc&lt;SystemContextHandle&lt;Types, I&gt;&gt;,
 ) {
     <span class="kw">let </span><span class="kw-2">mut </span>event_stream = hotshot_handle.event_stream();
     <span class="kw">loop </span>{

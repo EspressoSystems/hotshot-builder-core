@@ -1028,6 +1028,17 @@
 <a href="#1026" id="1026">1026</a>
 <a href="#1027" id="1027">1027</a>
 <a href="#1028" id="1028">1028</a>
+<a href="#1029" id="1029">1029</a>
+<a href="#1030" id="1030">1030</a>
+<a href="#1031" id="1031">1031</a>
+<a href="#1032" id="1032">1032</a>
+<a href="#1033" id="1033">1033</a>
+<a href="#1034" id="1034">1034</a>
+<a href="#1035" id="1035">1035</a>
+<a href="#1036" id="1036">1036</a>
+<a href="#1037" id="1037">1037</a>
+<a href="#1038" id="1038">1038</a>
+<a href="#1039" id="1039">1039</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DaProposal, Leaf, QuorumProposal},
     message::Proposal,
@@ -1124,7 +1135,7 @@
     <span class="kw">pub </span>block_size: u64,
     <span class="kw">pub </span>offered_fee: u64,
     <span class="kw">pub </span>block_payload: TYPES::BlockPayload,
-    <span class="kw">pub </span>metadata: &lt;&lt;TYPES <span class="kw">as </span>NodeType&gt;::BlockPayload <span class="kw">as </span>BlockPayload&gt;::Metadata,
+    <span class="kw">pub </span>metadata: &lt;&lt;TYPES <span class="kw">as </span>NodeType&gt;::BlockPayload <span class="kw">as </span>BlockPayload&lt;TYPES&gt;&gt;::Metadata,
     <span class="kw">pub </span>vid_trigger: OneShotSender&lt;TriggerStatus&gt;,
     <span class="kw">pub </span>vid_receiver: UnboundedReceiver&lt;(VidCommitment, VidPrecomputeData)&gt;,
 }
@@ -1227,6 +1238,10 @@
 
     <span class="doccomment">/// constant fee that the builder will offer per byte of data sequenced
     </span><span class="kw">pub </span>base_fee: u64,
+
+    <span class="doccomment">/// validated state that is required for a proposal to be considered valid. Needed for the
+    /// purposes of building a valid block payload within the sequencer.
+    </span><span class="kw">pub </span>validated_state: Arc&lt;TYPES::ValidatedState&gt;,
 
     <span class="doccomment">/// instance state to enfoce max_block_size
     </span><span class="kw">pub </span>instance_state: Arc&lt;TYPES::InstanceState&gt;,
@@ -1403,7 +1418,7 @@
 
         <span class="comment">// form a block payload from the encoded transactions
         </span><span class="kw">let </span>block_payload =
-            &lt;TYPES::BlockPayload <span class="kw">as </span>BlockPayload&gt;::from_bytes(encoded_txns, metadata);
+            &lt;TYPES::BlockPayload <span class="kw">as </span>BlockPayload&lt;TYPES&gt;&gt;::from_bytes(encoded_txns, metadata);
         <span class="comment">// get the builder commitment from the block payload
         </span><span class="kw">let </span>payload_builder_commitment = block_payload.builder_commitment(metadata);
 
@@ -1683,14 +1698,18 @@
             }
         }
 
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>((payload, metadata)) = &lt;TYPES::BlockPayload <span class="kw">as </span>BlockPayload&gt;::from_transactions(
-            <span class="self">self</span>.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
-                <span class="self">self</span>.tx_hash_to_available_txns
-                    .get(tx_hash)
-                    .map(|(_ts, tx, _source)| tx.clone())
-            }),
-            <span class="kw-2">&amp;</span><span class="self">self</span>.instance_state,
-        ) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((payload, metadata)) =
+            &lt;TYPES::BlockPayload <span class="kw">as </span>BlockPayload&lt;TYPES&gt;&gt;::from_transactions(
+                <span class="self">self</span>.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
+                    <span class="self">self</span>.tx_hash_to_available_txns
+                        .get(tx_hash)
+                        .map(|(_ts, tx, _source)| tx.clone())
+                }),
+                <span class="kw-2">&amp;</span><span class="self">self</span>.validated_state,
+                <span class="kw-2">&amp;</span><span class="self">self</span>.instance_state,
+            )
+            .<span class="kw">await
+        </span>{
             <span class="kw">let </span>builder_hash = payload.builder_commitment(<span class="kw-2">&amp;</span>metadata);
             <span class="comment">// count the number of txns
             </span><span class="kw">let </span>txn_count = payload.num_transactions(<span class="kw-2">&amp;</span>metadata);
@@ -1983,6 +2002,7 @@
         base_fee: u64,
         instance_state: Arc&lt;TYPES::InstanceState&gt;,
         txn_garbage_collect_duration: Duration,
+        validated_state: Arc&lt;TYPES::ValidatedState&gt;,
     ) -&gt; <span class="self">Self </span>{
         BuilderState {
             timestamp_to_tx: BTreeMap::new(),
@@ -2006,6 +2026,7 @@
             instance_state,
             txn_garbage_collect_duration,
             next_txn_garbage_collect_time: Instant::now() + txn_garbage_collect_duration,
+            validated_state,
         }
     }
     <span class="kw">pub fn </span>clone_with_receiver(<span class="kw-2">&amp;</span><span class="self">self</span>, req_receiver: BroadcastReceiver&lt;MessageType&lt;TYPES&gt;&gt;) -&gt; <span class="self">Self </span>{
@@ -2053,6 +2074,7 @@
             instance_state: <span class="self">self</span>.instance_state.clone(),
             txn_garbage_collect_duration: <span class="self">self</span>.txn_garbage_collect_duration,
             next_txn_garbage_collect_time,
+            validated_state: <span class="self">self</span>.validated_state.clone(),
         }
     }
 }
