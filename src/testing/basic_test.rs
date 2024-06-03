@@ -88,8 +88,8 @@ mod tests {
         const TEST_NUM_NODES_IN_VID_COMPUTATION: usize = 4;
 
         // settingup the broadcast channels i.e [From hostshot: (tx, decide, da, qc, )], [From api:(req - broadcast, res - mpsc channel) ]
-        let (tx_sender, tx_receiver) =
-            broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
+        // let (tx_sender, tx_receiver) =
+        //     broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
         let (decide_sender, decide_receiver) =
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
         let (da_sender, da_receiver) =
@@ -106,7 +106,7 @@ mod tests {
         // instantiate the global state also
         let global_state = GlobalState::<TestTypes>::new(
             bootstrap_sender,
-            tx_sender.clone(),
+            // tx_sender.clone(),
             txn_queue.clone(),
             vid_commitment(&[], 8),
             ViewNumber::new(0),
@@ -287,7 +287,7 @@ mod tests {
             // currently this step happens in the service.rs, wheneve we receiver an hotshot event
             tracing::debug!("Sending transaction message: {:?}", tx);
             handle_received_txns(
-                &tx_sender,
+                // &tx_sender,
                 &txn_queue,
                 vec![tx.clone()],
                 TransactionSource::HotShot,
@@ -327,6 +327,7 @@ mod tests {
         //let global_state_clone = arc_rwlock_global_state.clone();
         let arc_rwlock_global_state = Arc::new(RwLock::new(global_state));
         let arc_rwlock_global_state_clone = arc_rwlock_global_state.clone();
+        let arc_rwlock_tx_queue = txn_queue.clone();
         let handle = async_spawn(async move {
             let built_from_info = BuiltFromProposedBlock {
                 view_number: ViewNumber::new(0),
@@ -336,11 +337,12 @@ mod tests {
             };
             let builder_state = BuilderState::<TestTypes>::new(
                 built_from_info,
-                tx_receiver,
+                // tx_receiver,
                 decide_receiver,
                 da_receiver,
                 qc_receiver,
                 bootstrap_receiver,
+                arc_rwlock_tx_queue,
                 arc_rwlock_global_state_clone,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
                 Duration::from_millis(10), // max time to wait for non-zero txn block

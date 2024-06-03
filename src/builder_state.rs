@@ -13,7 +13,7 @@ use hotshot_types::{
 
 use committable::{Commitment, Committable};
 
-use crate::service::GlobalState;
+use crate::service::{GlobalState, ReceivedTransaction};
 use async_broadcast::broadcast;
 use async_broadcast::Receiver as BroadcastReceiver;
 use async_broadcast::Sender as BroadcastSender;
@@ -30,16 +30,12 @@ use async_std::task::spawn_blocking;
 #[cfg(async_executor_impl = "tokio")]
 use tokio::task::spawn_blocking;
 
-use std::fmt::Debug;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
-use std::time::SystemTime;
-use std::{
-    cmp::max,
-    collections::{BTreeMap, HashMap, HashSet},
-};
 use std::{cmp::PartialEq, num::NonZeroUsize};
 use std::{collections::hash_map::Entry, time::Duration};
+use std::{collections::VecDeque, fmt::Debug};
 
 pub type TxTimeStamp = u128;
 
@@ -138,13 +134,13 @@ pub struct DAProposalInfo<TYPES: NodeType> {
 #[derive(Debug)]
 pub struct BuilderState<TYPES: NodeType> {
     /// timestamp to tx hash, used for ordering for the transactions
-    pub timestamp_to_tx: BTreeMap<TxTimeStamp, Commitment<TYPES::Transaction>>,
+    // pub timestamp_to_tx: BTreeMap<TxTimeStamp, Commitment<TYPES::Transaction>>,
 
     /// transaction hash to available transaction data
-    pub tx_hash_to_available_txns: HashMap<
-        Commitment<TYPES::Transaction>,
-        (TxTimeStamp, TYPES::Transaction, TransactionSource),
-    >,
+    // pub tx_hash_to_available_txns: HashMap<
+    //     Commitment<TYPES::Transaction>,
+    //     (TxTimeStamp, TYPES::Transaction, TransactionSource),
+    // >,
 
     /// Recent included txs set while building blocks
     pub included_txns: HashSet<Commitment<TYPES::Transaction>>,
@@ -169,7 +165,7 @@ pub struct BuilderState<TYPES: NodeType> {
 
     // Channel Receivers for the HotShot events, Tx_receiver could also receive the external transactions
     /// transaction receiver
-    pub tx_receiver: BroadcastReceiver<MessageType<TYPES>>,
+    // pub tx_receiver: BroadcastReceiver<MessageType<TYPES>>,
 
     /// decide receiver
     pub decide_receiver: BroadcastReceiver<MessageType<TYPES>>,
@@ -182,6 +178,9 @@ pub struct BuilderState<TYPES: NodeType> {
 
     /// channel receiver for the block requests
     pub req_receiver: BroadcastReceiver<MessageType<TYPES>>,
+
+    /// transaction queue handle, defined in service.rs
+    pub tx_queue: Arc<RwLock<VecDeque<ReceivedTransaction<TYPES>>>>,
 
     /// global state handle, defined in the service.rs
     pub global_state: Arc<RwLock<GlobalState<TYPES>>>,
@@ -212,10 +211,10 @@ pub struct BuilderState<TYPES: NodeType> {
 #[async_trait]
 pub trait BuilderProgress<TYPES: NodeType> {
     /// process the external transaction
-    fn process_external_transaction(&mut self, txns: Arc<Vec<TYPES::Transaction>>);
+    // fn process_external_transaction(&mut self, txns: Arc<Vec<TYPES::Transaction>>);
 
     /// process the hotshot transaction
-    fn process_hotshot_transaction(&mut self, tx: Arc<Vec<TYPES::Transaction>>);
+    // fn process_hotshot_transaction(&mut self, tx: Arc<Vec<TYPES::Transaction>>);
 
     /// process the DA proposal
     async fn process_da_proposal(&mut self, da_msg: DaProposalMessage<TYPES>);
@@ -251,63 +250,63 @@ pub trait BuilderProgress<TYPES: NodeType> {
 
 #[async_trait]
 impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
-    /// processing the external i.e private mempool transaction
-    fn process_external_transaction(&mut self, txns: Arc<Vec<TYPES::Transaction>>) {
-        // PRIVATE MEMPOOL TRANSACTION PROCESSING
-        tracing::debug!("Processing external transactions");
-        // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
-        txns.iter().for_each(|tx| {
-            let tx_hash = tx.commit();
-            tracing::debug!("Transaction hash: {:?}", tx_hash);
-            if self.tx_hash_to_available_txns.contains_key(&tx_hash)
-                || self.included_txns.contains(&tx_hash) || self.included_txns_old.contains(&tx_hash) || self.included_txns_expiring.contains(&tx_hash)
-            {
-                tracing::debug!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
-            } else {
-                // get the current timestamp in nanoseconds; it used for ordering the transactions
-                let tx_timestamp = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap_or(Duration::new(0, 0))
-                    .as_nanos();
+    // /// processing the external i.e private mempool transaction
+    // fn process_external_transaction(&mut self, txns: Arc<Vec<TYPES::Transaction>>) {
+    //     // PRIVATE MEMPOOL TRANSACTION PROCESSING
+    //     tracing::debug!("Processing external transactions");
+    //     // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
+    //     txns.iter().for_each(|tx| {
+    //         let tx_hash = tx.commit();
+    //         tracing::debug!("Transaction hash: {:?}", tx_hash);
+    //         if self.tx_hash_to_available_txns.contains_key(&tx_hash)
+    //             || self.included_txns.contains(&tx_hash) || self.included_txns_old.contains(&tx_hash) || self.included_txns_expiring.contains(&tx_hash)
+    //         {
+    //             tracing::debug!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
+    //         } else {
+    //             // get the current timestamp in nanoseconds; it used for ordering the transactions
+    //             let tx_timestamp = SystemTime::now()
+    //                 .duration_since(SystemTime::UNIX_EPOCH)
+    //                 .unwrap_or(Duration::new(0, 0))
+    //                 .as_nanos();
 
-                // insert into both timestamp_tx and tx_hash_tx maps
-                self.timestamp_to_tx.insert(tx_timestamp, tx_hash);
-                self.tx_hash_to_available_txns
-                    .insert(tx_hash, (tx_timestamp, tx.clone(), TransactionSource::External));
-            }
-    });
-    }
+    //             // insert into both timestamp_tx and tx_hash_tx maps
+    //             // self.timestamp_to_tx.insert(tx_timestamp, tx_hash);
+    //             self.tx_hash_to_available_txns
+    //                 .insert(tx_hash, (tx_timestamp, tx.clone(), TransactionSource::External));
+    //         }
+    // });
+    // }
 
-    /// processing the hotshot i.e public mempool transaction
-    #[tracing::instrument(skip_all, name = "process hotshot transaction",
-                                    fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
-    fn process_hotshot_transaction(&mut self, txns: Arc<Vec<TYPES::Transaction>>) {
-        // Hotshot Public Mempool txns processing
-        tracing::debug!("Processing hotshot transactions");
-        // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
-        txns.iter().for_each(|tx| {
-            let tx_hash = tx.commit();
-            tracing::debug!("Transaction hash: {:?}", tx_hash);
-            // HOTSHOT MEMPOOL TRANSACTION PROCESSING
-            // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
-            if self.tx_hash_to_available_txns.contains_key(&tx_hash)
-            || self.included_txns.contains(&tx_hash) || self.included_txns_old.contains(&tx_hash) || self.included_txns_expiring.contains(&tx_hash)
-            {
-                tracing::debug!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
-            } else {
-                // get the current timestamp in nanoseconds
-                let tx_timestamp = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap_or(Duration::new(0, 0))
-                    .as_nanos();
+    // /// processing the hotshot i.e public mempool transaction
+    // #[tracing::instrument(skip_all, name = "process hotshot transaction",
+    //                                 fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
+    // fn process_hotshot_transaction(&mut self, txns: Arc<Vec<TYPES::Transaction>>) {
+    //     // Hotshot Public Mempool txns processing
+    //     tracing::debug!("Processing hotshot transactions");
+    //     // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
+    //     txns.iter().for_each(|tx| {
+    //         let tx_hash = tx.commit();
+    //         tracing::debug!("Transaction hash: {:?}", tx_hash);
+    //         // HOTSHOT MEMPOOL TRANSACTION PROCESSING
+    //         // If it already exists, then discard it. Decide the existence based on the tx_hash_tx and check in both the local pool and already included txns
+    //         if self.tx_hash_to_available_txns.contains_key(&tx_hash)
+    //         || self.included_txns.contains(&tx_hash) || self.included_txns_old.contains(&tx_hash) || self.included_txns_expiring.contains(&tx_hash)
+    //         {
+    //             tracing::debug!("Transaction already exists in the builderinfo.txid_to_tx hashmap, So we can ignore it");
+    //         } else {
+    //             // get the current timestamp in nanoseconds
+    //             let tx_timestamp = SystemTime::now()
+    //                 .duration_since(SystemTime::UNIX_EPOCH)
+    //                 .unwrap_or(Duration::new(0, 0))
+    //                 .as_nanos();
 
-                // insert into both timestamp_tx and tx_hash_tx maps
-                self.timestamp_to_tx.insert(tx_timestamp, tx_hash);
-                self.tx_hash_to_available_txns
-                    .insert(tx_hash, (tx_timestamp, tx.clone(), TransactionSource::HotShot));
-            }
-        });
-    }
+    //             // insert into both timestamp_tx and tx_hash_tx maps
+    //             self.timestamp_to_tx.insert(tx_timestamp, tx_hash);
+    //             self.tx_hash_to_available_txns
+    //                 .insert(tx_hash, (tx_timestamp, tx.clone(), TransactionSource::HotShot));
+    //         }
+    //     });
+    // }
 
     /// processing the DA proposal
     #[tracing::instrument(skip_all, name = "process da proposal",
@@ -596,11 +595,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         self.built_from_proposed_block.leaf_commit = leaf.commit();
 
         da_proposal_info.txn_commitments.iter().for_each(|txn| {
-            if let Entry::Occupied(txn_info) = self.tx_hash_to_available_txns.entry(*txn) {
-                self.timestamp_to_tx.remove(&txn_info.get().0);
-                self.included_txns.insert(*txn);
-                txn_info.remove_entry();
-            }
+            self.included_txns.insert(*txn);
         });
 
         // register the spawned builder state to spawned_builder_states in the global state
@@ -621,46 +616,33 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         matching_vid: VidCommitment,
         requested_view_number: TYPES::Time,
     ) -> Option<BuildBlockInfo<TYPES>> {
-        // try to provide atleast one txn inside the block, ideally this should be a threshold through configurable value,
-        // if it gets non-zero before timeout return, otherwise return after timeout
-        if self.timestamp_to_tx.is_empty() {
-            let timeout_after = Instant::now() + self.maximize_txn_capture_timeout;
-            let sleep_interval = self.maximize_txn_capture_timeout / 10;
-            loop {
-                if let Ok(MessageType::TransactionMessage(rtx_msg)) = self.tx_receiver.try_recv() {
-                    tracing::debug!(
-                        "Received ({:?}) txns msg in builder {:?}",
-                        rtx_msg.txns.len(),
-                        self.built_from_proposed_block,
-                    );
-                    if rtx_msg.tx_type == TransactionSource::HotShot {
-                        self.process_hotshot_transaction(rtx_msg.txns);
+        let mut txns = Vec::new();
+        let timeout_after = Instant::now() + self.maximize_txn_capture_timeout;
+        let sleep_interval = self.maximize_txn_capture_timeout / 10;
+        while Instant::now() <= timeout_after {
+            txns = self
+                .tx_queue
+                .read_arc()
+                .await
+                .iter()
+                .filter_map(|txn| {
+                    if self.included_txns.contains(&txn.commit)
+                        || self.included_txns_old.contains(&txn.commit)
+                        || self.included_txns_expiring.contains(&txn.commit)
+                    {
+                        None
                     } else {
-                        self.process_external_transaction(rtx_msg.txns);
+                        Some(txn.tx.clone())
                     }
-                    tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
-                }
-                // return if non-zero txns are available
-                if !self.timestamp_to_tx.is_empty() {
-                    break;
-                }
-                // if would timeout before next wake, return
-                if Instant::now() + sleep_interval > timeout_after {
-                    break;
-                }
-
+                })
+                .collect();
+            if txns.is_empty() && (Instant::now() + sleep_interval) <= timeout_after {
                 async_sleep(sleep_interval).await;
             }
         }
-
-        if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
-            self.timestamp_to_tx.iter().filter_map(|(_ts, tx_hash)| {
-                self.tx_hash_to_available_txns
-                    .get(tx_hash)
-                    .map(|(_ts, tx, _source)| tx.clone())
-            }),
-            &self.instance_state,
-        ) {
+        if let Ok((payload, metadata)) =
+            <TYPES::BlockPayload as BlockPayload>::from_transactions(txns, &self.instance_state)
+        {
             let builder_hash = payload.builder_commitment(&metadata);
             // count the number of txns
             let txn_count = payload.num_transactions(&metadata);
@@ -801,29 +783,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let _builder_handle = async_spawn(async move {
             loop {
                 tracing::debug!("Builder event loop");
-                // read and process up to 1/4 of the channel capacity of available txns
-                let mut message_counter = 0;
-                let max_loop_count = max(self.tx_receiver.capacity() / 4, 1);
-                while let Ok(tx) = self.tx_receiver.try_recv() {
-                    if message_counter >= max_loop_count {
-                        break;
-                    }
-                    message_counter += 1;
-                    if let MessageType::TransactionMessage(rtx_msg) = tx {
-                        tracing::debug!(
-                            "Received ({:?}) txns msg in builder {:?}",
-                            rtx_msg.txns.len(),
-                            self.built_from_proposed_block,
-                        );
-                        if rtx_msg.tx_type == TransactionSource::HotShot {
-                            self.process_hotshot_transaction(rtx_msg.txns);
-                        } else {
-                            self.process_external_transaction(rtx_msg.txns);
-                        }
-                        tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
-                    }
-                }
-
                 futures::select! {
                     req = self.req_receiver.next() => {
                         tracing::debug!("Received request msg in builder {:?}: {:?}", self.built_from_proposed_block.view_number, req);
@@ -842,28 +801,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                             }
                             None => {
                                 tracing::info!("No more request messages to consume");
-                            }
-                        }
-                    },
-                    tx = self.tx_receiver.next() => {
-                        match tx {
-                            Some(tx) => {
-                                if let MessageType::TransactionMessage(rtx_msg) = tx {
-                                    tracing::debug!(
-                                        "Received ({:?}) txns msg in builder {:?}",
-                                        rtx_msg.txns.len(),
-                                        self.built_from_proposed_block,
-                                    );
-                                    if rtx_msg.tx_type == TransactionSource::HotShot {
-                                        self.process_hotshot_transaction(rtx_msg.txns);
-                                    } else {
-                                        self.process_external_transaction(rtx_msg.txns);
-                                    }
-                                    tracing::debug!("tx map size: {}", self.tx_hash_to_available_txns.len());
-                                }
-                            }
-                            None => {
-                                tracing::info!("No more tx messages to consume");
                             }
                         }
                     },
@@ -939,11 +876,12 @@ pub enum MessageType<TYPES: NodeType> {
 impl<TYPES: NodeType> BuilderState<TYPES> {
     pub fn new(
         built_from_proposed_block: BuiltFromProposedBlock<TYPES>,
-        tx_receiver: BroadcastReceiver<MessageType<TYPES>>,
+        // tx_receiver: BroadcastReceiver<MessageType<TYPES>>,
         decide_receiver: BroadcastReceiver<MessageType<TYPES>>,
         da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>,
         qc_receiver: BroadcastReceiver<MessageType<TYPES>>,
         req_receiver: BroadcastReceiver<MessageType<TYPES>>,
+        tx_queue: Arc<RwLock<VecDeque<ReceivedTransaction<TYPES>>>>,
         global_state: Arc<RwLock<GlobalState<TYPES>>>,
         num_nodes: NonZeroUsize,
         maximize_txn_capture_timeout: Duration,
@@ -952,19 +890,20 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         txn_garbage_collect_duration: Duration,
     ) -> Self {
         BuilderState {
-            timestamp_to_tx: BTreeMap::new(),
-            tx_hash_to_available_txns: HashMap::new(),
+            // timestamp_to_tx: BTreeMap::new(),
+            // tx_hash_to_available_txns: HashMap::new(),
             included_txns: HashSet::new(),
             included_txns_old: HashSet::new(),
             included_txns_expiring: HashSet::new(),
             built_from_proposed_block,
-            tx_receiver,
+            // tx_receiver,
             decide_receiver,
             da_proposal_receiver,
             qc_receiver,
             req_receiver,
             da_proposal_payload_commit_to_da_proposal: HashMap::new(),
             quorum_proposal_payload_commit_to_quorum_proposal: HashMap::new(),
+            tx_queue,
             global_state,
             builder_commitments: HashSet::new(),
             total_nodes: num_nodes,
@@ -999,19 +938,20 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         };
 
         BuilderState {
-            timestamp_to_tx: self.timestamp_to_tx.clone(),
-            tx_hash_to_available_txns: self.tx_hash_to_available_txns.clone(),
+            // timestamp_to_tx: self.timestamp_to_tx.clone(),
+            // tx_hash_to_available_txns: self.tx_hash_to_available_txns.clone(),
             included_txns,
             included_txns_old,
             included_txns_expiring,
             built_from_proposed_block: self.built_from_proposed_block.clone(),
-            tx_receiver: self.tx_receiver.clone(),
+            // tx_receiver: self.tx_receiver.clone(),
             decide_receiver: self.decide_receiver.clone(),
             da_proposal_receiver: self.da_proposal_receiver.clone(),
             qc_receiver: self.qc_receiver.clone(),
             req_receiver,
             da_proposal_payload_commit_to_da_proposal: HashMap::new(),
             quorum_proposal_payload_commit_to_quorum_proposal: HashMap::new(),
+            tx_queue: self.tx_queue.clone(),
             global_state: self.global_state.clone(),
             builder_commitments: self.builder_commitments.clone(),
             total_nodes: self.total_nodes,
