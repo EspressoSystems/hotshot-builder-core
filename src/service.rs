@@ -126,10 +126,7 @@ pub struct GlobalState<Types: NodeType> {
 
     // sending a transaction from the hotshot/private mempool to the builder states
     // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
-    // pub tx_sender: BroadcastSender<MessageType<Types>>,
-
-    // accumulate transactions in the order received
-    pub tx_queue: Arc<RwLock<VecDeque<ReceivedTransaction<Types>>>>,
+    pub tx_sender: BroadcastSender<Arc<ReceivedTransaction<Types>>>,
 
     // last garbage collected view number
     pub last_garbage_collected_view_num: Types::Time,
@@ -145,8 +142,7 @@ impl<Types: NodeType> GlobalState<Types> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         bootstrap_sender: BroadcastSender<MessageType<Types>>,
-        // tx_sender: BroadcastSender<MessageType<Types>>,
-        tx_queue: Arc<RwLock<VecDeque<ReceivedTransaction<Types>>>>,
+        tx_sender: BroadcastSender<Arc<ReceivedTransaction<Types>>>,
         bootstrapped_builder_state_id: VidCommitment,
         bootstrapped_view_num: Types::Time,
         last_garbage_collected_view_num: Types::Time,
@@ -161,8 +157,7 @@ impl<Types: NodeType> GlobalState<Types> {
             block_hash_to_block: Default::default(),
             spawned_builder_states,
             view_to_cleanup_targets: Default::default(),
-            // tx_sender,
-            tx_queue,
+            tx_sender,
             last_garbage_collected_view_num,
             buffer_view_num_count,
             builder_state_to_last_built_block: Default::default(),
@@ -291,13 +286,7 @@ impl<Types: NodeType> GlobalState<Types> {
         &self,
         txns: Vec<<Types as NodeType>::Transaction>,
     ) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
-        handle_received_txns(
-            // &self.tx_sender,
-            &self.tx_queue,
-            txns,
-            TransactionSource::External,
-        )
-        .await
+        handle_received_txns(&self.tx_sender, txns, TransactionSource::External).await
     }
 
     pub fn get_channel_for_matching_builder_or_highest_view_buider(
@@ -773,7 +762,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
     decide_sender: BroadcastSender<MessageType<Types>>,
 
     // shared accumulated transactions handle
-    tx_queue: Arc<RwLock<VecDeque<ReceivedTransaction<Types>>>>,
+    tx_sender: BroadcastSender<Arc<ReceivedTransaction<Types>>>,
 
     // Url to (re)connect to for the events stream
     hotshot_events_api_url: Url,
@@ -810,8 +799,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                     // tx event
                     BuilderEventType::HotshotTransactions { transactions } => {
                         if let Err(e) = handle_received_txns(
-                            // &tx_sender,
-                            &tx_queue,
+                            &tx_sender,
                             transactions,
                             TransactionSource::HotShot,
                         )
@@ -879,8 +867,8 @@ pub async fn run_permissioned_standalone_builder_service<
     Types: NodeType,
     I: NodeImplementation<Types>,
 >(
-    // sending a transaction from the hotshot mempool to the builder states
-    // tx_sender: BroadcastSender<MessageType<Types>>,
+    // sending received transactions
+    tx_sender: BroadcastSender<Arc<ReceivedTransaction<Types>>>,
 
     // sending a DA proposal from the hotshot to the builder states
     da_sender: BroadcastSender<MessageType<Types>>,
@@ -890,9 +878,6 @@ pub async fn run_permissioned_standalone_builder_service<
 
     // sending a Decide event from the hotshot to the builder states
     decide_sender: BroadcastSender<MessageType<Types>>,
-
-    // shared accumulated transactions handle
-    tx_queue: Arc<RwLock<VecDeque<ReceivedTransaction<Types>>>>,
 
     // hotshot context handle
     hotshot_handle: SystemContextHandle<Types, I>,
@@ -913,8 +898,7 @@ pub async fn run_permissioned_standalone_builder_service<
                     // tx event
                     EventType::Transactions { transactions } => {
                         if let Err(e) = handle_received_txns(
-                            // &tx_sender,
-                            &tx_queue,
+                            &tx_sender,
                             transactions,
                             TransactionSource::HotShot,
                         )
@@ -1072,8 +1056,7 @@ async fn handle_decide_event<Types: NodeType>(
 }
 
 pub(crate) async fn handle_received_txns<Types: NodeType>(
-    // tx_sender: &BroadcastSender<MessageType<Types>>,
-    tx_queue: &Arc<RwLock<VecDeque<ReceivedTransaction<Types>>>>,
+    tx_sender: &BroadcastSender<Arc<ReceivedTransaction<Types>>>,
     txns: Vec<Types::Transaction>,
     source: TransactionSource,
 ) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
@@ -1085,35 +1068,15 @@ pub(crate) async fn handle_received_txns<Types: NodeType>(
     //     tx_type: source.clone(),
     // };
     let time_in = Instant::now();
-    let mut received_txns: VecDeque<_> = txns
-        .into_iter()
-        .map(|tx| {
-            let commit = tx.commit();
-            results.push(commit);
-            ReceivedTransaction {
-                tx,
-                source: source.clone(),
-                commit,
-                time_in,
-            }
-        })
-        .collect();
-    tx_queue.write_arc().await.append(&mut received_txns);
-
+    txns.into_iter().map(|tx| {
+        let commit = tx.commit();
+        results.push(commit);
+        tx_sender.broadcast(Arc::new(ReceivedTransaction {
+            tx,
+            source: source.clone(),
+            commit,
+            time_in,
+        }));
+    });
     Ok(results)
-
-    // tracing::debug!(
-    //     "Sending txn_count ({:?}) transactions to the builder states",
-    //     tx_msg.txns.len()
-    // );
-    // tx_sender
-    //     .broadcast(MessageType::TransactionMessage(tx_msg))
-    //     .await
-    //     .map(|_a| results)
-    //     .map_err(|e| {
-    //         tracing::warn!("Error {e}, failed to send transactions to the builder states");
-    //         BuildError::Error {
-    //             message: "failed to send txns".to_string(),
-    //         }
-    //     })
 }

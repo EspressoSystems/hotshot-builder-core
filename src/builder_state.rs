@@ -23,7 +23,7 @@ use async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use core::panic;
-use futures::StreamExt;
+use futures::{channel::mpsc::TryRecvError, StreamExt};
 
 #[cfg(async_executor_impl = "async-std")]
 use async_std::task::spawn_blocking;
@@ -164,9 +164,6 @@ pub struct BuilderState<TYPES: NodeType> {
     pub built_from_proposed_block: BuiltFromProposedBlock<TYPES>,
 
     // Channel Receivers for the HotShot events, Tx_receiver could also receive the external transactions
-    /// transaction receiver
-    // pub tx_receiver: BroadcastReceiver<MessageType<TYPES>>,
-
     /// decide receiver
     pub decide_receiver: BroadcastReceiver<MessageType<TYPES>>,
 
@@ -179,8 +176,11 @@ pub struct BuilderState<TYPES: NodeType> {
     /// channel receiver for the block requests
     pub req_receiver: BroadcastReceiver<MessageType<TYPES>>,
 
-    /// transaction queue handle, defined in service.rs
-    pub tx_queue: Arc<RwLock<VecDeque<ReceivedTransaction<TYPES>>>>,
+    /// incoming stream of transactions
+    pub tx_receiver: BroadcastReceiver<Arc<ReceivedTransaction<TYPES>>>,
+
+    /// filtered queue of available transactions, taken from tx_receiver
+    pub tx_queue: Vec<Arc<ReceivedTransaction<TYPES>>>,
 
     /// global state handle, defined in the service.rs
     pub global_state: Arc<RwLock<GlobalState<TYPES>>>,
@@ -412,7 +412,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         .remove(&payload_builder_commitment.clone());
 
                     let (req_sender, req_receiver) = broadcast(self.req_receiver.capacity());
-
                     self.clone_with_receiver(req_receiver)
                         .spawn_clone(
                             Arc::new(da_proposal_info),
@@ -597,6 +596,11 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         da_proposal_info.txn_commitments.iter().for_each(|txn| {
             self.included_txns.insert(*txn);
         });
+        self.tx_queue = self
+            .tx_queue
+            .into_iter()
+            .filter(|tx| (&self.included_txns).contains(&tx.commit))
+            .collect();
 
         // register the spawned builder state to spawned_builder_states in the global state
         self.global_state.write_arc().await.register_builder_state(
@@ -616,33 +620,21 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         matching_vid: VidCommitment,
         requested_view_number: TYPES::Time,
     ) -> Option<BuildBlockInfo<TYPES>> {
-        let mut txns = Vec::new();
         let timeout_after = Instant::now() + self.maximize_txn_capture_timeout;
         let sleep_interval = self.maximize_txn_capture_timeout / 10;
         while Instant::now() <= timeout_after {
-            txns = self
-                .tx_queue
-                .read_arc()
-                .await
-                .iter()
-                .filter_map(|txn| {
-                    if self.included_txns.contains(&txn.commit)
-                        || self.included_txns_old.contains(&txn.commit)
-                        || self.included_txns_expiring.contains(&txn.commit)
-                    {
-                        None
-                    } else {
-                        Some(txn.tx.clone())
-                    }
-                })
-                .collect();
-            if txns.is_empty() && (Instant::now() + sleep_interval) <= timeout_after {
+            self.collect_txns(timeout_after).await;
+            if Instant::now() + sleep_interval <= timeout_after {
+                break;
+            }
+            if self.tx_queue.is_empty() {
                 async_sleep(sleep_interval).await;
             }
         }
-        if let Ok((payload, metadata)) =
-            <TYPES::BlockPayload as BlockPayload>::from_transactions(txns, &self.instance_state)
-        {
+        if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
+            self.tx_queue.iter().map(|tx| tx.tx.clone()),
+            &self.instance_state,
+        ) {
             let builder_hash = payload.builder_commitment(&metadata);
             // count the number of txns
             let txn_count = payload.num_transactions(&metadata);
@@ -876,12 +868,12 @@ pub enum MessageType<TYPES: NodeType> {
 impl<TYPES: NodeType> BuilderState<TYPES> {
     pub fn new(
         built_from_proposed_block: BuiltFromProposedBlock<TYPES>,
-        // tx_receiver: BroadcastReceiver<MessageType<TYPES>>,
         decide_receiver: BroadcastReceiver<MessageType<TYPES>>,
         da_proposal_receiver: BroadcastReceiver<MessageType<TYPES>>,
         qc_receiver: BroadcastReceiver<MessageType<TYPES>>,
         req_receiver: BroadcastReceiver<MessageType<TYPES>>,
-        tx_queue: Arc<RwLock<VecDeque<ReceivedTransaction<TYPES>>>>,
+        tx_receiver: BroadcastReceiver<Arc<ReceivedTransaction<TYPES>>>,
+        tx_queue: Vec<Arc<ReceivedTransaction<TYPES>>>,
         global_state: Arc<RwLock<GlobalState<TYPES>>>,
         num_nodes: NonZeroUsize,
         maximize_txn_capture_timeout: Duration,
@@ -896,13 +888,13 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             included_txns_old: HashSet::new(),
             included_txns_expiring: HashSet::new(),
             built_from_proposed_block,
-            // tx_receiver,
             decide_receiver,
             da_proposal_receiver,
             qc_receiver,
             req_receiver,
             da_proposal_payload_commit_to_da_proposal: HashMap::new(),
             quorum_proposal_payload_commit_to_quorum_proposal: HashMap::new(),
+            tx_receiver,
             tx_queue,
             global_state,
             builder_commitments: HashSet::new(),
@@ -944,13 +936,13 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             included_txns_old,
             included_txns_expiring,
             built_from_proposed_block: self.built_from_proposed_block.clone(),
-            // tx_receiver: self.tx_receiver.clone(),
             decide_receiver: self.decide_receiver.clone(),
             da_proposal_receiver: self.da_proposal_receiver.clone(),
             qc_receiver: self.qc_receiver.clone(),
             req_receiver,
             da_proposal_payload_commit_to_da_proposal: HashMap::new(),
             quorum_proposal_payload_commit_to_quorum_proposal: HashMap::new(),
+            tx_receiver: self.tx_receiver.clone(),
             tx_queue: self.tx_queue.clone(),
             global_state: self.global_state.clone(),
             builder_commitments: self.builder_commitments.clone(),
@@ -960,6 +952,31 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             instance_state: self.instance_state.clone(),
             txn_garbage_collect_duration: self.txn_garbage_collect_duration,
             next_txn_garbage_collect_time,
+        }
+    }
+
+    // collect outstanding transactions
+    async fn collect_txns(&mut self, timeout_after: Instant) {
+        while Instant::now() <= timeout_after {
+            match self.tx_receiver.try_recv() {
+                Ok(tx) => {
+                    if self.included_txns.contains(&tx.commit)
+                        || self.included_txns_old.contains(&tx.commit)
+                        || self.included_txns_expiring.contains(&tx.commit)
+                    {
+                        continue;
+                    }
+                    self.tx_queue.push(tx);
+                }
+                Err(async_broadcast::TryRecvError::Empty)
+                | Err(async_broadcast::TryRecvError::Closed) => {
+                    break;
+                }
+                Err(async_broadcast::TryRecvError::Overflowed(lost)) => {
+                    tracing::warn!("Missed {lost} transactions due to backlog");
+                    continue;
+                }
+            }
         }
     }
 }
