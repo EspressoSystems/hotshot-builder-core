@@ -17,7 +17,7 @@ clap = { version = "4.4", features = ["derive", "env"] }
 committable = "0.2"
 derivative = "2.2"
 futures = "0.3"
-hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "rc-0.5.57" }
+hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "rc-0.5.58" }
 hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "rc-0.5.57" }
 hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.27" }
 hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "rc-0.5.57" }
