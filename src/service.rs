@@ -46,7 +46,7 @@ use hotshot_events_service::{
     events_source::{BuilderEvent, BuilderEventType},
 };
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -1068,15 +1068,20 @@ pub(crate) async fn handle_received_txns<Types: NodeType>(
     //     tx_type: source.clone(),
     // };
     let time_in = Instant::now();
-    txns.into_iter().map(|tx| {
+    for tx in txns.into_iter() {
         let commit = tx.commit();
         results.push(commit);
-        tx_sender.broadcast(Arc::new(ReceivedTransaction {
-            tx,
-            source: source.clone(),
-            commit,
-            time_in,
-        }));
-    });
+        let res = tx_sender
+            .broadcast(Arc::new(ReceivedTransaction {
+                tx,
+                source: source.clone(),
+                commit,
+                time_in,
+            }))
+            .await;
+        if res.is_err() {
+            tracing::warn!("failed to broadcast txn with commit {:?}", commit);
+        }
+    }
     Ok(results)
 }
