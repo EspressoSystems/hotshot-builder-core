@@ -90,7 +90,7 @@ pub struct BuildBlockInfo<TYPES: NodeType> {
     pub block_size: u64,
     pub offered_fee: u64,
     pub block_payload: TYPES::BlockPayload,
-    pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload>::Metadata,
+    pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload<TYPES>>::Metadata,
     pub vid_trigger: OneShotSender<TriggerStatus>,
     pub vid_receiver: UnboundedReceiver<(VidCommitment, VidPrecomputeData)>,
 }
@@ -196,6 +196,10 @@ pub struct BuilderState<TYPES: NodeType> {
 
     /// constant fee that the builder will offer per byte of data sequenced
     pub base_fee: u64,
+
+    /// validated state that is required for a proposal to be considered valid. Needed for the
+    /// purposes of building a valid block payload within the sequencer.
+    pub validated_state: Arc<TYPES::ValidatedState>,
 
     /// instance state to enfoce max_block_size
     pub instance_state: Arc<TYPES::InstanceState>,
@@ -314,7 +318,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
         // form a block payload from the encoded transactions
         let block_payload =
-            <TYPES::BlockPayload as BlockPayload>::from_bytes(encoded_txns, metadata);
+            <TYPES::BlockPayload as BlockPayload<TYPES>>::from_bytes(encoded_txns, metadata);
         // get the builder commitment from the block payload
         let payload_builder_commitment = block_payload.builder_commitment(metadata);
 
@@ -570,10 +574,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                 async_sleep(sleep_interval).await;
             }
         }
-        if let Ok((payload, metadata)) = <TYPES::BlockPayload as BlockPayload>::from_transactions(
-            self.tx_queue.iter().map(|tx| tx.tx.clone()),
-            &self.instance_state,
-        ) {
+        if let Ok((payload, metadata)) =
+            <TYPES::BlockPayload as BlockPayload<TYPES>>::from_transactions(
+                self.tx_queue.iter().map(|tx| tx.tx.clone()),
+                &self.validated_state,
+                &self.instance_state,
+            )
+            .await
+        {
             let builder_hash = payload.builder_commitment(&metadata);
             // count the number of txns
             let txn_count = payload.num_transactions(&metadata);
@@ -713,7 +721,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     fn event_loop(mut self) {
         let _builder_handle = async_spawn(async move {
             loop {
-                tracing::debug!("Builder event loop");
+                tracing::debug!(
+                    "Builder{:?} event loop",
+                    self.built_from_proposed_block.view_number
+                );
                 futures::select! {
                     req = self.req_receiver.next() => {
                         tracing::debug!("Received request msg in builder {:?}: {:?}", self.built_from_proposed_block.view_number, req);
@@ -752,7 +763,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match qc {
                             Some(qc) => {
                                 if let MessageType::QCMessage(rqc_msg) = qc {
-                                    tracing::debug!("Received qc msg in builder {:?}:\n {:?} from index", self.built_from_proposed_block, rqc_msg.proposal.data.view_number);
+                                    tracing::debug!("Received qc msg in builder {:?}:\n {:?} for view ", self.built_from_proposed_block, rqc_msg.proposal.data.view_number);
                                     self.process_quorum_proposal(rqc_msg).await;
                                 }
                             }
@@ -765,7 +776,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match decide {
                             Some(decide) => {
                                 if let MessageType::DecideMessage(rdecide_msg) = decide {
-                                    tracing::debug!("Received decide msg in builder {:?}:\n {:?} from index", self.built_from_proposed_block, rdecide_msg);
+                                    tracing::debug!("Received decide msg in builder {:?}:\n {:?} for view ", self.built_from_proposed_block, rdecide_msg.latest_decide_view_number);
                                     let decide_status = self.process_decide_event(rdecide_msg).await;
                                     match decide_status{
                                         Some(Status::ShouldExit) => {
@@ -819,6 +830,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         base_fee: u64,
         instance_state: Arc<TYPES::InstanceState>,
         txn_garbage_collect_duration: Duration,
+        validated_state: Arc<TYPES::ValidatedState>,
     ) -> Self {
         BuilderState {
             included_txns: HashSet::new(),
@@ -841,6 +853,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             instance_state,
             txn_garbage_collect_duration,
             next_txn_garbage_collect_time: Instant::now() + txn_garbage_collect_duration,
+            validated_state,
         }
     }
     pub fn clone_with_receiver(&self, req_receiver: BroadcastReceiver<MessageType<TYPES>>) -> Self {
@@ -887,6 +900,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             instance_state: self.instance_state.clone(),
             txn_garbage_collect_duration: self.txn_garbage_collect_duration,
             next_txn_garbage_collect_time,
+            validated_state: self.validated_state.clone(),
         }
     }
 

@@ -608,9 +608,9 @@ dependencies = [
 
 [[package]]
 name = "async-compatibility-layer"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7d24a8f9d6fec5b9313ceebbd82133ae87cf94944c362e8169d7ec735c88a23"
+checksum = "2c928880329566b45c159fca61fbc2a1d301a7e5fd2a0e94c17476bb1a3ea526"
 dependencies = [
  "async-lock 3.3.0",
  "async-std",
@@ -2239,9 +2239,9 @@ checksum = "bbbaaaf38131deb9ca518a274a45bfdb8771f139517b073b16c2d3d32ae5037b"
 
 [[package]]
 name = "either"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a47c1c47d2f5964e29c61246e81db715514cd532db6b5116a25ea3c03d6780a2"
+checksum = "3dca9240753cf90908d7e4aac30f630662b02aebaa1b58a3cadabdb23385b58b"
 dependencies = [
  "serde",
 ]
@@ -3030,8 +3030,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot"
-version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.55#81842b54a699a255645ac195354a0feb08fdc9d6"
+version = "0.5.56"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.57#828f71864bec2600a2740e24c86468c5a485585b"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3045,6 +3045,7 @@ dependencies = [
  "cdn-broker",
  "cdn-client",
  "cdn-marshal",
+ "chrono",
  "committable",
  "custom_debug",
  "dashmap",
@@ -3076,7 +3077,7 @@ dependencies = [
 [[package]]
 name = "hotshot-builder-api"
 version = "0.1.7"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.55#81842b54a699a255645ac195354a0feb08fdc9d6"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.57#828f71864bec2600a2740e24c86468c5a485585b"
 dependencies = [
  "async-trait",
  "clap",
@@ -3094,7 +3095,7 @@ dependencies = [
 
 [[package]]
 name = "hotshot-builder-core"
-version = "0.1.21"
+version = "0.1.26"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3124,8 +3125,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot-events-service"
-version = "0.1.22"
-source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?tag=0.1.23#7049c81d8e697894803ea76e7128d0aca7fa47c9"
+version = "0.1.26"
+source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?tag=0.1.27#e4703477c687be50dea4faa4235aafa67a068cd4"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
@@ -3149,8 +3150,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot-example-types"
-version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.55#81842b54a699a255645ac195354a0feb08fdc9d6"
+version = "0.5.56"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.57#828f71864bec2600a2740e24c86468c5a485585b"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3180,8 +3181,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot-orchestrator"
-version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.55#81842b54a699a255645ac195354a0feb08fdc9d6"
+version = "0.5.56"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.57#828f71864bec2600a2740e24c86468c5a485585b"
 dependencies = [
  "anyhow",
  "async-compatibility-layer",
@@ -3209,12 +3210,14 @@ dependencies = [
 
 [[package]]
 name = "hotshot-task"
-version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.55#81842b54a699a255645ac195354a0feb08fdc9d6"
+version = "0.5.56"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.57#828f71864bec2600a2740e24c86468c5a485585b"
 dependencies = [
+ "anyhow",
  "async-broadcast",
  "async-compatibility-layer",
  "async-std",
+ "async-trait",
  "futures",
  "tokio",
  "tracing",
@@ -3222,8 +3225,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot-task-impls"
-version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.55#81842b54a699a255645ac195354a0feb08fdc9d6"
+version = "0.5.56"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.57#828f71864bec2600a2740e24c86468c5a485585b"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3258,7 +3261,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.11"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.55#81842b54a699a255645ac195354a0feb08fdc9d6"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.57#828f71864bec2600a2740e24c86468c5a485585b"
 dependencies = [
  "anyhow",
  "ark-bls12-381",
@@ -4357,8 +4360,8 @@ dependencies = [
 
 [[package]]
 name = "libp2p-networking"
-version = "0.5.43"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=0.5.55#81842b54a699a255645ac195354a0feb08fdc9d6"
+version = "0.5.56"
+source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.57#828f71864bec2600a2740e24c86468c5a485585b"
 dependencies = [
  "anyhow",
  "async-compatibility-layer",
@@ -5235,17 +5238,6 @@ name = "num-conv"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51d515d32fb182ee37cda2ccdcb92950d6a3c2893aa280e540671c2cd0f3b1d9"
-
-[[package]]
-name = "num-derive"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.60",
-]
 
 [[package]]
 name = "num-integer"
@@ -7393,9 +7385,9 @@ checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
 name = "surf-disco"
-version = "0.6.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b649b5919e809b105a8ae833154430f7069b0e3a392fff26a672211c6b8e30d"
+checksum = "55c871338479a1c27b5e2ae15e5ae0fe70769306d2ef5a0c2d30896a09ac8a3c"
 dependencies = [
  "async-std",
  "async-tungstenite",
@@ -7655,11 +7647,13 @@ dependencies = [
 
 [[package]]
 name = "tide-disco"
-version = "0.6.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbf3579d6f1362fffc7d1686ed061537afe8a187fd0b18e0f5694ad17e977ff3"
+checksum = "715558234f09576333f92ee769bd160e6c4bb1d156d25613cf62be9a592f291a"
 dependencies = [
  "anyhow",
+ "async-h1",
+ "async-lock 3.3.0",
  "async-std",
  "async-trait",
  "clap",
@@ -7677,8 +7671,6 @@ dependencies = [
  "libc",
  "markdown",
  "maud",
- "num-derive",
- "num-traits",
  "parking_lot",
  "prometheus",
  "reqwest",
