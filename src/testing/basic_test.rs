@@ -87,9 +87,6 @@ mod tests {
         const TEST_NUM_NODES_IN_VID_COMPUTATION: usize = 4;
 
         // settingup the broadcast channels i.e [From hostshot: (tx, decide, da, qc, )], [From api:(req - broadcast, res - mpsc channel) ]
-        let (tx_sender, tx_receiver) = broadcast::<Arc<ReceivedTransaction<TestTypes>>>(
-            num_test_messages * multiplication_factor,
-        );
         let (decide_sender, decide_receiver) =
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
         let (da_sender, da_receiver) =
