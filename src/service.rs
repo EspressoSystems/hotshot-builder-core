@@ -814,9 +814,6 @@ async fn connect_to_events_service<Types: NodeType>(
 Running Non-Permissioned Builder Service
 */
 pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
-    // sending a transaction from the hotshot mempool to the builder states
-    // tx_sender: BroadcastSender<MessageType<Types>>,
-
     // sending a DA proposal from the hotshot to the builder states
     da_sender: BroadcastSender<MessageType<Types>>,
 
@@ -1119,12 +1116,6 @@ pub(crate) async fn handle_received_txns<Types: NodeType>(
     source: TransactionSource,
 ) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
     let mut results = Vec::with_capacity(txns.len());
-    // let results: Vec<Commitment<<Types as NodeType>::Transaction>> = txns.iter().map(|tx| tx.commit()).collect();
-    // send the whole txn batch to the tx_sender, might get duplicate transactions but builder needs to filter them
-    // let tx_msg = TransactionMessage::<Types> {
-    //     txns: Arc::new(txns.clone()),
-    //     tx_type: source.clone(),
-    // };
     let time_in = Instant::now();
     for tx in txns.into_iter() {
         let commit = tx.commit();

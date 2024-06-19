@@ -133,15 +133,6 @@ pub struct DAProposalInfo<TYPES: NodeType> {
 
 #[derive(Debug)]
 pub struct BuilderState<TYPES: NodeType> {
-    /// timestamp to tx hash, used for ordering for the transactions
-    // pub timestamp_to_tx: BTreeMap<TxTimeStamp, Commitment<TYPES::Transaction>>,
-
-    /// transaction hash to available transaction data
-    // pub tx_hash_to_available_txns: HashMap<
-    //     Commitment<TYPES::Transaction>,
-    //     (TxTimeStamp, TYPES::Transaction, TransactionSource),
-    // >,
-
     /// Recent included txs set while building blocks
     pub included_txns: HashSet<Commitment<TYPES::Transaction>>,
 
@@ -539,9 +530,8 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
         self.built_from_proposed_block.leaf_commit = leaf.commit();
 
-        da_proposal_info.txn_commitments.iter().for_each(|txn| {
-            self.included_txns.insert(*txn);
-        });
+        self.included_txns
+            .extend(da_proposal_info.txn_commitments.iter());
         self.tx_queue
             .retain(|tx| !self.included_txns.contains(&tx.commit));
 
