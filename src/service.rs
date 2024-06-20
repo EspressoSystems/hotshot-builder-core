@@ -20,22 +20,18 @@ use hotshot_types::{
         signature_key::{BuilderSignatureKey, SignatureKey},
     },
     utils::BuilderCommitment,
-    vid::{VidCommitment, VidPrecomputeData},
+    vid::VidCommitment,
 };
 
 use crate::builder_state::{
     BuildBlockInfo, DaProposalMessage, DecideMessage, QCMessage, TransactionMessage,
-    TransactionSource, TriggerStatus,
+    TransactionSource,
 };
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
-use crate::WaitAndKeep;
 use anyhow::anyhow;
 use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
-use async_compatibility_layer::{
-    art::async_timeout,
-    channel::{unbounded, OneShotSender},
-};
+use async_compatibility_layer::{art::async_timeout, channel::unbounded};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use committable::{Commitment, Committable};
@@ -60,8 +56,6 @@ use tide_disco::{method::ReadState, Url};
 pub struct BlockInfo<Types: NodeType> {
     pub block_payload: Types::BlockPayload,
     pub metadata: <<Types as NodeType>::BlockPayload as BlockPayload<Types>>::Metadata,
-    pub vid_trigger: Arc<RwLock<Option<OneShotSender<TriggerStatus>>>>,
-    pub vid_receiver: Arc<RwLock<WaitAndKeep<(VidCommitment, VidPrecomputeData)>>>,
     pub offered_fee: u64,
 }
 
@@ -182,10 +176,6 @@ impl<Types: NodeType> GlobalState<Types> {
             .or_insert_with(|| BlockInfo {
                 block_payload: build_block_info.block_payload,
                 metadata: build_block_info.metadata,
-                vid_trigger: Arc::new(RwLock::new(Some(build_block_info.vid_trigger))),
-                vid_receiver: Arc::new(RwLock::new(WaitAndKeep::Wait(
-                    build_block_info.vid_receiver,
-                ))),
                 offered_fee: build_block_info.offered_fee,
             });
 
@@ -551,17 +541,6 @@ where
                 view_num
             );
 
-            if let Some(trigger_writer) = block_info.vid_trigger.write().await.take() {
-                tracing::info!("Sending vid trigger for {:?}@{:?}", block_hash, view_num);
-                trigger_writer.send(TriggerStatus::Start);
-                tracing::info!("Sent vid trigger for {:?}@{:?}", block_hash, view_num);
-            }
-            tracing::info!(
-                "Done Trying sending vid trigger info for {:?}@{:?}",
-                block_hash,
-                view_num
-            );
-
             // sign over the builder commitment, as the proposer can computer it based on provide block_payload
             // and the metata data
             let response_block_hash = block_info
@@ -593,119 +572,20 @@ where
         }
     }
 
+    /// Implemented for compatibility with trait, removal pending
+    ///
+    /// # Errors
+    /// Always
     async fn claim_block_header_input(
         &self,
-        block_hash: &BuilderCommitment,
-        view_number: u64,
-        sender: Types::SignatureKey,
-        signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
+        _block_hash: &BuilderCommitment,
+        _view_number: u64,
+        _sender: Types::SignatureKey,
+        _signature: &<<Types as NodeType>::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<AvailableBlockHeaderInput<Types>, BuildError> {
-        tracing::info!(
-            "Received request for claiming block header input for (block_hash {:?}, view_num: {:?})",
-            block_hash,
-            view_number
-        );
-        // verify the signature
-        if !sender.validate(signature, block_hash.as_ref()) {
-            tracing::error!("Signature validation failed in claim block header input");
-            return Err(BuildError::Error {
-                message: "Signature validation failed in claim block header input".to_string(),
-            });
-        }
-        let (pub_key, sign_key) = self.builder_keys.clone();
-        let view_num = <<Types as NodeType>::Time as ConsensusTime>::new(view_number);
-        if let Some(block_info) = self
-            .global_state
-            .read_arc()
-            .await
-            .block_hash_to_block
-            .get(&(block_hash.clone(), view_num))
-        {
-            tracing::info!("Waiting for vid commitment for block {:?}", block_hash);
-
-            let timeout_after = Instant::now() + self.max_api_waiting_time;
-            let check_duration = self.max_api_waiting_time / 10;
-
-            let response_received = loop {
-                match async_timeout(check_duration, block_info.vid_receiver.write().await.get())
-                    .await
-                {
-                    Err(_toe) => {
-                        if Instant::now() >= timeout_after {
-                            tracing::warn!(
-                                "Couldn't get vid commitment in time for block {:?}",
-                                block_hash
-                            );
-                            break Err(BuildError::Error {
-                                message: "Couldn't get vid commitment in time".to_string(),
-                            });
-                        }
-                        continue;
-                    }
-                    Ok(recv_attempt) => {
-                        if let Err(ref _e) = recv_attempt {
-                            tracing::error!(
-                                "Channel closed while getting vid commitment for block {:?}",
-                                block_hash
-                            );
-                        }
-                        break recv_attempt.map_err(|_| BuildError::Error {
-                            message: "channel unexpectedly closed".to_string(),
-                        });
-                    }
-                }
-            };
-
-            tracing::info!(
-                "Got vid commitment for block {:?}@{:?}",
-                block_hash,
-                view_number
-            );
-            if response_received.is_ok() {
-                let (vid_commitment, vid_precompute_data) = response_received.unwrap();
-
-                // sign over the vid commitment
-                let signature_over_vid_commitment =
-                    <Types as NodeType>::BuilderSignatureKey::sign_builder_message(
-                        &sign_key,
-                        vid_commitment.as_ref(),
-                    )
-                    .expect("Claim block header input message signing failed");
-
-                let signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
-                    &sign_key,
-                    block_info.offered_fee,
-                    &block_info.metadata,
-                    &vid_commitment,
-                )
-                .expect("Claim block header input fee signing failed");
-
-                let response = AvailableBlockHeaderInput::<Types> {
-                    vid_commitment,
-                    vid_precompute_data,
-                    fee_signature: signature_over_fee_info,
-                    message_signature: signature_over_vid_commitment,
-                    sender: pub_key.clone(),
-                };
-                tracing::info!(
-                "Sending Claim Block Header Input response for (block_hash {:?}, view_num: {:?})",
-                block_hash,
-                view_number
-            );
-                Ok(response)
-            } else {
-                tracing::warn!("Claim Block Header Input not found");
-                Err(BuildError::Error {
-                    message: "Block Header not found".to_string(),
-                })
-            }
-        } else {
-            tracing::warn!("Claim Block Header Input not found");
-            Err(BuildError::Error {
-                message: "Block Header not found".to_string(),
-            })
-        }
+        Err(BuildError::Missing)
     }
+
     async fn builder_address(
         &self,
     ) -> Result<<Types as NodeType>::BuilderSignatureKey, BuildError> {
