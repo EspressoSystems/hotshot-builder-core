@@ -38,9 +38,9 @@ mod tests {
 
     use crate::builder_state::{
         BuiltFromProposedBlock, DaProposalMessage, DecideMessage, QCMessage, RequestMessage,
-        TransactionMessage, TransactionSource,
+        TransactionSource,
     };
-    use crate::service::GlobalState;
+    use crate::service::{handle_received_txns, GlobalState, ReceivedTransaction};
     use async_lock::RwLock;
     use async_std::task;
     use committable::{Commitment, CommitmentBoundsArkless, Committable};
@@ -87,8 +87,6 @@ mod tests {
         const TEST_NUM_NODES_IN_VID_COMPUTATION: usize = 4;
 
         // settingup the broadcast channels i.e [From hostshot: (tx, decide, da, qc, )], [From api:(req - broadcast, res - mpsc channel) ]
-        let (tx_sender, tx_receiver) =
-            broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
         let (decide_sender, decide_receiver) =
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
         let (da_sender, da_receiver) =
@@ -97,7 +95,10 @@ mod tests {
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
         let (bootstrap_sender, bootstrap_receiver) =
             broadcast::<MessageType<TestTypes>>(num_test_messages * multiplication_factor);
-
+        let (tx_sender, tx_receiver) = broadcast::<Arc<ReceivedTransaction<TestTypes>>>(
+            num_test_messages * multiplication_factor,
+        );
+        let tx_queue = Vec::new();
         // generate the keys for the buidler
         let seed = [201_u8; 32];
         let (_builder_pub_key, _builder_private_key) =
@@ -106,6 +107,7 @@ mod tests {
         let global_state = GlobalState::<TestTypes>::new(
             bootstrap_sender,
             tx_sender.clone(),
+            // tx_queue.clone(),
             vid_commitment(&[], 8),
             ViewNumber::new(0),
             ViewNumber::new(0),
@@ -113,7 +115,6 @@ mod tests {
         );
 
         // to store all the sent messages
-        let mut stx_msgs: Vec<TransactionMessage<TestTypes>> = Vec::new();
         let mut sdecide_msgs: Vec<DecideMessage<TestTypes>> = Vec::new();
         let mut sda_msgs: Vec<DaProposalMessage<TestTypes>> = Vec::new();
         let mut sqc_msgs: Vec<QCMessage<TestTypes>> = Vec::new();
@@ -132,11 +133,6 @@ mod tests {
             // Prepare the transaction message
             let tx = TestTransaction::new(vec![i as u8]);
             let encoded_transactions = TestTransaction::encode(&[tx.clone()]);
-
-            let stx_msg = TransactionMessage::<TestTypes> {
-                txns: Arc::new(vec![tx.clone()]),
-                tx_type: TransactionSource::HotShot,
-            };
 
             // Prepare the DA proposal message
             let da_proposal = DaProposal {
@@ -302,9 +298,8 @@ mod tests {
 
             // validate the signature before pushing the message to the builder_state channels
             // currently this step happens in the service.rs, wheneve we receiver an hotshot event
-            tracing::debug!("Sending transaction message: {:?}", stx_msg);
-            tx_sender
-                .broadcast(MessageType::TransactionMessage(stx_msg.clone()))
+            tracing::debug!("Sending transaction message: {:?}", tx);
+            handle_received_txns(&tx_sender, vec![tx.clone()], TransactionSource::HotShot)
                 .await
                 .unwrap();
             da_sender
@@ -327,7 +322,6 @@ mod tests {
                 response_channel: response_sender,
             });
 
-            stx_msgs.push(stx_msg);
             sdecide_msgs.push(sdecide_msg);
             sda_msgs.push(sda_msg);
             sqc_msgs.push(sqc_msg);
@@ -350,11 +344,12 @@ mod tests {
             };
             let builder_state = BuilderState::<TestTypes>::new(
                 built_from_info,
-                tx_receiver,
                 decide_receiver,
                 da_receiver,
                 qc_receiver,
                 bootstrap_receiver,
+                tx_receiver,
+                tx_queue,
                 arc_rwlock_global_state_clone,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
                 Duration::from_millis(10), // max time to wait for non-zero txn block
