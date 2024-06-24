@@ -1144,7 +1144,7 @@
     data_source::{AcceptsTxnSubmits, BuilderDataSource},
 };
 <span class="kw">use </span>hotshot_types::{
-    constants::Version01,
+    constants::Base,
     data::{DaProposal, Leaf, QuorumProposal},
     event::EventType,
     message::Proposal,
@@ -1892,11 +1892,11 @@ Handling Builder API responses
         BuilderEvent&lt;Types&gt;,
         surf_disco::socket::Unsupported,
         EventStreamError,
-        vbs::version::StaticVersion&lt;<span class="number">0</span>, <span class="number">1</span>&gt;,
+        Base,
     &gt;,
     GeneralStaticCommittee&lt;Types, &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey&gt;,
 )&gt; {
-    <span class="kw">let </span>client = surf_disco::Client::&lt;hotshot_events_service::events::Error, Version01&gt;::new(
+    <span class="kw">let </span>client = surf_disco::Client::&lt;hotshot_events_service::events::Error, Base&gt;::new(
         hotshot_events_api_url.clone(),
     );
 
