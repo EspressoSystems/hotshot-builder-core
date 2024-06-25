@@ -40,7 +40,9 @@ mod tests {
         BuiltFromProposedBlock, DaProposalMessage, DecideMessage, QCMessage, RequestMessage,
         TransactionSource,
     };
-    use crate::service::{handle_received_txns, GlobalState, ReceivedTransaction};
+    use crate::service::{
+        handle_received_txns, BuilderTransaction, GlobalState, ReceivedTransaction,
+    };
     use async_lock::RwLock;
     use async_std::task;
     use committable::{Commitment, CommitmentBoundsArkless, Committable};
@@ -81,6 +83,15 @@ mod tests {
             type Membership = GeneralStaticCommittee<TestTypes, Self::SignatureKey>;
             type BuilderSignatureKey = BuilderKey;
         }
+
+        impl BuilderTransaction for TestTransaction {
+            type NamespaceId = u8;
+
+            fn namespace_id(&self) -> Self::NamespaceId {
+                *self.bytes().first().unwrap_or(&0)
+            }
+        }
+
         // no of test messages to send
         let num_test_messages = 5;
         let multiplication_factor = 5;
@@ -107,7 +118,6 @@ mod tests {
         let global_state = GlobalState::<TestTypes>::new(
             bootstrap_sender,
             tx_sender.clone(),
-            // tx_queue.clone(),
             vid_commitment(&[], 8),
             ViewNumber::new(0),
             ViewNumber::new(0),

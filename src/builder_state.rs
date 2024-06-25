@@ -13,7 +13,7 @@ use hotshot_types::{
 
 use committable::{Commitment, Committable};
 
-use crate::service::{GlobalState, ReceivedTransaction};
+use crate::service::{BuilderTransaction, GlobalState, ReceivedTransaction};
 use async_broadcast::broadcast;
 use async_broadcast::Receiver as BroadcastReceiver;
 use async_broadcast::Sender as BroadcastSender;
@@ -132,7 +132,10 @@ pub struct DAProposalInfo<TYPES: NodeType> {
 }
 
 #[derive(Debug)]
-pub struct BuilderState<TYPES: NodeType> {
+pub struct BuilderState<TYPES: NodeType>
+where
+    TYPES::Transaction: BuilderTransaction,
+{
     /// Recent included txs set while building blocks
     pub included_txns: HashSet<Commitment<TYPES::Transaction>>,
 
@@ -204,7 +207,10 @@ pub struct BuilderState<TYPES: NodeType> {
 
 /// Trait to hold the helper functions for the builder
 #[async_trait]
-pub trait BuilderProgress<TYPES: NodeType> {
+pub trait BuilderProgress<TYPES: NodeType>
+where
+    TYPES::Transaction: BuilderTransaction,
+{
     /// process the external transaction
     // fn process_external_transaction(&mut self, txns: Arc<Vec<TYPES::Transaction>>);
 
@@ -244,7 +250,10 @@ pub trait BuilderProgress<TYPES: NodeType> {
 }
 
 #[async_trait]
-impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
+impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES>
+where
+    TYPES::Transaction: BuilderTransaction,
+{
     /// processing the DA proposal
     #[tracing::instrument(skip_all, name = "process da proposal",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
@@ -796,7 +805,10 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 }
 /// Unifies the possible messages that can be received by the builder
 #[derive(Debug, Clone)]
-pub enum MessageType<TYPES: NodeType> {
+pub enum MessageType<TYPES: NodeType>
+where
+    TYPES::Transaction: BuilderTransaction,
+{
     TransactionMessage(TransactionMessage<TYPES>),
     DecideMessage(DecideMessage<TYPES>),
     DaProposalMessage(DaProposalMessage<TYPES>),
@@ -805,7 +817,10 @@ pub enum MessageType<TYPES: NodeType> {
 }
 
 #[allow(clippy::too_many_arguments)]
-impl<TYPES: NodeType> BuilderState<TYPES> {
+impl<TYPES: NodeType> BuilderState<TYPES>
+where
+    TYPES::Transaction: BuilderTransaction,
+{
     pub fn new(
         built_from_proposed_block: BuiltFromProposedBlock<TYPES>,
         decide_receiver: BroadcastReceiver<MessageType<TYPES>>,
