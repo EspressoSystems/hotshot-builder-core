@@ -63,6 +63,7 @@ use tide_disco::{method::ReadState, Url};
 pub trait BuilderTransaction {
     /// Type representing the namespace id for a transaction.
     type NamespaceId: Clone
+        + Copy
         + Serialize
         + DeserializeOwned
         + Debug
@@ -137,6 +138,9 @@ pub struct GlobalState<Types: NodeType>
 where
     Types::Transaction: BuilderTransaction,
 {
+    /// id of namespace builder is building for
+    pub namespace_id: <Types::Transaction as BuilderTransaction>::NamespaceId,
+
     // data store for the blocks
     pub block_hash_to_block: HashMap<(BuilderCommitment, Types::Time), BlockInfo<Types>>,
 
@@ -171,6 +175,7 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        namespace_id: <Types::Transaction as BuilderTransaction>::NamespaceId,
         bootstrap_sender: BroadcastSender<MessageType<Types>>,
         tx_sender: BroadcastSender<Arc<ReceivedTransaction<Types>>>,
         bootstrapped_builder_state_id: VidCommitment,
@@ -187,6 +192,7 @@ where
             block_hash_to_block: Default::default(),
             spawned_builder_states,
             view_to_cleanup_targets: Default::default(),
+            namespace_id,
             tx_sender,
             last_garbage_collected_view_num,
             buffer_view_num_count,
@@ -316,7 +322,13 @@ where
         &self,
         txns: Vec<<Types as NodeType>::Transaction>,
     ) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
-        handle_received_txns(&self.tx_sender, txns, TransactionSource::External).await
+        handle_received_txns(
+            &self.tx_sender,
+            txns,
+            TransactionSource::External,
+            self.namespace_id,
+        )
+        .await
     }
 
     pub fn get_channel_for_matching_builder_or_highest_view_buider(
@@ -860,6 +872,9 @@ where
 Running Non-Permissioned Builder Service
 */
 pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
+    // id of namespace to build for
+    namespace_id: <Types::Transaction as BuilderTransaction>::NamespaceId,
+
     // sending a DA proposal from the hotshot to the builder states
     da_sender: BroadcastSender<MessageType<Types>>,
 
@@ -906,6 +921,7 @@ where
                             &tx_sender,
                             transactions,
                             TransactionSource::HotShot,
+                            namespace_id,
                         )
                         .await
                         {
@@ -971,6 +987,9 @@ pub async fn run_permissioned_standalone_builder_service<
     Types: NodeType,
     I: NodeImplementation<Types>,
 >(
+    // id of namespace to build for
+    namespace_id: <Types::Transaction as BuilderTransaction>::NamespaceId,
+
     // sending received transactions
     tx_sender: BroadcastSender<Arc<ReceivedTransaction<Types>>>,
 
@@ -1007,6 +1026,7 @@ pub async fn run_permissioned_standalone_builder_service<
                             &tx_sender,
                             transactions,
                             TransactionSource::HotShot,
+                            namespace_id,
                         )
                         .await
                         {
@@ -1169,9 +1189,14 @@ async fn handle_decide_event<Types: NodeType>(
 
 pub(crate) async fn handle_received_txns<Types: NodeType>(
     tx_sender: &BroadcastSender<Arc<ReceivedTransaction<Types>>>,
-    txns: Vec<Types::Transaction>,
+    mut txns: Vec<Types::Transaction>,
     source: TransactionSource,
-) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
+    namespace_id: <Types::Transaction as BuilderTransaction>::NamespaceId,
+) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError>
+where
+    Types::Transaction: BuilderTransaction,
+{
+    txns.retain(|txn| txn.namespace_id() == namespace_id);
     let mut results = Vec::with_capacity(txns.len());
     let time_in = Instant::now();
     for tx in txns.into_iter() {

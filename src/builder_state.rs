@@ -136,6 +136,9 @@ pub struct BuilderState<TYPES: NodeType>
 where
     TYPES::Transaction: BuilderTransaction,
 {
+    /// Namespace we're building for
+    pub namespace_id: <TYPES::Transaction as BuilderTransaction>::NamespaceId,
+
     /// Recent included txs set while building blocks
     pub included_txns: HashSet<Commitment<TYPES::Transaction>>,
 
@@ -327,10 +330,17 @@ where
             payload_builder_commitment
         );
 
+        // we don't need to keep transactions from other namespaces
+        let txn_commitments = block_payload
+            .transactions(metadata)
+            .filter(|txn| txn.namespace_id() != self.namespace_id)
+            .map(|txn| txn.commit())
+            .collect();
+
         // form the DA proposal info
         let da_proposal_info = DAProposalInfo {
             view_number,
-            txn_commitments: block_payload.transaction_commitments(metadata).to_vec(),
+            txn_commitments,
             num_nodes: total_nodes,
         };
 
@@ -830,6 +840,7 @@ where
         tx_receiver: BroadcastReceiver<Arc<ReceivedTransaction<TYPES>>>,
         tx_queue: Vec<Arc<ReceivedTransaction<TYPES>>>,
         global_state: Arc<RwLock<GlobalState<TYPES>>>,
+        namespace_id: <TYPES::Transaction as BuilderTransaction>::NamespaceId,
         num_nodes: NonZeroUsize,
         maximize_txn_capture_timeout: Duration,
         base_fee: u64,
@@ -838,6 +849,7 @@ where
         validated_state: Arc<TYPES::ValidatedState>,
     ) -> Self {
         BuilderState {
+            namespace_id,
             included_txns: HashSet::new(),
             included_txns_old: HashSet::new(),
             included_txns_expiring: HashSet::new(),
@@ -885,6 +897,7 @@ where
         };
 
         BuilderState {
+            namespace_id: self.namespace_id,
             included_txns,
             included_txns_old,
             included_txns_expiring,

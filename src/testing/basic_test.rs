@@ -84,11 +84,26 @@ mod tests {
             type BuilderSignatureKey = BuilderKey;
         }
 
+        #[derive(
+            Clone,
+            Copy,
+            Debug,
+            Default,
+            Hash,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Serialize,
+            Deserialize,
+        )]
+        pub struct TestNamespaceId(u8);
+
         impl BuilderTransaction for TestTransaction {
-            type NamespaceId = u8;
+            type NamespaceId = TestNamespaceId;
 
             fn namespace_id(&self) -> Self::NamespaceId {
-                *self.bytes().first().unwrap_or(&0)
+                TestNamespaceId(*self.bytes().first().unwrap_or(&0))
             }
         }
 
@@ -96,6 +111,7 @@ mod tests {
         let num_test_messages = 5;
         let multiplication_factor = 5;
         const TEST_NUM_NODES_IN_VID_COMPUTATION: usize = 4;
+        const TEST_NSID: TestNamespaceId = TestNamespaceId(10);
 
         // settingup the broadcast channels i.e [From hostshot: (tx, decide, da, qc, )], [From api:(req - broadcast, res - mpsc channel) ]
         let (decide_sender, decide_receiver) =
@@ -116,6 +132,7 @@ mod tests {
             BLSPubKey::generated_from_seed_indexed(seed, 2011_u64);
         // instantiate the global state also
         let global_state = GlobalState::<TestTypes>::new(
+            TEST_NSID,
             bootstrap_sender,
             tx_sender.clone(),
             vid_commitment(&[], 8),
@@ -309,9 +326,14 @@ mod tests {
             // validate the signature before pushing the message to the builder_state channels
             // currently this step happens in the service.rs, wheneve we receiver an hotshot event
             tracing::debug!("Sending transaction message: {:?}", tx);
-            handle_received_txns(&tx_sender, vec![tx.clone()], TransactionSource::HotShot)
-                .await
-                .unwrap();
+            handle_received_txns(
+                &tx_sender,
+                vec![tx.clone()],
+                TransactionSource::HotShot,
+                TEST_NSID,
+            )
+            .await
+            .unwrap();
             da_sender
                 .broadcast(MessageType::DaProposalMessage(sda_msg.clone()))
                 .await
@@ -361,6 +383,7 @@ mod tests {
                 tx_receiver,
                 tx_queue,
                 arc_rwlock_global_state_clone,
+                TEST_NSID,
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
                 Duration::from_millis(10), // max time to wait for non-zero txn block
                 0,                         // base fee
