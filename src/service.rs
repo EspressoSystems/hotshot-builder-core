@@ -292,9 +292,9 @@ impl<Types: NodeType> GlobalState<Types> {
     pub fn get_channel_for_matching_builder_or_highest_view_buider(
         &self,
         key: &(VidCommitment, Types::Time),
-    ) -> &BroadcastSender<MessageType<Types>> {
+    ) -> Result<&BroadcastSender<MessageType<Types>>, ()> {
         if let Some(channel) = self.spawned_builder_states.get(key) {
-            channel
+            Ok(channel)
         } else {
             tracing::info!(
                 "failed to recover builder for parent {:?}@{:?}, using higest view num builder",
@@ -302,9 +302,13 @@ impl<Types: NodeType> GlobalState<Types> {
                 key.1
             );
             // get the sender for the highest view number builder
-            self.spawned_builder_states
+            match self
+                .spawned_builder_states
                 .get(&self.highest_view_num_builder_id)
-                .expect("failed to recover highest view num builder")
+            {
+                Some(chan) => Ok(chan),
+                None => Err(()),
+            }
         }
     }
 
@@ -417,19 +421,26 @@ where
             let check_duration = self.max_api_waiting_time / 10;
 
             // broadcast the request to the builder states
-            if let Err(e) = self
+            if let Ok(chan) = self
                 .global_state
                 .read_arc()
                 .await
                 .get_channel_for_matching_builder_or_highest_view_buider(&(*for_parent, view_num))
-                .broadcast(MessageType::RequestMessage(req_msg.clone()))
-                .await
             {
-                tracing::warn!(
+                if let Err(e) = chan
+                    .broadcast(MessageType::RequestMessage(req_msg.clone()))
+                    .await
+                {
+                    tracing::warn!(
                     "Error {e} sending get_available_blocks request for parent {:?}@{view_number}",
                     req_msg.requested_vid_commitment
                 );
-            }
+                }
+            } else {
+                return Err(BuildError::Error {
+                    message: "Couldn't find channel for higest view".to_string(),
+                });
+            };
 
             tracing::debug!(
                 "Waiting for response for get_available_blocks with parent {:?}@{view_number}",

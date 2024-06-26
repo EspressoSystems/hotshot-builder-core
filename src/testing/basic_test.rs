@@ -372,6 +372,7 @@ mod tests {
                 .read_arc()
                 .await
                 .get_channel_for_matching_builder_or_highest_view_buider(&req_msg.1)
+                .unwrap()
                 .broadcast(req_msg.2.clone())
                 .await
                 .unwrap();
