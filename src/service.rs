@@ -177,7 +177,20 @@ impl<Types: NodeType> GlobalState<Types> {
 
         // keep track of the max view number
         if view_num > self.highest_view_num_builder_id.1 {
+            tracing::info!(
+                "registering builder {:?}@{:?} as highest",
+                vid_commmit,
+                view_num
+            );
             self.highest_view_num_builder_id = (vid_commmit, view_num);
+        } else {
+            tracing::info!(
+                "builder {:?}@{:?} created; highest registered is {:?}@{:?}",
+                vid_commmit,
+                view_num,
+                self.highest_view_num_builder_id.0,
+                self.highest_view_num_builder_id.1
+            );
         }
     }
 
@@ -211,14 +224,12 @@ impl<Types: NodeType> GlobalState<Types> {
         builder_vid_commitment: &VidCommitment,
         block_hashes: HashSet<(VidCommitment, BuilderCommitment, Types::Time)>,
         on_decide_view: Types::Time,
-        highest_view_num: bool,
-    ) {
-        // remove the builder commitment from the spawned builder states
-        if !highest_view_num {
-            // remove everything from the spawned builder states when view_num <= on_decide_view
-            self.spawned_builder_states
-                .retain(|(_vid, view_num), _channel| view_num > &on_decide_view);
-        }
+    ) -> Types::Time {
+        // remove everything from the spawned builder states when view_num <= on_decide_view
+        self.spawned_builder_states
+            .retain(|(_vid, view_num), _channel| {
+                *view_num >= self.highest_view_num_builder_id.1 || *view_num > on_decide_view
+            });
 
         let cleanup_after_view = on_decide_view + self.buffer_view_num_count;
 
@@ -249,7 +260,7 @@ impl<Types: NodeType> GlobalState<Types> {
                  vid_commitments: _vids,
                  block_ids: parent_hash_block_hashes_view_num,
              }| {
-                if view_num > &on_decide_view {
+                if *view_num == self.highest_view_num_builder_id.1 || *view_num > on_decide_view {
                     true
                 } else {
                     // go through the vids and remove from the builder_state_to_last_built_block
@@ -271,13 +282,11 @@ impl<Types: NodeType> GlobalState<Types> {
                                 .remove(&(block_hash.clone(), *view_number_built_for));
                         },
                     );
-                    // remove all the last built block for the builder states having view_num > on_decide_view
-                    self.builder_state_to_last_built_block
-                        .retain(|(_vid, view_number), _| view_number > view_num);
                     false
                 }
             },
         );
+        self.highest_view_num_builder_id.1
     }
 
     // private mempool submit txn
@@ -296,10 +305,12 @@ impl<Types: NodeType> GlobalState<Types> {
         if let Some(channel) = self.spawned_builder_states.get(key) {
             Ok(channel)
         } else {
-            tracing::info!(
-                "failed to recover builder for parent {:?}@{:?}, using higest view num builder",
+            tracing::warn!(
+                "failed to recover builder for parent {:?}@{:?}, using higest view num builder with {:?}@{:?}",
                 key.0,
-                key.1
+                key.1,
+                self.highest_view_num_builder_id.0,
+                self.highest_view_num_builder_id.1
             );
             // get the sender for the highest view number builder
             self.spawned_builder_states
@@ -316,6 +327,15 @@ impl<Types: NodeType> GlobalState<Types> {
         self.spawned_builder_states
             .iter()
             .any(|((_vid, view_num), _sender)| view_num == key)
+    }
+
+    pub fn should_view_handle_other_proposals(
+        &self,
+        builder_view: &Types::Time,
+        proposal_view: &Types::Time,
+    ) -> bool {
+        *builder_view == self.highest_view_num_builder_id.1
+            && !self.check_builder_state_existence_for_a_view(proposal_view)
     }
 }
 
