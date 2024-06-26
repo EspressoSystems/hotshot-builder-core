@@ -28,7 +28,7 @@ use crate::builder_state::{
 };
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use crate::WaitAndKeep;
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
 use async_compatibility_layer::{
@@ -292,9 +292,9 @@ impl<Types: NodeType> GlobalState<Types> {
     pub fn get_channel_for_matching_builder_or_highest_view_buider(
         &self,
         key: &(VidCommitment, Types::Time),
-    ) -> &BroadcastSender<MessageType<Types>> {
+    ) -> Result<&BroadcastSender<MessageType<Types>>, BuildError> {
         if let Some(channel) = self.spawned_builder_states.get(key) {
-            channel
+            Ok(channel)
         } else {
             tracing::info!(
                 "failed to recover builder for parent {:?}@{:?}, using higest view num builder",
@@ -304,7 +304,9 @@ impl<Types: NodeType> GlobalState<Types> {
             // get the sender for the highest view number builder
             self.spawned_builder_states
                 .get(&self.highest_view_num_builder_id)
-                .expect("failed to recover highest view num builder")
+                .ok_or_else(|| BuildError::Error {
+                    message: "No builder state found".to_string(),
+                })
         }
     }
 
@@ -421,7 +423,7 @@ where
                 .global_state
                 .read_arc()
                 .await
-                .get_channel_for_matching_builder_or_highest_view_buider(&(*for_parent, view_num))
+                .get_channel_for_matching_builder_or_highest_view_buider(&(*for_parent, view_num))?
                 .broadcast(MessageType::RequestMessage(req_msg.clone()))
                 .await
             {
@@ -484,7 +486,9 @@ where
                         response.offered_fee,
                         &response.builder_hash,
                     )
-                    .expect("Available block info signing failed");
+                    .map_err(|e| BuildError::Error {
+                        message: format!("Signing over block info failed: {:?}", e),
+                    })?;
 
                 // insert the block info into local hashmap
                 let initial_block_info = AvailableBlockInfo::<Types> {
@@ -571,7 +575,10 @@ where
                     &sign_key,
                     response_block_hash.as_ref(),
                 )
-                .expect("Claim block signing failed");
+                .map_err(|e| BuildError::Error {
+                    message: format!("Signing over builder commitment failed: {:?}", e),
+                })?;
+
             let block_data = AvailableBlockData::<Types> {
                 block_payload: block_info.block_payload.clone(),
                 metadata: block_info.metadata.clone(),
@@ -661,7 +668,10 @@ where
                 view_number
             );
             if response_received.is_ok() {
-                let (vid_commitment, vid_precompute_data) = response_received.unwrap();
+                let (vid_commitment, vid_precompute_data) =
+                    response_received.map_err(|err| BuildError::Error {
+                        message: format!("Error getting vid commitment: {:?}", err),
+                    })?;
 
                 // sign over the vid commitment
                 let signature_over_vid_commitment =
@@ -669,7 +679,9 @@ where
                         &sign_key,
                         vid_commitment.as_ref(),
                     )
-                    .expect("Claim block header input message signing failed");
+                    .map_err(|e| BuildError::Error {
+                        message: format!("Failed to sign VID commitment: {:?}", e),
+                    })?;
 
                 let signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
                     &sign_key,
@@ -677,7 +689,9 @@ where
                     &block_info.metadata,
                     &vid_commitment,
                 )
-                .expect("Claim block header input fee signing failed");
+                .map_err(|e| BuildError::Error {
+                    message: format!("Failed to sign fee info: {:?}", e),
+                })?;
 
                 let response = AvailableBlockHeaderInput::<Types> {
                     vid_commitment,
@@ -836,7 +850,8 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
             "failed to connect to API at {hotshot_events_api_url}"
         ));
     }
-    let (mut subscribed_events, mut membership) = connected.unwrap();
+    let (mut subscribed_events, mut membership) =
+        connected.context("Failed to connect to events service")?;
 
     loop {
         let event = subscribed_events.next().await;
@@ -909,7 +924,8 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                         "failed to reconnect to API at {hotshot_events_api_url}"
                     ));
                 }
-                (subscribed_events, membership) = connected.unwrap();
+                (subscribed_events, membership) =
+                    connected.context("Failed to reconnect to events service")?;
             }
         }
     }
