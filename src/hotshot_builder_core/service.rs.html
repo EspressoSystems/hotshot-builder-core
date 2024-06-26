@@ -1134,6 +1134,22 @@
 <a href="#1134" id="1134">1134</a>
 <a href="#1135" id="1135">1135</a>
 <a href="#1136" id="1136">1136</a>
+<a href="#1137" id="1137">1137</a>
+<a href="#1138" id="1138">1138</a>
+<a href="#1139" id="1139">1139</a>
+<a href="#1140" id="1140">1140</a>
+<a href="#1141" id="1141">1141</a>
+<a href="#1142" id="1142">1142</a>
+<a href="#1143" id="1143">1143</a>
+<a href="#1144" id="1144">1144</a>
+<a href="#1145" id="1145">1145</a>
+<a href="#1146" id="1146">1146</a>
+<a href="#1147" id="1147">1147</a>
+<a href="#1148" id="1148">1148</a>
+<a href="#1149" id="1149">1149</a>
+<a href="#1150" id="1150">1150</a>
+<a href="#1151" id="1151">1151</a>
+<a href="#1152" id="1152">1152</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::SystemContextHandle,
@@ -1164,7 +1180,7 @@
 };
 <span class="kw">use </span><span class="kw">crate</span>::builder_state::{MessageType, RequestMessage, ResponseMessage};
 <span class="kw">use </span><span class="kw">crate</span>::WaitAndKeep;
-<span class="kw">use </span>anyhow::anyhow;
+<span class="kw">use </span>anyhow::{anyhow, Context};
 <span class="kw">use </span>async_broadcast::Sender <span class="kw">as </span>BroadcastSender;
 <span class="kw">pub use </span>async_broadcast::{broadcast, RecvError, TryRecvError};
 <span class="kw">use </span>async_compatibility_layer::{
@@ -1428,9 +1444,9 @@
     <span class="kw">pub fn </span>get_channel_for_matching_builder_or_highest_view_buider(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         key: <span class="kw-2">&amp;</span>(VidCommitment, Types::Time),
-    ) -&gt; <span class="kw-2">&amp;</span>BroadcastSender&lt;MessageType&lt;Types&gt;&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>BroadcastSender&lt;MessageType&lt;Types&gt;&gt;, BuildError&gt; {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(channel) = <span class="self">self</span>.spawned_builder_states.get(key) {
-            channel
+            <span class="prelude-val">Ok</span>(channel)
         } <span class="kw">else </span>{
             <span class="macro">tracing::info!</span>(
                 <span class="string">"failed to recover builder for parent {:?}@{:?}, using higest view num builder"</span>,
@@ -1440,7 +1456,9 @@
             <span class="comment">// get the sender for the highest view number builder
             </span><span class="self">self</span>.spawned_builder_states
                 .get(<span class="kw-2">&amp;</span><span class="self">self</span>.highest_view_num_builder_id)
-                .expect(<span class="string">"failed to recover highest view num builder"</span>)
+                .ok_or_else(|| BuildError::Error {
+                    message: <span class="string">"No builder state found"</span>.to_string(),
+                })
         }
     }
 
@@ -1557,8 +1575,8 @@ Handling Builder API responses
                 </span>.global_state
                 .read_arc()
                 .<span class="kw">await
-                </span>.get_channel_for_matching_builder_or_highest_view_buider(<span class="kw-2">&amp;</span>(<span class="kw-2">*</span>for_parent, view_num))
-                .broadcast(MessageType::RequestMessage(req_msg.clone()))
+                </span>.get_channel_for_matching_builder_or_highest_view_buider(<span class="kw-2">&amp;</span>(<span class="kw-2">*</span>for_parent, view_num))<span class="question-mark">?
+                </span>.broadcast(MessageType::RequestMessage(req_msg.clone()))
                 .<span class="kw">await
             </span>{
                 <span class="macro">tracing::warn!</span>(
@@ -1620,7 +1638,9 @@ Handling Builder API responses
                         response.offered_fee,
                         <span class="kw-2">&amp;</span>response.builder_hash,
                     )
-                    .expect(<span class="string">"Available block info signing failed"</span>);
+                    .map_err(|e| BuildError::Error {
+                        message: <span class="macro">format!</span>(<span class="string">"Signing over block info failed: {:?}"</span>, e),
+                    })<span class="question-mark">?</span>;
 
                 <span class="comment">// insert the block info into local hashmap
                 </span><span class="kw">let </span>initial_block_info = AvailableBlockInfo::&lt;Types&gt; {
@@ -1707,7 +1727,10 @@ Handling Builder API responses
                     <span class="kw-2">&amp;</span>sign_key,
                     response_block_hash.as_ref(),
                 )
-                .expect(<span class="string">"Claim block signing failed"</span>);
+                .map_err(|e| BuildError::Error {
+                    message: <span class="macro">format!</span>(<span class="string">"Signing over builder commitment failed: {:?}"</span>, e),
+                })<span class="question-mark">?</span>;
+
             <span class="kw">let </span>block_data = AvailableBlockData::&lt;Types&gt; {
                 block_payload: block_info.block_payload.clone(),
                 metadata: block_info.metadata.clone(),
@@ -1797,7 +1820,10 @@ Handling Builder API responses
                 view_number
             );
             <span class="kw">if </span>response_received.is_ok() {
-                <span class="kw">let </span>(vid_commitment, vid_precompute_data) = response_received.unwrap();
+                <span class="kw">let </span>(vid_commitment, vid_precompute_data) =
+                    response_received.map_err(|err| BuildError::Error {
+                        message: <span class="macro">format!</span>(<span class="string">"Error getting vid commitment: {:?}"</span>, err),
+                    })<span class="question-mark">?</span>;
 
                 <span class="comment">// sign over the vid commitment
                 </span><span class="kw">let </span>signature_over_vid_commitment =
@@ -1805,7 +1831,9 @@ Handling Builder API responses
                         <span class="kw-2">&amp;</span>sign_key,
                         vid_commitment.as_ref(),
                     )
-                    .expect(<span class="string">"Claim block header input message signing failed"</span>);
+                    .map_err(|e| BuildError::Error {
+                        message: <span class="macro">format!</span>(<span class="string">"Failed to sign VID commitment: {:?}"</span>, e),
+                    })<span class="question-mark">?</span>;
 
                 <span class="kw">let </span>signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
                     <span class="kw-2">&amp;</span>sign_key,
@@ -1813,7 +1841,9 @@ Handling Builder API responses
                     <span class="kw-2">&amp;</span>block_info.metadata,
                     <span class="kw-2">&amp;</span>vid_commitment,
                 )
-                .expect(<span class="string">"Claim block header input fee signing failed"</span>);
+                .map_err(|e| BuildError::Error {
+                    message: <span class="macro">format!</span>(<span class="string">"Failed to sign fee info: {:?}"</span>, e),
+                })<span class="question-mark">?</span>;
 
                 <span class="kw">let </span>response = AvailableBlockHeaderInput::&lt;Types&gt; {
                     vid_commitment,
@@ -1972,7 +2002,8 @@ Running Non-Permissioned Builder Service
             <span class="string">"failed to connect to API at {hotshot_events_api_url}"
         </span>));
     }
-    <span class="kw">let </span>(<span class="kw-2">mut </span>subscribed_events, <span class="kw-2">mut </span>membership) = connected.unwrap();
+    <span class="kw">let </span>(<span class="kw-2">mut </span>subscribed_events, <span class="kw-2">mut </span>membership) =
+        connected.context(<span class="string">"Failed to connect to events service"</span>)<span class="question-mark">?</span>;
 
     <span class="kw">loop </span>{
         <span class="kw">let </span>event = subscribed_events.next().<span class="kw">await</span>;
@@ -2045,7 +2076,8 @@ Running Non-Permissioned Builder Service
                         <span class="string">"failed to reconnect to API at {hotshot_events_api_url}"
                     </span>));
                 }
-                (subscribed_events, membership) = connected.unwrap();
+                (subscribed_events, membership) =
+                    connected.context(<span class="string">"Failed to reconnect to events service"</span>)<span class="question-mark">?</span>;
             }
         }
     }
