@@ -517,12 +517,15 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let sleep_interval = self.maximize_txn_capture_timeout / 10;
         while Instant::now() <= timeout_after {
             self.collect_txns(timeout_after).await;
-            if Instant::now() + sleep_interval <= timeout_after {
+
+            if !self.tx_queue.is_empty() // we have transactions
+            || Instant::now() + sleep_interval > timeout_after
+            // we don't have time for another iteration
+            {
                 break;
             }
-            if self.tx_queue.is_empty() {
-                async_sleep(sleep_interval).await;
-            }
+
+            async_sleep(sleep_interval).await
         }
         if let Ok((payload, metadata)) =
             <TYPES::BlockPayload as BlockPayload<TYPES>>::from_transactions(
