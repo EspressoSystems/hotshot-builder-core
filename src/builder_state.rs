@@ -127,7 +127,7 @@ impl<TYPES: NodeType> std::fmt::Display for BuiltFromProposedBlock<TYPES> {
 #[derive(Debug, Clone)]
 pub struct DAProposalInfo<TYPES: NodeType> {
     pub view_number: TYPES::Time,
-    pub txn_commitments: Vec<Commitment<TYPES::Transaction>>,
+    pub proposal: Arc<Proposal<TYPES, DaProposal<TYPES>>>,
     pub num_nodes: usize,
 }
 
@@ -145,11 +145,12 @@ pub struct BuilderState<TYPES: NodeType> {
     /// da_proposal_payload_commit to (da_proposal, node_count)
     #[allow(clippy::type_complexity)]
     pub da_proposal_payload_commit_to_da_proposal:
-        HashMap<BuilderCommitment, Arc<DAProposalInfo<TYPES>>>,
+        HashMap<(BuilderCommitment, TYPES::Time), DAProposalInfo<TYPES>>,
 
     /// quorum_proposal_payload_commit to quorum_proposal
+    #[allow(clippy::type_complexity)]
     pub quorum_proposal_payload_commit_to_quorum_proposal:
-        HashMap<BuilderCommitment, Arc<Proposal<TYPES, QuorumProposal<TYPES>>>>,
+        HashMap<(BuilderCommitment, TYPES::Time), Arc<Proposal<TYPES, QuorumProposal<TYPES>>>>,
 
     /// the spawned from info for a builder state
     pub built_from_proposed_block: BuiltFromProposedBlock<TYPES>,
@@ -223,7 +224,7 @@ pub trait BuilderProgress<TYPES: NodeType> {
     /// spawn a clone of builder
     async fn spawn_clone(
         self,
-        da_proposal: Arc<DAProposalInfo<TYPES>>,
+        da_proposal: DAProposalInfo<TYPES>,
         quorum_proposal: Arc<Proposal<TYPES, QuorumProposal<TYPES>>>,
         leader: TYPES::SignatureKey,
         req_sender: BroadcastSender<MessageType<TYPES>>,
@@ -254,58 +255,19 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
             da_msg.proposal.data.view_number
         );
 
-        // Two cases to handle:
-        // Case 1: Bootstrapping phase
-        // Case 2: No intended builder state exist
-        // To handle both cases, we can have the highest view number builder state running
-        // and only doing the insertion if and only if intended builder state for a particulat view is not present
-        // check the presence of da_msg.proposal.data.view_number-1 in the spawned_builder_states list
-        if self.built_from_proposed_block.view_number.u64()
-            == self
-                .global_state
-                .read_arc()
-                .await
-                .highest_view_num_builder_id
-                .1
-                .u64()
-            && (da_msg.proposal.data.view_number.u64() == 0
-                || !self
-                    .global_state
-                    .read_arc()
-                    .await
-                    .check_builder_state_existence_for_a_view(
-                        &(da_msg.proposal.data.view_number - 1),
-                    ))
-        {
-            tracing::info!(
-                "DA Proposal for view {:?} handled by highest view {:?} builder state",
-                da_msg.proposal.data.view_number,
-                self.built_from_proposed_block.view_number
-            );
-        }
-        // Do the validation check for the correct builder state then
-        else if da_msg.proposal.data.view_number.u64()
-            != self.built_from_proposed_block.view_number.u64() + 1
-        {
-            tracing::debug!(
-                "DA Proposal view number{:?} is not equal to built_from_view + 1, so returning",
-                da_msg.proposal.data.view_number
-            );
-            return;
-        }
+        // we do not have the option to ignore DA proposals if we want to be able to handle failed view reorgs.
 
         // If the respective builder state exists to handle the request
-        let da_proposal = da_msg.proposal.clone();
+        let proposal = da_msg.proposal.clone();
         let sender = &da_msg.sender;
 
         // get the view number and encoded txns from the da_proposal_data
-        let view_number = da_proposal.data.view_number;
-        let encoded_txns = &da_proposal.data.encoded_transactions;
+        let view_number = proposal.data.view_number;
+        let encoded_txns = &proposal.data.encoded_transactions;
 
-        let metadata = &da_proposal.data.metadata;
+        let metadata = &proposal.data.metadata;
 
-        // generate the vid commitment; num nodes are received through hotshot api in service.rs and passed along with message onto channel
-        let total_nodes = da_msg.total_nodes;
+        let num_nodes = da_msg.total_nodes;
 
         // form a block payload from the encoded transactions
         let block_payload =
@@ -321,47 +283,44 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // form the DA proposal info
         let da_proposal_info = DAProposalInfo {
             view_number,
-            txn_commitments: block_payload.transaction_commitments(metadata).to_vec(),
-            num_nodes: total_nodes,
+            proposal,
+            num_nodes,
         };
 
         if let std::collections::hash_map::Entry::Vacant(e) = self
             .da_proposal_payload_commit_to_da_proposal
-            .entry(payload_builder_commitment.clone())
+            .entry((payload_builder_commitment.clone(), view_number))
         {
-            // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
+            // if we have matching da and quorum proposals, we can skip storing the one, and remove
+            // the other from storage, and call build_block with both, to save a little space.
             if let Entry::Occupied(qc_proposal) = self
                 .quorum_proposal_payload_commit_to_quorum_proposal
-                .entry(payload_builder_commitment.clone())
+                .entry((payload_builder_commitment.clone(), view_number))
             {
                 let qc_proposal = qc_proposal.remove();
 
-                // make sure we don't clone for the bootstrapping da and qc proposals
-                // also make sure we clone for the same view number( check incase payload commitments are same)
-                // this will handle the case when the intended builder state can spawn
+                // if we have a matching quorum proposal
+                //  if (this is the correct parent or
+                //      (the correct parent is missing and this is the highest view))
+                //    spawn a clone
                 if qc_proposal.data.view_number == view_number {
                     tracing::info!(
                         "Spawning a clone from process DA proposal for view number: {:?}",
                         view_number
                     );
-                    // remove this entry from the qc_proposal_payload_commit_to_quorum_proposal hashmap
+                    // remove this entry from qc_proposal_payload_commit_to_quorum_proposal
                     self.quorum_proposal_payload_commit_to_quorum_proposal
-                        .remove(&payload_builder_commitment.clone());
+                        .remove(&(payload_builder_commitment.clone(), view_number));
 
                     let (req_sender, req_receiver) = broadcast(self.req_receiver.capacity());
                     self.clone_with_receiver(req_receiver)
-                        .spawn_clone(
-                            Arc::new(da_proposal_info),
-                            qc_proposal,
-                            sender.clone(),
-                            req_sender,
-                        )
+                        .spawn_clone(da_proposal_info, qc_proposal, sender.clone(), req_sender)
                         .await;
                 } else {
                     tracing::debug!("Not spawning a clone despite matching DA and QC payload commitments, as they corresponds to different view numbers");
                 }
             } else {
-                e.insert(Arc::new(da_proposal_info));
+                e.insert(da_proposal_info);
             }
         } else {
             tracing::debug!("Payload commitment already exists in the da_proposal_payload_commit_to_da_proposal hashmap, so ignoring it");
@@ -384,38 +343,43 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // To handle both cases, we can have the highest view number builder state running
         // and only doing the insertion if and only if intended builder state for a particulat view is not present
         // check the presence of quorum_proposal.data.view_number-1 in the spawned_builder_states list
-        if self.built_from_proposed_block.view_number.u64()
-            == self
+        if qc_msg.proposal.data.justify_qc.view_number != self.built_from_proposed_block.view_number
+        {
+            tracing::debug!(
+                "View number {:?} from justify qc does not match for builder {:?}",
+                qc_msg.proposal.data.justify_qc.view_number,
+                self.built_from_proposed_block
+            );
+            if !self
                 .global_state
                 .read_arc()
                 .await
-                .highest_view_num_builder_id
-                .1
-                .u64()
-            && (qc_msg.proposal.data.view_number.u64() == 0
-                || !self
-                    .global_state
-                    .read_arc()
-                    .await
-                    .check_builder_state_existence_for_a_view(
-                        &(qc_msg.proposal.data.view_number - 1),
-                    ))
-        {
-            tracing::info!(
-                "QC Proposal for view {:?} handled by highest view {:?} builder state",
-                qc_msg.proposal.data.view_number,
-                self.built_from_proposed_block.view_number
+                .should_view_handle_other_proposals(
+                    &self.built_from_proposed_block.view_number,
+                    &qc_msg.proposal.data.justify_qc.view_number,
+                )
+            {
+                tracing::debug!(
+                    "Builder {:?} is not currently bootstrapping.",
+                    self.built_from_proposed_block
+                );
+                // if we have the matching da proposal, we now know we don't need to keep it.
+                self.da_proposal_payload_commit_to_da_proposal.remove(&(
+                    qc_msg
+                        .proposal
+                        .data
+                        .block_header
+                        .builder_commitment()
+                        .clone(),
+                    qc_msg.proposal.data.view_number,
+                ));
+                return;
+            }
+            tracing::debug!(
+                "Builder {:?} handling proposal as bootstrap.",
+                self.built_from_proposed_block
             );
-        } else if qc_msg.proposal.data.justify_qc.view_number
-            != self.built_from_proposed_block.view_number
-            || (qc_msg.proposal.data.justify_qc.data.leaf_commit
-                != self.built_from_proposed_block.leaf_commit)
-        {
-            tracing::debug!("Either View number {:?} or leaf commit{:?} from justify qc does not match the built-in info {:?}, so returning",
-            qc_msg.proposal.data.justify_qc.view_number, qc_msg.proposal.data.justify_qc.data.leaf_commit, self.built_from_proposed_block);
-            return;
         }
-
         let qc_proposal = &qc_msg.proposal;
         let sender = &qc_msg.sender;
         let view_number = qc_proposal.data.view_number;
@@ -429,17 +393,17 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // first check whether vid_commitment exists in the qc_payload_commit_to_qc hashmap, if yer, ignore it, otherwise validate it and later insert in
         if let std::collections::hash_map::Entry::Vacant(e) = self
             .quorum_proposal_payload_commit_to_quorum_proposal
-            .entry(payload_builder_commitment.clone())
+            .entry((payload_builder_commitment.clone(), view_number))
         {
             // if we have matching da and quorum proposals, we can skip storing the one, and remove the other from storage, and call build_block with both, to save a little space.
             if let Entry::Occupied(da_proposal) = self
                 .da_proposal_payload_commit_to_da_proposal
-                .entry(payload_builder_commitment.clone())
+                .entry((payload_builder_commitment.clone(), view_number))
             {
                 let da_proposal_info = da_proposal.remove();
                 // remove the entry from the da_proposal_payload_commit_to_da_proposal hashmap
                 self.da_proposal_payload_commit_to_da_proposal
-                    .remove(&payload_builder_commitment);
+                    .remove(&(payload_builder_commitment.clone(), view_number));
 
                 // also make sure we clone for the same view number( check incase payload commitments are same)
                 if da_proposal_info.view_number == view_number {
@@ -475,35 +439,25 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // Exit out all the builder states if their built_from_proposed_block.view_number is less than the latest_decide_view_number
         // The only exception is that we want to keep the highest view number builder state active to ensure that
         // we have a builder state to handle the incoming DA and QC proposals
-        let _block_size = decide_msg.block_size;
-        let latest_leaf_view_number = decide_msg.latest_decide_view_number;
-
-        // Garbage collection
-        // Keep the builder states stay active till their built in view + BUFFER_VIEW_NUM
-        if self.built_from_proposed_block.view_number.u64()
-            == self
-                .global_state
-                .read_arc()
-                .await
-                .highest_view_num_builder_id
-                .1
-                .u64()
-        {
+        let decide_view_number = decide_msg.latest_decide_view_number;
+        if self.built_from_proposed_block.view_number < decide_view_number {
             tracing::info!(
-                "Task view {:?} is not exiting as it has the highest view",
-                self.built_from_proposed_block.view_number.u64()
-            );
-
-            return Some(Status::ShouldContinue);
-        } else if self.built_from_proposed_block.view_number < latest_leaf_view_number {
-            tracing::info!("Task view is less than the currently decided leaf view {:?}; exiting builder state for view {:?}", latest_leaf_view_number.u64(), self.built_from_proposed_block.view_number.u64());
-            self.global_state.write_arc().await.remove_handles(
+                "Task view is less than the currently decided leaf view {:?}; attempting to exit builder state for view {:?}",
+                decide_view_number.u64(), self.built_from_proposed_block.view_number.u64());
+            let highest_view = self.global_state.write_arc().await.remove_handles(
                 &self.built_from_proposed_block.vid_commitment,
                 self.builder_commitments.clone(),
-                latest_leaf_view_number,
-                false,
+                decide_view_number,
             );
-            return Some(Status::ShouldExit);
+
+            if highest_view == self.built_from_proposed_block.view_number {
+                tracing::info!(
+                    "Task view {:?} is not exiting as it has the highest view",
+                    self.built_from_proposed_block.view_number.u64()
+                );
+            } else {
+                return Some(Status::ShouldExit);
+            }
         }
 
         return Some(Status::ShouldContinue);
@@ -514,7 +468,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn spawn_clone(
         mut self,
-        da_proposal_info: Arc<DAProposalInfo<TYPES>>,
+        da_proposal_info: DAProposalInfo<TYPES>,
         quorum_proposal: Arc<Proposal<TYPES, QuorumProposal<TYPES>>>,
         _leader: TYPES::SignatureKey,
         req_sender: BroadcastSender<MessageType<TYPES>>,
@@ -530,8 +484,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 
         self.built_from_proposed_block.leaf_commit = leaf.commit();
 
-        self.included_txns
-            .extend(da_proposal_info.txn_commitments.iter());
+        let encoded_txns = &da_proposal_info.proposal.data.encoded_transactions;
+
+        let metadata = &da_proposal_info.proposal.data.metadata;
+
+        let block_payload =
+            <TYPES::BlockPayload as BlockPayload<TYPES>>::from_bytes(encoded_txns, metadata);
+        let txn_commitments = block_payload.transaction_commitments(metadata);
+        self.included_txns.extend(txn_commitments.iter());
         self.tx_queue
             .retain(|tx| !self.included_txns.contains(&tx.commit));
 
@@ -557,12 +517,15 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let sleep_interval = self.maximize_txn_capture_timeout / 10;
         while Instant::now() <= timeout_after {
             self.collect_txns(timeout_after).await;
-            if Instant::now() + sleep_interval <= timeout_after {
+
+            if !self.tx_queue.is_empty() // we have transactions
+            || Instant::now() + sleep_interval > timeout_after
+            // we don't have time for another iteration
+            {
                 break;
             }
-            if self.tx_queue.is_empty() {
-                async_sleep(sleep_interval).await;
-            }
+
+            async_sleep(sleep_interval).await
         }
         if let Ok((payload, metadata)) =
             <TYPES::BlockPayload as BlockPayload<TYPES>>::from_transactions(

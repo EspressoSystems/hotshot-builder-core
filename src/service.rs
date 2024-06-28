@@ -28,7 +28,7 @@ use crate::builder_state::{
 };
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use crate::WaitAndKeep;
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
 use async_compatibility_layer::{
@@ -177,7 +177,20 @@ impl<Types: NodeType> GlobalState<Types> {
 
         // keep track of the max view number
         if view_num > self.highest_view_num_builder_id.1 {
+            tracing::info!(
+                "registering builder {:?}@{:?} as highest",
+                vid_commmit,
+                view_num
+            );
             self.highest_view_num_builder_id = (vid_commmit, view_num);
+        } else {
+            tracing::info!(
+                "builder {:?}@{:?} created; highest registered is {:?}@{:?}",
+                vid_commmit,
+                view_num,
+                self.highest_view_num_builder_id.0,
+                self.highest_view_num_builder_id.1
+            );
         }
     }
 
@@ -211,14 +224,12 @@ impl<Types: NodeType> GlobalState<Types> {
         builder_vid_commitment: &VidCommitment,
         block_hashes: HashSet<(VidCommitment, BuilderCommitment, Types::Time)>,
         on_decide_view: Types::Time,
-        highest_view_num: bool,
-    ) {
-        // remove the builder commitment from the spawned builder states
-        if !highest_view_num {
-            // remove everything from the spawned builder states when view_num <= on_decide_view
-            self.spawned_builder_states
-                .retain(|(_vid, view_num), _channel| view_num > &on_decide_view);
-        }
+    ) -> Types::Time {
+        // remove everything from the spawned builder states when view_num <= on_decide_view
+        self.spawned_builder_states
+            .retain(|(_vid, view_num), _channel| {
+                *view_num >= self.highest_view_num_builder_id.1 || *view_num > on_decide_view
+            });
 
         let cleanup_after_view = on_decide_view + self.buffer_view_num_count;
 
@@ -249,7 +260,7 @@ impl<Types: NodeType> GlobalState<Types> {
                  vid_commitments: _vids,
                  block_ids: parent_hash_block_hashes_view_num,
              }| {
-                if view_num > &on_decide_view {
+                if *view_num == self.highest_view_num_builder_id.1 || *view_num > on_decide_view {
                     true
                 } else {
                     // go through the vids and remove from the builder_state_to_last_built_block
@@ -271,13 +282,11 @@ impl<Types: NodeType> GlobalState<Types> {
                                 .remove(&(block_hash.clone(), *view_number_built_for));
                         },
                     );
-                    // remove all the last built block for the builder states having view_num > on_decide_view
-                    self.builder_state_to_last_built_block
-                        .retain(|(_vid, view_number), _| view_number > view_num);
                     false
                 }
             },
         );
+        self.highest_view_num_builder_id.1
     }
 
     // private mempool submit txn
@@ -292,19 +301,23 @@ impl<Types: NodeType> GlobalState<Types> {
     pub fn get_channel_for_matching_builder_or_highest_view_buider(
         &self,
         key: &(VidCommitment, Types::Time),
-    ) -> &BroadcastSender<MessageType<Types>> {
+    ) -> Result<&BroadcastSender<MessageType<Types>>, BuildError> {
         if let Some(channel) = self.spawned_builder_states.get(key) {
-            channel
+            Ok(channel)
         } else {
-            tracing::info!(
-                "failed to recover builder for parent {:?}@{:?}, using higest view num builder",
+            tracing::warn!(
+                "failed to recover builder for parent {:?}@{:?}, using higest view num builder with {:?}@{:?}",
                 key.0,
-                key.1
+                key.1,
+                self.highest_view_num_builder_id.0,
+                self.highest_view_num_builder_id.1
             );
             // get the sender for the highest view number builder
             self.spawned_builder_states
                 .get(&self.highest_view_num_builder_id)
-                .expect("failed to recover highest view num builder")
+                .ok_or_else(|| BuildError::Error {
+                    message: "No builder state found".to_string(),
+                })
         }
     }
 
@@ -314,6 +327,15 @@ impl<Types: NodeType> GlobalState<Types> {
         self.spawned_builder_states
             .iter()
             .any(|((_vid, view_num), _sender)| view_num == key)
+    }
+
+    pub fn should_view_handle_other_proposals(
+        &self,
+        builder_view: &Types::Time,
+        proposal_view: &Types::Time,
+    ) -> bool {
+        *builder_view == self.highest_view_num_builder_id.1
+            && !self.check_builder_state_existence_for_a_view(proposal_view)
     }
 }
 
@@ -421,7 +443,7 @@ where
                 .global_state
                 .read_arc()
                 .await
-                .get_channel_for_matching_builder_or_highest_view_buider(&(*for_parent, view_num))
+                .get_channel_for_matching_builder_or_highest_view_buider(&(*for_parent, view_num))?
                 .broadcast(MessageType::RequestMessage(req_msg.clone()))
                 .await
             {
@@ -484,7 +506,9 @@ where
                         response.offered_fee,
                         &response.builder_hash,
                     )
-                    .expect("Available block info signing failed");
+                    .map_err(|e| BuildError::Error {
+                        message: format!("Signing over block info failed: {:?}", e),
+                    })?;
 
                 // insert the block info into local hashmap
                 let initial_block_info = AvailableBlockInfo::<Types> {
@@ -571,7 +595,10 @@ where
                     &sign_key,
                     response_block_hash.as_ref(),
                 )
-                .expect("Claim block signing failed");
+                .map_err(|e| BuildError::Error {
+                    message: format!("Signing over builder commitment failed: {:?}", e),
+                })?;
+
             let block_data = AvailableBlockData::<Types> {
                 block_payload: block_info.block_payload.clone(),
                 metadata: block_info.metadata.clone(),
@@ -661,7 +688,10 @@ where
                 view_number
             );
             if response_received.is_ok() {
-                let (vid_commitment, vid_precompute_data) = response_received.unwrap();
+                let (vid_commitment, vid_precompute_data) =
+                    response_received.map_err(|err| BuildError::Error {
+                        message: format!("Error getting vid commitment: {:?}", err),
+                    })?;
 
                 // sign over the vid commitment
                 let signature_over_vid_commitment =
@@ -669,7 +699,9 @@ where
                         &sign_key,
                         vid_commitment.as_ref(),
                     )
-                    .expect("Claim block header input message signing failed");
+                    .map_err(|e| BuildError::Error {
+                        message: format!("Failed to sign VID commitment: {:?}", e),
+                    })?;
 
                 let signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
                     &sign_key,
@@ -677,7 +709,9 @@ where
                     &block_info.metadata,
                     &vid_commitment,
                 )
-                .expect("Claim block header input fee signing failed");
+                .map_err(|e| BuildError::Error {
+                    message: format!("Failed to sign fee info: {:?}", e),
+                })?;
 
                 let response = AvailableBlockHeaderInput::<Types> {
                     vid_commitment,
@@ -836,7 +870,8 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
             "failed to connect to API at {hotshot_events_api_url}"
         ));
     }
-    let (mut subscribed_events, mut membership) = connected.unwrap();
+    let (mut subscribed_events, mut membership) =
+        connected.context("Failed to connect to events service")?;
 
     loop {
         let event = subscribed_events.next().await;
@@ -909,7 +944,8 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                         "failed to reconnect to API at {hotshot_events_api_url}"
                     ));
                 }
-                (subscribed_events, membership) = connected.unwrap();
+                (subscribed_events, membership) =
+                    connected.context("Failed to reconnect to events service")?;
             }
         }
     }
