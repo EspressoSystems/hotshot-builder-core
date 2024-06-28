@@ -19,7 +19,7 @@ derivative = "2.2"
 futures = "0.3"
 hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "rc-0.5.60" }
 hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "rc-0.5.60" }
-hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", rc = "rc-0.1.30" }
+hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "rc-0.1.30" }
 hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "rc-0.5.60" }
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
