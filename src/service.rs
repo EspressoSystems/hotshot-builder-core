@@ -31,7 +31,7 @@ use crate::builder_state::{
 };
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use crate::WaitAndKeep;
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
 use async_compatibility_layer::{
@@ -213,7 +213,20 @@ where
 
         // keep track of the max view number
         if view_num > self.highest_view_num_builder_id.1 {
+            tracing::info!(
+                "registering builder {:?}@{:?} as highest",
+                vid_commmit,
+                view_num
+            );
             self.highest_view_num_builder_id = (vid_commmit, view_num);
+        } else {
+            tracing::info!(
+                "builder {:?}@{:?} created; highest registered is {:?}@{:?}",
+                vid_commmit,
+                view_num,
+                self.highest_view_num_builder_id.0,
+                self.highest_view_num_builder_id.1
+            );
         }
     }
 
@@ -247,14 +260,12 @@ where
         builder_vid_commitment: &VidCommitment,
         block_hashes: HashSet<(VidCommitment, BuilderCommitment, Types::Time)>,
         on_decide_view: Types::Time,
-        highest_view_num: bool,
-    ) {
-        // remove the builder commitment from the spawned builder states
-        if !highest_view_num {
-            // remove everything from the spawned builder states when view_num <= on_decide_view
-            self.spawned_builder_states
-                .retain(|(_vid, view_num), _channel| view_num > &on_decide_view);
-        }
+    ) -> Types::Time {
+        // remove everything from the spawned builder states when view_num <= on_decide_view
+        self.spawned_builder_states
+            .retain(|(_vid, view_num), _channel| {
+                *view_num >= self.highest_view_num_builder_id.1 || *view_num > on_decide_view
+            });
 
         let cleanup_after_view = on_decide_view + self.buffer_view_num_count;
 
@@ -285,7 +296,7 @@ where
                  vid_commitments: _vids,
                  block_ids: parent_hash_block_hashes_view_num,
              }| {
-                if view_num > &on_decide_view {
+                if *view_num == self.highest_view_num_builder_id.1 || *view_num > on_decide_view {
                     true
                 } else {
                     // go through the vids and remove from the builder_state_to_last_built_block
@@ -307,13 +318,11 @@ where
                                 .remove(&(block_hash.clone(), *view_number_built_for));
                         },
                     );
-                    // remove all the last built block for the builder states having view_num > on_decide_view
-                    self.builder_state_to_last_built_block
-                        .retain(|(_vid, view_number), _| view_number > view_num);
                     false
                 }
             },
         );
+        self.highest_view_num_builder_id.1
     }
 
     // private mempool submit txn
@@ -334,19 +343,23 @@ where
     pub fn get_channel_for_matching_builder_or_highest_view_buider(
         &self,
         key: &(VidCommitment, Types::Time),
-    ) -> &BroadcastSender<MessageType<Types>> {
+    ) -> Result<&BroadcastSender<MessageType<Types>>, BuildError> {
         if let Some(channel) = self.spawned_builder_states.get(key) {
-            channel
+            Ok(channel)
         } else {
-            tracing::info!(
-                "failed to recover builder for parent {:?}@{:?}, using higest view num builder",
+            tracing::warn!(
+                "failed to recover builder for parent {:?}@{:?}, using higest view num builder with {:?}@{:?}",
                 key.0,
-                key.1
+                key.1,
+                self.highest_view_num_builder_id.0,
+                self.highest_view_num_builder_id.1
             );
             // get the sender for the highest view number builder
             self.spawned_builder_states
                 .get(&self.highest_view_num_builder_id)
-                .expect("failed to recover highest view num builder")
+                .ok_or_else(|| BuildError::Error {
+                    message: "No builder state found".to_string(),
+                })
         }
     }
 
@@ -356,6 +369,15 @@ where
         self.spawned_builder_states
             .iter()
             .any(|((_vid, view_num), _sender)| view_num == key)
+    }
+
+    pub fn should_view_handle_other_proposals(
+        &self,
+        builder_view: &Types::Time,
+        proposal_view: &Types::Time,
+    ) -> bool {
+        *builder_view == self.highest_view_num_builder_id.1
+            && !self.check_builder_state_existence_for_a_view(proposal_view)
     }
 }
 
@@ -470,7 +492,7 @@ where
                 .global_state
                 .read_arc()
                 .await
-                .get_channel_for_matching_builder_or_highest_view_buider(&(*for_parent, view_num))
+                .get_channel_for_matching_builder_or_highest_view_buider(&(*for_parent, view_num))?
                 .broadcast(MessageType::RequestMessage(req_msg.clone()))
                 .await
             {
@@ -533,7 +555,9 @@ where
                         response.offered_fee,
                         &response.builder_hash,
                     )
-                    .expect("Available block info signing failed");
+                    .map_err(|e| BuildError::Error {
+                        message: format!("Signing over block info failed: {:?}", e),
+                    })?;
 
                 // insert the block info into local hashmap
                 let initial_block_info = AvailableBlockInfo::<Types> {
@@ -620,7 +644,10 @@ where
                     &sign_key,
                     response_block_hash.as_ref(),
                 )
-                .expect("Claim block signing failed");
+                .map_err(|e| BuildError::Error {
+                    message: format!("Signing over builder commitment failed: {:?}", e),
+                })?;
+
             let block_data = AvailableBlockData::<Types> {
                 block_payload: block_info.block_payload.clone(),
                 metadata: block_info.metadata.clone(),
@@ -710,7 +737,10 @@ where
                 view_number
             );
             if response_received.is_ok() {
-                let (vid_commitment, vid_precompute_data) = response_received.unwrap();
+                let (vid_commitment, vid_precompute_data) =
+                    response_received.map_err(|err| BuildError::Error {
+                        message: format!("Error getting vid commitment: {:?}", err),
+                    })?;
 
                 // sign over the vid commitment
                 let signature_over_vid_commitment =
@@ -718,7 +748,9 @@ where
                         &sign_key,
                         vid_commitment.as_ref(),
                     )
-                    .expect("Claim block header input message signing failed");
+                    .map_err(|e| BuildError::Error {
+                        message: format!("Failed to sign VID commitment: {:?}", e),
+                    })?;
 
                 let signature_over_fee_info = Types::BuilderSignatureKey::sign_fee(
                     &sign_key,
@@ -726,7 +758,9 @@ where
                     &block_info.metadata,
                     &vid_commitment,
                 )
-                .expect("Claim block header input fee signing failed");
+                .map_err(|e| BuildError::Error {
+                    message: format!("Failed to sign fee info: {:?}", e),
+                })?;
 
                 let response = AvailableBlockHeaderInput::<Types> {
                     vid_commitment,
@@ -900,7 +934,8 @@ where
             "failed to connect to API at {hotshot_events_api_url}"
         ));
     }
-    let (mut subscribed_events, mut membership) = connected.unwrap();
+    let (mut subscribed_events, mut membership) =
+        connected.context("Failed to connect to events service")?;
 
     loop {
         let event = subscribed_events.next().await;
@@ -945,10 +980,11 @@ where
 
                         handle_da_event(
                             &da_sender,
-                            Arc::new(proposal),
+                            proposal,
                             sender,
                             leader,
                             NonZeroUsize::new(total_nodes).unwrap_or(NonZeroUsize::MIN),
+                            namespace_id,
                         )
                         .await;
                     }
@@ -974,7 +1010,8 @@ where
                         "failed to reconnect to API at {hotshot_events_api_url}"
                     ));
                 }
-                (subscribed_events, membership) = connected.unwrap();
+                (subscribed_events, membership) =
+                    connected.context("Failed to reconnect to events service")?;
             }
         }
     }
@@ -1052,10 +1089,11 @@ pub async fn run_permissioned_standalone_builder_service<
 
                         handle_da_event(
                             &da_sender,
-                            Arc::new(proposal),
+                            proposal,
                             sender,
                             leader,
                             total_nodes,
+                            namespace_id,
                         )
                         .await;
                     }
@@ -1079,10 +1117,11 @@ Utility functions to handle the hotshot events
 */
 async fn handle_da_event<Types: NodeType>(
     da_channel_sender: &BroadcastSender<MessageType<Types>>,
-    da_proposal: Arc<Proposal<Types, DaProposal<Types>>>,
+    da_proposal: Proposal<Types, DaProposal<Types>>,
     sender: <Types as NodeType>::SignatureKey,
     leader: <Types as NodeType>::SignatureKey,
     total_nodes: NonZeroUsize,
+    namespace_id: <Types::Transaction as BuilderTransaction>::NamespaceId,
 ) where
     Types::Transaction: BuilderTransaction,
 {
@@ -1096,18 +1135,42 @@ async fn handle_da_event<Types: NodeType>(
     let encoded_txns_hash = Sha256::digest(&da_proposal.data.encoded_transactions);
     // check if the sender is the leader and the signature is valid; if yes, broadcast the DA proposal
     if leader == sender && sender.validate(&da_proposal.signature, &encoded_txns_hash) {
-        let da_msg = DaProposalMessage::<Types> {
-            proposal: da_proposal,
-            sender: leader,
-            total_nodes: total_nodes.into(),
-        };
-        let view_number = da_msg.proposal.data.view_number;
+        // let da_msg = DaProposalMessage::<Types> {
+        //     proposal: da_proposal,
+        //     sender: leader,
+        //     total_nodes: total_nodes.into(),
+        // };
+        let view_number = da_proposal.data.view_number;
         tracing::debug!(
             "Sending DA proposal to the builder states for view {:?}",
             view_number
         );
+
+        // form a block payload from the encoded transactions
+        let block_payload = <Types::BlockPayload as BlockPayload<Types>>::from_bytes(
+            &da_proposal.data.encoded_transactions,
+            &da_proposal.data.metadata,
+        );
+        // get the builder commitment from the block payload
+        let builder_commitment = block_payload.builder_commitment(&da_proposal.data.metadata);
+
+        // we don't need to keep transactions from other namespaces
+        let txn_commitments = block_payload
+            .transactions(&da_proposal.data.metadata)
+            .filter(|txn| txn.namespace_id() != namespace_id)
+            .map(|txn| txn.commit())
+            .collect();
+
+        let da_msg = DaProposalMessage {
+            view_number,
+            txn_commitments,
+            num_nodes: total_nodes.into(),
+            sender,
+            builder_commitment,
+        };
+
         if let Err(e) = da_channel_sender
-            .broadcast(MessageType::DaProposalMessage(da_msg))
+            .broadcast(MessageType::DaProposalMessage(Arc::new(da_msg)))
             .await
         {
             tracing::warn!(

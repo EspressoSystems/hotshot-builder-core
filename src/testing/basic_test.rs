@@ -46,7 +46,6 @@ mod tests {
     use async_lock::RwLock;
     use async_std::task;
     use committable::{Commitment, CommitmentBoundsArkless, Committable};
-    use sha2::{Digest, Sha256};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -143,7 +142,7 @@ mod tests {
 
         // to store all the sent messages
         let mut sdecide_msgs: Vec<DecideMessage<TestTypes>> = Vec::new();
-        let mut sda_msgs: Vec<DaProposalMessage<TestTypes>> = Vec::new();
+        let mut sda_msgs: Vec<Arc<DaProposalMessage<TestTypes>>> = Vec::new();
         let mut sqc_msgs: Vec<QCMessage<TestTypes>> = Vec::new();
         #[allow(clippy::type_complexity)]
         let mut sreq_msgs: Vec<(
@@ -160,45 +159,29 @@ mod tests {
             // Prepare the transaction message
             let tx = TestTransaction::new(vec![i as u8]);
             let encoded_transactions = TestTransaction::encode(&[tx.clone()]);
-
-            // Prepare the DA proposal message
-            let da_proposal = DaProposal {
-                encoded_transactions: encoded_transactions.clone().into(),
-                metadata: TestMetadata,
-                view_number: ViewNumber::new(i as u64),
+            let block_payload = TestBlockPayload {
+                transactions: vec![tx.clone()],
             };
-            let encoded_transactions_hash = Sha256::digest(&encoded_transactions);
+            let metadata = TestMetadata {};
+
             let seed = [i as u8; 32];
             let (pub_key, private_key) = BLSPubKey::generated_from_seed_indexed(seed, i as u64);
-            let da_signature =
-            <TestTypes as hotshot_types::traits::node_implementation::NodeType>::SignatureKey::sign(
-                &private_key,
-                &encoded_transactions_hash,
-            )
-            .expect("Failed to sign encoded tx hash while preparing da proposal");
 
-            let sda_msg = DaProposalMessage::<TestTypes> {
-                proposal: Arc::new(Proposal {
-                    data: da_proposal,
-                    signature: da_signature.clone(),
-                    _pd: PhantomData,
-                }),
+            let sda_msg = DaProposalMessage {
+                view_number: ViewNumber::new(i as u64),
+                txn_commitments: vec![tx.commit()],
+                num_nodes: TEST_NUM_NODES_IN_VID_COMPUTATION,
                 sender: pub_key,
-                total_nodes: TEST_NUM_NODES_IN_VID_COMPUTATION,
+                builder_commitment:
+                    <TestBlockPayload as BlockPayload<TestTypes>>::builder_commitment(
+                        &block_payload,
+                        &metadata,
+                    ),
             };
+            let sda_msg = Arc::new(sda_msg);
 
             // Prepare the QC proposal message
             // calculate the vid commitment over the encoded_transactions
-
-            let (block_payload, metadata) =
-                <TestBlockPayload as BlockPayload<TestTypes>>::from_transactions(
-                    vec![tx.clone()],
-                    &TestValidatedState::default(),
-                    &TestInstanceState {},
-                )
-                .await
-                .unwrap();
-
             tracing::debug!(
                 "Encoded transactions: {:?} Num nodes:{}",
                 encoded_transactions,
@@ -335,7 +318,7 @@ mod tests {
             .await
             .unwrap();
             da_sender
-                .broadcast(MessageType::DaProposalMessage(sda_msg.clone()))
+                .broadcast(MessageType::DaProposalMessage(Arc::clone(&sda_msg)))
                 .await
                 .unwrap();
             qc_sender
@@ -405,6 +388,7 @@ mod tests {
                 .read_arc()
                 .await
                 .get_channel_for_matching_builder_or_highest_view_buider(&req_msg.1)
+                .expect("Failed to get channel for matching builder or highest view builder")
                 .broadcast(req_msg.2.clone())
                 .await
                 .unwrap();
