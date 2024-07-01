@@ -1135,11 +1135,6 @@ async fn handle_da_event<Types: NodeType>(
     let encoded_txns_hash = Sha256::digest(&da_proposal.data.encoded_transactions);
     // check if the sender is the leader and the signature is valid; if yes, broadcast the DA proposal
     if leader == sender && sender.validate(&da_proposal.signature, &encoded_txns_hash) {
-        // let da_msg = DaProposalMessage::<Types> {
-        //     proposal: da_proposal,
-        //     sender: leader,
-        //     total_nodes: total_nodes.into(),
-        // };
         let view_number = da_proposal.data.view_number;
         tracing::debug!(
             "Sending DA proposal to the builder states for view {:?}",
