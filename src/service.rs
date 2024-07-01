@@ -8,7 +8,6 @@ use hotshot_builder_api::{
     data_source::{AcceptsTxnSubmits, BuilderDataSource},
 };
 use hotshot_types::{
-    constants::Base,
     data::{DaProposal, Leaf, QuorumProposal},
     event::EventType,
     message::Proposal,
@@ -829,11 +828,11 @@ async fn connect_to_events_service<Types: NodeType>(
         BuilderEvent<Types>,
         surf_disco::socket::Unsupported,
         EventStreamError,
-        Base,
+        Types::Base,
     >,
     GeneralStaticCommittee<Types, <Types as NodeType>::SignatureKey>,
 )> {
-    let client = surf_disco::Client::<hotshot_events_service::events::Error, Base>::new(
+    let client = surf_disco::Client::<hotshot_events_service::events::Error, Types::Base>::new(
         hotshot_events_api_url.clone(),
     );
 
