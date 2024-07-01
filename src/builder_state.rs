@@ -142,6 +142,9 @@ pub struct BuilderState<TYPES: NodeType> {
     /// Expiring txs to be garbage collected
     pub included_txns_expiring: HashSet<Commitment<TYPES::Transaction>>,
 
+    /// txns currently in the tx_queue
+    pub txns_in_queue: HashSet<Commitment<TYPES::Transaction>>,
+
     /// da_proposal_payload_commit to (da_proposal, node_count)
     #[allow(clippy::type_complexity)]
     pub da_proposal_payload_commit_to_da_proposal:
@@ -491,9 +494,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let block_payload =
             <TYPES::BlockPayload as BlockPayload<TYPES>>::from_bytes(encoded_txns, metadata);
         let txn_commitments = block_payload.transaction_commitments(metadata);
+
+        for tx in txn_commitments.iter() {
+            self.txns_in_queue.remove(tx);
+        }
+
         self.included_txns.extend(txn_commitments.iter());
         self.tx_queue
-            .retain(|tx| !self.included_txns.contains(&tx.commit));
+            .retain(|tx| self.txns_in_queue.contains(&tx.commit));
 
         // register the spawned builder state to spawned_builder_states in the global state
         self.global_state.write_arc().await.register_builder_state(
@@ -785,10 +793,12 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         txn_garbage_collect_duration: Duration,
         validated_state: Arc<TYPES::ValidatedState>,
     ) -> Self {
+        let txns_in_queue: HashSet<_> = tx_queue.iter().map(|tx| tx.commit).collect();
         BuilderState {
             included_txns: HashSet::new(),
             included_txns_old: HashSet::new(),
             included_txns_expiring: HashSet::new(),
+            txns_in_queue,
             built_from_proposed_block,
             decide_receiver,
             da_proposal_receiver,
@@ -836,6 +846,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             included_txns,
             included_txns_old,
             included_txns_expiring,
+            txns_in_queue: self.txns_in_queue.clone(),
             built_from_proposed_block: self.built_from_proposed_block.clone(),
             decide_receiver: self.decide_receiver.clone(),
             da_proposal_receiver: self.da_proposal_receiver.clone(),
@@ -865,9 +876,11 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
                     if self.included_txns.contains(&tx.commit)
                         || self.included_txns_old.contains(&tx.commit)
                         || self.included_txns_expiring.contains(&tx.commit)
+                        || self.txns_in_queue.contains(&tx.commit)
                     {
                         continue;
                     }
+                    self.txns_in_queue.insert(tx.commit);
                     self.tx_queue.push(tx);
                 }
                 Err(async_broadcast::TryRecvError::Empty)
