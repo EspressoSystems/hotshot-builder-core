@@ -110,7 +110,7 @@ mod tests {
         let num_test_messages = 5;
         let multiplication_factor = 5;
         const TEST_NUM_NODES_IN_VID_COMPUTATION: usize = 4;
-        const TEST_NSID: TestNamespaceId = TestNamespaceId(10);
+        const TEST_NSID: Option<TestNamespaceId> = Some(TestNamespaceId(10));
 
         // settingup the broadcast channels i.e [From hostshot: (tx, decide, da, qc, )], [From api:(req - broadcast, res - mpsc channel) ]
         let (decide_sender, decide_receiver) =

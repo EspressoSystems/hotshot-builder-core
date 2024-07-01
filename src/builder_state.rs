@@ -132,8 +132,8 @@ pub struct BuilderState<TYPES: NodeType>
 where
     TYPES::Transaction: BuilderTransaction,
 {
-    /// Namespace we're building for
-    pub namespace_id: <TYPES::Transaction as BuilderTransaction>::NamespaceId,
+    /// Namespace we're building for. None if filtering transactions is disabled
+    pub namespace_id: Option<<TYPES::Transaction as BuilderTransaction>::NamespaceId>,
 
     /// Recent included txs set while building blocks
     pub included_txns: HashSet<Commitment<TYPES::Transaction>>,
@@ -753,7 +753,7 @@ where
         tx_receiver: BroadcastReceiver<Arc<ReceivedTransaction<TYPES>>>,
         tx_queue: Vec<Arc<ReceivedTransaction<TYPES>>>,
         global_state: Arc<RwLock<GlobalState<TYPES>>>,
-        namespace_id: <TYPES::Transaction as BuilderTransaction>::NamespaceId,
+        namespace_id: Option<<TYPES::Transaction as BuilderTransaction>::NamespaceId>,
         num_nodes: NonZeroUsize,
         maximize_txn_capture_timeout: Duration,
         base_fee: u64,

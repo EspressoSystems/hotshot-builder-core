@@ -138,8 +138,8 @@ pub struct GlobalState<Types: NodeType>
 where
     Types::Transaction: BuilderTransaction,
 {
-    /// id of namespace builder is building for
-    pub namespace_id: <Types::Transaction as BuilderTransaction>::NamespaceId,
+    /// id of namespace builder is building for. None if the builder builds for all namespaces
+    pub namespace_id: Option<<Types::Transaction as BuilderTransaction>::NamespaceId>,
 
     // data store for the blocks
     pub block_hash_to_block: HashMap<(BuilderCommitment, Types::Time), BlockInfo<Types>>,
@@ -175,7 +175,7 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        namespace_id: <Types::Transaction as BuilderTransaction>::NamespaceId,
+        namespace_id: Option<<Types::Transaction as BuilderTransaction>::NamespaceId>,
         bootstrap_sender: BroadcastSender<MessageType<Types>>,
         tx_sender: BroadcastSender<Arc<ReceivedTransaction<Types>>>,
         bootstrapped_builder_state_id: VidCommitment,
@@ -907,7 +907,7 @@ Running Non-Permissioned Builder Service
 */
 pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
     // id of namespace to build for
-    namespace_id: <Types::Transaction as BuilderTransaction>::NamespaceId,
+    namespace_id: Option<<Types::Transaction as BuilderTransaction>::NamespaceId>,
 
     // sending a DA proposal from the hotshot to the builder states
     da_sender: BroadcastSender<MessageType<Types>>,
@@ -1024,8 +1024,8 @@ pub async fn run_permissioned_standalone_builder_service<
     Types: NodeType,
     I: NodeImplementation<Types>,
 >(
-    // id of namespace to build for
-    namespace_id: <Types::Transaction as BuilderTransaction>::NamespaceId,
+    // id of namespace to build for. None if building for all namespaces
+    namespace_id: Option<<Types::Transaction as BuilderTransaction>::NamespaceId>,
 
     // sending received transactions
     tx_sender: BroadcastSender<Arc<ReceivedTransaction<Types>>>,
@@ -1121,7 +1121,7 @@ async fn handle_da_event<Types: NodeType>(
     sender: <Types as NodeType>::SignatureKey,
     leader: <Types as NodeType>::SignatureKey,
     total_nodes: NonZeroUsize,
-    namespace_id: <Types::Transaction as BuilderTransaction>::NamespaceId,
+    namespace_id: Option<<Types::Transaction as BuilderTransaction>::NamespaceId>,
 ) where
     Types::Transaction: BuilderTransaction,
 {
@@ -1154,12 +1154,20 @@ async fn handle_da_event<Types: NodeType>(
         // get the builder commitment from the block payload
         let builder_commitment = block_payload.builder_commitment(&da_proposal.data.metadata);
 
-        // we don't need to keep transactions from other namespaces
-        let txn_commitments = block_payload
-            .transactions(&da_proposal.data.metadata)
-            .filter(|txn| txn.namespace_id() != namespace_id)
-            .map(|txn| txn.commit())
-            .collect();
+        let txn_commitments = match namespace_id {
+            Some(namespace_id) => {
+                // we don't need to keep transactions from other namespaces
+                block_payload
+                    .transactions(&da_proposal.data.metadata)
+                    .filter(|txn| txn.namespace_id() != namespace_id)
+                    .map(|txn| txn.commit())
+                    .collect()
+            }
+            None => block_payload
+                .transactions(&da_proposal.data.metadata)
+                .map(|txn| txn.commit())
+                .collect(),
+        };
 
         let da_msg = DaProposalMessage {
             view_number,
@@ -1254,12 +1262,14 @@ pub(crate) async fn handle_received_txns<Types: NodeType>(
     tx_sender: &BroadcastSender<Arc<ReceivedTransaction<Types>>>,
     mut txns: Vec<Types::Transaction>,
     source: TransactionSource,
-    namespace_id: <Types::Transaction as BuilderTransaction>::NamespaceId,
+    namespace_id: Option<<Types::Transaction as BuilderTransaction>::NamespaceId>,
 ) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError>
 where
     Types::Transaction: BuilderTransaction,
 {
-    txns.retain(|txn| txn.namespace_id() == namespace_id);
+    if let Some(namespace_id) = namespace_id {
+        txns.retain(|txn| txn.namespace_id() == namespace_id);
+    }
     let mut results = Vec::with_capacity(txns.len());
     let time_in = Instant::now();
     for tx in txns.into_iter() {
