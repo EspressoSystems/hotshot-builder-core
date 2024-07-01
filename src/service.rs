@@ -418,10 +418,19 @@ where
         {
             // 1st case: Decide event received, and not bootstrapping.
             // If this `BlockBuilder` hasn't been reaped, it should have been.
-            let global_state = self.global_state.read_arc().await;
-            if global_state.last_garbage_collected_view_num >= view_num
+            let global_state: async_lock::RwLockReadGuardArc<GlobalState<Types>> =
+                self.global_state.read_arc().await;
+            if global_state.last_garbage_collected_view_num
+                < global_state.highest_view_num_builder_id.1
+                && global_state.last_garbage_collected_view_num >= view_num
                 && global_state.highest_view_num_builder_id.1 != view_num
             {
+                tracing::warn!(
+                    "Requesting for view {:?}, last decide on view {:?}, highest view num is {:?}",
+                    view_num,
+                    global_state.last_garbage_collected_view_num,
+                    global_state.highest_view_num_builder_id.1
+                );
                 return Err(BuildError::Error {
                     message:
                         "Request for available blocks for a view that has already been decided."
