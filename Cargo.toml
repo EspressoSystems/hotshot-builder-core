@@ -17,19 +17,19 @@ clap = { version = "4.4", features = ["derive", "env"] }
 committable = "0.2"
 derivative = "2.2"
 futures = "0.3"
-hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.60" }
-hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.60" }
-hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "rc-0.1.31" }
-hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.60" }
+hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "rc-0.5.61" }
+hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "rc-0.5.61" }
+hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "rc-0.1.32" }
+hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "rc-0.5.61" }
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
 snafu = "0.8"
-surf-disco = "0.8"
+surf-disco = "0.9"
 tagged-base64 = "0.4"
-tide-disco = "0.8"
+tide-disco = "0.9"
 tokio = "1"
 tracing = "0.1"
 vbs = "0.1"
 
 [dev-dependencies]
-hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.60" }
+hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "rc-0.5.61" }
