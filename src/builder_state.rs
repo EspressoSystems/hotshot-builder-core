@@ -46,17 +46,10 @@ pub enum TransactionSource {
     HotShot,  // txn from the HotShot network i.e public mempool
 }
 
-/// Transaction Message to be put on the tx channel
-#[derive(Clone, Debug, PartialEq)]
-pub struct TransactionMessage<TYPES: NodeType> {
-    pub txns: Arc<Vec<TYPES::Transaction>>,
-    pub tx_type: TransactionSource,
-}
 /// Decide Message to be put on the decide channel
 #[derive(Clone, Debug)]
 pub struct DecideMessage<TYPES: NodeType> {
     pub latest_decide_view_number: TYPES::Time,
-    pub block_size: Option<u64>,
 }
 /// DA Proposal Message to be put on the da proposal channel
 #[derive(Clone, Debug, PartialEq)]
@@ -209,12 +202,6 @@ pub struct BuilderState<TYPES: NodeType> {
 /// Trait to hold the helper functions for the builder
 #[async_trait]
 pub trait BuilderProgress<TYPES: NodeType> {
-    /// process the external transaction
-    // fn process_external_transaction(&mut self, txns: Arc<Vec<TYPES::Transaction>>);
-
-    /// process the hotshot transaction
-    // fn process_hotshot_transaction(&mut self, tx: Arc<Vec<TYPES::Transaction>>);
-
     /// process the DA proposal
     async fn process_da_proposal(&mut self, da_msg: DaProposalMessage<TYPES>);
 
@@ -443,27 +430,29 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         // The only exception is that we want to keep the highest view number builder state active to ensure that
         // we have a builder state to handle the incoming DA and QC proposals
         let decide_view_number = decide_msg.latest_decide_view_number;
-        if self.built_from_proposed_block.view_number < decide_view_number {
+
+        let retained_view_cutoff = self
+            .global_state
+            .write_arc()
+            .await
+            .remove_handles(decide_view_number);
+        if self.built_from_proposed_block.view_number < retained_view_cutoff {
             tracing::info!(
-                "Task view is less than the currently decided leaf view {:?}; attempting to exit builder state for view {:?}",
-                decide_view_number.u64(), self.built_from_proposed_block.view_number.u64());
-            let highest_view = self.global_state.write_arc().await.remove_handles(
-                &self.built_from_proposed_block.vid_commitment,
-                self.builder_commitments.clone(),
-                decide_view_number,
+                "Decide@{:?}; Task@{:?} exiting; views < {:?} being reclaimed",
+                decide_view_number.u64(),
+                self.built_from_proposed_block.view_number.u64(),
+                retained_view_cutoff.u64(),
             );
-
-            if highest_view == self.built_from_proposed_block.view_number {
-                tracing::info!(
-                    "Task view {:?} is not exiting as it has the highest view",
-                    self.built_from_proposed_block.view_number.u64()
-                );
-            } else {
-                return Some(Status::ShouldExit);
-            }
+            return Some(Status::ShouldExit);
         }
+        tracing::info!(
+            "Decide@{:?}; Task@{:?} not exiting; views >= {:?} being retained",
+            decide_view_number.u64(),
+            self.built_from_proposed_block.view_number.u64(),
+            retained_view_cutoff.u64(),
+        );
 
-        return Some(Status::ShouldContinue);
+        Some(Status::ShouldContinue)
     }
 
     // spawn a clone of the builder state
@@ -658,7 +647,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         }
                         Err(e) => {
                             tracing::warn!(
-                                "Builder {:?} failed to send response to the request{:?} with builder hash {:?}, ERRROR {:?}",
+                                "Builder {:?} failed to send response to {:?} with builder hash {:?}, Err: {:?}",
                                 self.built_from_proposed_block.view_number,
                                 req,
                                 builder_hash,
@@ -683,7 +672,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         let _builder_handle = async_spawn(async move {
             loop {
                 tracing::debug!(
-                    "Builder{:?} event loop",
+                    "Builder {:?} event loop",
                     self.built_from_proposed_block.view_number
                 );
                 futures::select! {
@@ -703,7 +692,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                 }
                             }
                             None => {
-                                tracing::info!("No more request messages to consume");
+                                tracing::warn!("No more request messages to consume");
                             }
                         }
                     },
@@ -713,10 +702,12 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                                 if let MessageType::DaProposalMessage(rda_msg) = da {
                                     tracing::debug!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_proposed_block, rda_msg.proposal.data.view_number);
                                     self.process_da_proposal(rda_msg).await;
+                                } else {
+                                    tracing::warn!("Unexpected message on da proposals channel: {:?}", da);
                                 }
                             }
                             None => {
-                                tracing::info!("No more da proposal messages to consume");
+                                tracing::warn!("No more da proposal messages to consume");
                             }
                         }
                     },
@@ -724,12 +715,14 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match qc {
                             Some(qc) => {
                                 if let MessageType::QCMessage(rqc_msg) = qc {
-                                    tracing::debug!("Received qc msg in builder {:?}:\n {:?} for view ", self.built_from_proposed_block, rqc_msg.proposal.data.view_number);
+                                    tracing::debug!("Received quorum proposal msg in builder {:?}:\n {:?} for view ", self.built_from_proposed_block, rqc_msg.proposal.data.view_number);
                                     self.process_quorum_proposal(rqc_msg).await;
+                                } else {
+                                    tracing::warn!("Unexpected message on quorum proposals channel: {:?}", qc);
                                 }
                             }
                             None => {
-                                tracing::info!("No more qc messages to consume");
+                                tracing::warn!("No more quorum proposal messages to consume");
                             }
                         }
                     },
@@ -737,26 +730,35 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
                         match decide {
                             Some(decide) => {
                                 if let MessageType::DecideMessage(rdecide_msg) = decide {
-                                    tracing::debug!("Received decide msg in builder {:?}:\n {:?} for view ", self.built_from_proposed_block, rdecide_msg.latest_decide_view_number);
+                                    let latest_decide_view_num = rdecide_msg.latest_decide_view_number;
+                                    tracing::debug!("Received decide msg view {:?} in builder {:?}",
+                                        &latest_decide_view_num,
+                                        self.built_from_proposed_block);
                                     let decide_status = self.process_decide_event(rdecide_msg).await;
                                     match decide_status{
                                         Some(Status::ShouldExit) => {
-                                            tracing::info!("Exiting the builder {:?}", self.built_from_proposed_block);
+                                            tracing::info!("Exiting builder {:?} with decide view {:?}",
+                                                self.built_from_proposed_block,
+                                                &latest_decide_view_num);
                                             return;
                                         }
                                         Some(Status::ShouldContinue) => {
-                                            tracing::debug!("continue the builder {:?}", self.built_from_proposed_block);
+                                            tracing::debug!("Continuing builder {:?}",
+                                                self.built_from_proposed_block);
                                             continue;
                                         }
                                         None => {
-                                            tracing::debug!("None type: continue the builder {:?}", self.built_from_proposed_block);
+                                            tracing::warn!("decide_status was None; Continuing builder {:?}",
+                                                self.built_from_proposed_block);
                                             continue;
                                         }
                                     }
+                                } else {
+                                    tracing::warn!("Unexpected message on decide channel: {:?}", decide);
                                 }
                             }
                             None => {
-                                tracing::info!("No more decide messages to consume");
+                                tracing::warn!("No more decide messages to consume");
                             }
                         }
                     },
@@ -768,7 +770,6 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
 /// Unifies the possible messages that can be received by the builder
 #[derive(Debug, Clone)]
 pub enum MessageType<TYPES: NodeType> {
-    TransactionMessage(TransactionMessage<TYPES>),
     DecideMessage(DecideMessage<TYPES>),
     DaProposalMessage(DaProposalMessage<TYPES>),
     QCMessage(QCMessage<TYPES>),
