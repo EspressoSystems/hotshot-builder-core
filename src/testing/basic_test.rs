@@ -114,7 +114,6 @@ mod tests {
         let global_state = GlobalState::<TestTypes>::new(
             bootstrap_sender,
             tx_sender.clone(),
-            // tx_queue.clone(),
             vid_commitment(&[], 8),
             ViewNumber::new(0),
             ViewNumber::new(0),
@@ -300,7 +299,6 @@ mod tests {
 
             let sdecide_msg = DecideMessage::<TestTypes> {
                 latest_decide_view_number: leaf.view_number(),
-                block_size: Some(encoded_transactions.len() as u64),
             };
 
             // validate the signature before pushing the message to the builder_state channels
