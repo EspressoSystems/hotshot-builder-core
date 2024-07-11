@@ -895,6 +895,7 @@
 <a href="#895" id="895">895</a>
 <a href="#896" id="896">896</a>
 <a href="#897" id="897">897</a>
+<a href="#898" id="898">898</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DaProposal, Leaf, QuorumProposal},
     message::Proposal,
@@ -943,17 +944,10 @@
     </span>HotShot,  <span class="comment">// txn from the HotShot network i.e public mempool
 </span>}
 
-<span class="doccomment">/// Transaction Message to be put on the tx channel
-</span><span class="attr">#[derive(Clone, Debug, PartialEq)]
-</span><span class="kw">pub struct </span>TransactionMessage&lt;TYPES: NodeType&gt; {
-    <span class="kw">pub </span>txns: Arc&lt;Vec&lt;TYPES::Transaction&gt;&gt;,
-    <span class="kw">pub </span>tx_type: TransactionSource,
-}
 <span class="doccomment">/// Decide Message to be put on the decide channel
 </span><span class="attr">#[derive(Clone, Debug)]
 </span><span class="kw">pub struct </span>DecideMessage&lt;TYPES: NodeType&gt; {
     <span class="kw">pub </span>latest_decide_view_number: TYPES::Time,
-    <span class="kw">pub </span>block_size: <span class="prelude-ty">Option</span>&lt;u64&gt;,
 }
 <span class="doccomment">/// DA Proposal Message to be put on the da proposal channel
 </span><span class="attr">#[derive(Clone, Debug, PartialEq)]
@@ -1106,13 +1100,7 @@
 <span class="doccomment">/// Trait to hold the helper functions for the builder
 </span><span class="attr">#[async_trait]
 </span><span class="kw">pub trait </span>BuilderProgress&lt;TYPES: NodeType&gt; {
-    <span class="doccomment">/// process the external transaction
-    </span><span class="comment">// fn process_external_transaction(&amp;mut self, txns: Arc&lt;Vec&lt;TYPES::Transaction&gt;&gt;);
-
-    </span><span class="doccomment">/// process the hotshot transaction
-    </span><span class="comment">// fn process_hotshot_transaction(&amp;mut self, tx: Arc&lt;Vec&lt;TYPES::Transaction&gt;&gt;);
-
-    </span><span class="doccomment">/// process the DA proposal
+    <span class="doccomment">/// process the DA proposal
     </span><span class="kw">async fn </span>process_da_proposal(<span class="kw-2">&amp;mut </span><span class="self">self</span>, da_msg: DaProposalMessage&lt;TYPES&gt;);
 
     <span class="doccomment">/// process the quorum proposal
@@ -1340,27 +1328,29 @@
         // The only exception is that we want to keep the highest view number builder state active to ensure that
         // we have a builder state to handle the incoming DA and QC proposals
         </span><span class="kw">let </span>decide_view_number = decide_msg.latest_decide_view_number;
-        <span class="kw">if </span><span class="self">self</span>.built_from_proposed_block.view_number &lt; decide_view_number {
+
+        <span class="kw">let </span>retained_view_cutoff = <span class="self">self
+            </span>.global_state
+            .write_arc()
+            .<span class="kw">await
+            </span>.remove_handles(decide_view_number);
+        <span class="kw">if </span><span class="self">self</span>.built_from_proposed_block.view_number &lt; retained_view_cutoff {
             <span class="macro">tracing::info!</span>(
-                <span class="string">"Task view is less than the currently decided leaf view {:?}; attempting to exit builder state for view {:?}"</span>,
-                decide_view_number.u64(), <span class="self">self</span>.built_from_proposed_block.view_number.u64());
-            <span class="kw">let </span>highest_view = <span class="self">self</span>.global_state.write_arc().<span class="kw">await</span>.remove_handles(
-                <span class="kw-2">&amp;</span><span class="self">self</span>.built_from_proposed_block.vid_commitment,
-                <span class="self">self</span>.builder_commitments.clone(),
-                decide_view_number,
+                <span class="string">"Decide@{:?}; Task@{:?} exiting; views &lt; {:?} being reclaimed"</span>,
+                decide_view_number.u64(),
+                <span class="self">self</span>.built_from_proposed_block.view_number.u64(),
+                retained_view_cutoff.u64(),
             );
-
-            <span class="kw">if </span>highest_view == <span class="self">self</span>.built_from_proposed_block.view_number {
-                <span class="macro">tracing::info!</span>(
-                    <span class="string">"Task view {:?} is not exiting as it has the highest view"</span>,
-                    <span class="self">self</span>.built_from_proposed_block.view_number.u64()
-                );
-            } <span class="kw">else </span>{
-                <span class="kw">return </span><span class="prelude-val">Some</span>(Status::ShouldExit);
-            }
+            <span class="kw">return </span><span class="prelude-val">Some</span>(Status::ShouldExit);
         }
+        <span class="macro">tracing::info!</span>(
+            <span class="string">"Decide@{:?}; Task@{:?} not exiting; views &gt;= {:?} being retained"</span>,
+            decide_view_number.u64(),
+            <span class="self">self</span>.built_from_proposed_block.view_number.u64(),
+            retained_view_cutoff.u64(),
+        );
 
-        <span class="kw">return </span><span class="prelude-val">Some</span>(Status::ShouldContinue);
+        <span class="prelude-val">Some</span>(Status::ShouldContinue)
     }
 
     <span class="comment">// spawn a clone of the builder state
@@ -1555,7 +1545,7 @@
                         }
                         <span class="prelude-val">Err</span>(e) =&gt; {
                             <span class="macro">tracing::warn!</span>(
-                                <span class="string">"Builder {:?} failed to send response to the request{:?} with builder hash {:?}, ERRROR {:?}"</span>,
+                                <span class="string">"Builder {:?} failed to send response to {:?} with builder hash {:?}, Err: {:?}"</span>,
                                 <span class="self">self</span>.built_from_proposed_block.view_number,
                                 req,
                                 builder_hash,
@@ -1580,7 +1570,7 @@
         <span class="kw">let </span>_builder_handle = async_spawn(<span class="kw">async move </span>{
             <span class="kw">loop </span>{
                 <span class="macro">tracing::debug!</span>(
-                    <span class="string">"Builder{:?} event loop"</span>,
+                    <span class="string">"Builder {:?} event loop"</span>,
                     <span class="self">self</span>.built_from_proposed_block.view_number
                 );
                 <span class="macro">futures::select!</span> {
@@ -1600,7 +1590,7 @@
                                 }
                             }
                             <span class="prelude-val">None </span>=&gt; {
-                                <span class="macro">tracing::info!</span>(<span class="string">"No more request messages to consume"</span>);
+                                <span class="macro">tracing::warn!</span>(<span class="string">"No more request messages to consume"</span>);
                             }
                         }
                     },
@@ -1610,10 +1600,12 @@
                                 <span class="kw">if let </span>MessageType::DaProposalMessage(rda_msg) = da {
                                     <span class="macro">tracing::debug!</span>(<span class="string">"Received da proposal msg in builder {:?}:\n {:?}"</span>, <span class="self">self</span>.built_from_proposed_block, rda_msg.proposal.data.view_number);
                                     <span class="self">self</span>.process_da_proposal(rda_msg).<span class="kw">await</span>;
+                                } <span class="kw">else </span>{
+                                    <span class="macro">tracing::warn!</span>(<span class="string">"Unexpected message on da proposals channel: {:?}"</span>, da);
                                 }
                             }
                             <span class="prelude-val">None </span>=&gt; {
-                                <span class="macro">tracing::info!</span>(<span class="string">"No more da proposal messages to consume"</span>);
+                                <span class="macro">tracing::warn!</span>(<span class="string">"No more da proposal messages to consume"</span>);
                             }
                         }
                     },
@@ -1621,12 +1613,14 @@
                         <span class="kw">match </span>qc {
                             <span class="prelude-val">Some</span>(qc) =&gt; {
                                 <span class="kw">if let </span>MessageType::QCMessage(rqc_msg) = qc {
-                                    <span class="macro">tracing::debug!</span>(<span class="string">"Received qc msg in builder {:?}:\n {:?} for view "</span>, <span class="self">self</span>.built_from_proposed_block, rqc_msg.proposal.data.view_number);
+                                    <span class="macro">tracing::debug!</span>(<span class="string">"Received quorum proposal msg in builder {:?}:\n {:?} for view "</span>, <span class="self">self</span>.built_from_proposed_block, rqc_msg.proposal.data.view_number);
                                     <span class="self">self</span>.process_quorum_proposal(rqc_msg).<span class="kw">await</span>;
+                                } <span class="kw">else </span>{
+                                    <span class="macro">tracing::warn!</span>(<span class="string">"Unexpected message on quorum proposals channel: {:?}"</span>, qc);
                                 }
                             }
                             <span class="prelude-val">None </span>=&gt; {
-                                <span class="macro">tracing::info!</span>(<span class="string">"No more qc messages to consume"</span>);
+                                <span class="macro">tracing::warn!</span>(<span class="string">"No more quorum proposal messages to consume"</span>);
                             }
                         }
                     },
@@ -1634,26 +1628,35 @@
                         <span class="kw">match </span>decide {
                             <span class="prelude-val">Some</span>(decide) =&gt; {
                                 <span class="kw">if let </span>MessageType::DecideMessage(rdecide_msg) = decide {
-                                    <span class="macro">tracing::debug!</span>(<span class="string">"Received decide msg in builder {:?}:\n {:?} for view "</span>, <span class="self">self</span>.built_from_proposed_block, rdecide_msg.latest_decide_view_number);
+                                    <span class="kw">let </span>latest_decide_view_num = rdecide_msg.latest_decide_view_number;
+                                    <span class="macro">tracing::debug!</span>(<span class="string">"Received decide msg view {:?} in builder {:?}"</span>,
+                                        <span class="kw-2">&amp;</span>latest_decide_view_num,
+                                        <span class="self">self</span>.built_from_proposed_block);
                                     <span class="kw">let </span>decide_status = <span class="self">self</span>.process_decide_event(rdecide_msg).<span class="kw">await</span>;
                                     <span class="kw">match </span>decide_status{
                                         <span class="prelude-val">Some</span>(Status::ShouldExit) =&gt; {
-                                            <span class="macro">tracing::info!</span>(<span class="string">"Exiting the builder {:?}"</span>, <span class="self">self</span>.built_from_proposed_block);
+                                            <span class="macro">tracing::info!</span>(<span class="string">"Exiting builder {:?} with decide view {:?}"</span>,
+                                                <span class="self">self</span>.built_from_proposed_block,
+                                                <span class="kw-2">&amp;</span>latest_decide_view_num);
                                             <span class="kw">return</span>;
                                         }
                                         <span class="prelude-val">Some</span>(Status::ShouldContinue) =&gt; {
-                                            <span class="macro">tracing::debug!</span>(<span class="string">"continue the builder {:?}"</span>, <span class="self">self</span>.built_from_proposed_block);
+                                            <span class="macro">tracing::debug!</span>(<span class="string">"Continuing builder {:?}"</span>,
+                                                <span class="self">self</span>.built_from_proposed_block);
                                             <span class="kw">continue</span>;
                                         }
                                         <span class="prelude-val">None </span>=&gt; {
-                                            <span class="macro">tracing::debug!</span>(<span class="string">"None type: continue the builder {:?}"</span>, <span class="self">self</span>.built_from_proposed_block);
+                                            <span class="macro">tracing::warn!</span>(<span class="string">"decide_status was None; Continuing builder {:?}"</span>,
+                                                <span class="self">self</span>.built_from_proposed_block);
                                             <span class="kw">continue</span>;
                                         }
                                     }
+                                } <span class="kw">else </span>{
+                                    <span class="macro">tracing::warn!</span>(<span class="string">"Unexpected message on decide channel: {:?}"</span>, decide);
                                 }
                             }
                             <span class="prelude-val">None </span>=&gt; {
-                                <span class="macro">tracing::info!</span>(<span class="string">"No more decide messages to consume"</span>);
+                                <span class="macro">tracing::warn!</span>(<span class="string">"No more decide messages to consume"</span>);
                             }
                         }
                     },
@@ -1665,7 +1668,6 @@
 <span class="doccomment">/// Unifies the possible messages that can be received by the builder
 </span><span class="attr">#[derive(Debug, Clone)]
 </span><span class="kw">pub enum </span>MessageType&lt;TYPES: NodeType&gt; {
-    TransactionMessage(TransactionMessage&lt;TYPES&gt;),
     DecideMessage(DecideMessage&lt;TYPES&gt;),
     DaProposalMessage(DaProposalMessage&lt;TYPES&gt;),
     QCMessage(QCMessage&lt;TYPES&gt;),
