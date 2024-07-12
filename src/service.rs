@@ -8,7 +8,6 @@ use hotshot_builder_api::{
     data_source::{AcceptsTxnSubmits, BuilderDataSource},
 };
 use hotshot_types::{
-    constants::Base,
     data::{DaProposal, Leaf, QuorumProposal},
     event::EventType,
     message::Proposal,
@@ -35,6 +34,7 @@ use anyhow::{anyhow, Context};
 use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
 use async_compatibility_layer::{
+    art::async_sleep,
     art::async_timeout,
     channel::{unbounded, OneShotSender},
 };
@@ -50,7 +50,7 @@ use hotshot_events_service::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -152,8 +152,8 @@ where
     // if the req channel times out during get_available_blocks
     pub builder_state_to_last_built_block: HashMap<(VidCommitment, Types::Time), ResponseMessage>,
 
-    // scheduled GC by view number
-    pub view_to_cleanup_targets: BTreeMap<Types::Time, BuilderStatesInfo<Types>>,
+    // // scheduled GC by view number
+    // pub view_to_cleanup_targets: BTreeMap<Types::Time, BuilderStatesInfo<Types>>,
 
     // sending a transaction from the hotshot/private mempool to the builder states
     // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
@@ -162,10 +162,7 @@ where
     // last garbage collected view number
     pub last_garbage_collected_view_num: Types::Time,
 
-    /// number of view to buffer before garbage collect
-    pub buffer_view_num_count: u64,
-
-    /// Max view num
+    // highest view running builder task
     pub highest_view_num_builder_id: (VidCommitment, Types::Time),
 }
 
@@ -181,7 +178,7 @@ where
         bootstrapped_builder_state_id: VidCommitment,
         bootstrapped_view_num: Types::Time,
         last_garbage_collected_view_num: Types::Time,
-        buffer_view_num_count: u64,
+        _buffer_view_num_count: u64,
     ) -> Self {
         let mut spawned_builder_states = HashMap::new();
         spawned_builder_states.insert(
@@ -191,11 +188,9 @@ where
         GlobalState {
             block_hash_to_block: Default::default(),
             spawned_builder_states,
-            view_to_cleanup_targets: Default::default(),
             namespace_id,
             tx_sender,
             last_garbage_collected_view_num,
-            buffer_view_num_count,
             builder_state_to_last_built_block: Default::default(),
             highest_view_num_builder_id: (bootstrapped_builder_state_id, bootstrapped_view_num),
         }
@@ -220,7 +215,7 @@ where
             );
             self.highest_view_num_builder_id = (vid_commmit, view_num);
         } else {
-            tracing::info!(
+            tracing::warn!(
                 "builder {:?}@{:?} created; highest registered is {:?}@{:?}",
                 vid_commmit,
                 view_num,
@@ -255,74 +250,19 @@ where
     }
 
     // remove the builder state handles based on the decide event
-    pub fn remove_handles(
-        &mut self,
-        builder_vid_commitment: &VidCommitment,
-        block_hashes: HashSet<(VidCommitment, BuilderCommitment, Types::Time)>,
-        on_decide_view: Types::Time,
-    ) -> Types::Time {
-        // remove everything from the spawned builder states when view_num <= on_decide_view
+    pub fn remove_handles(&mut self, on_decide_view: Types::Time) -> Types::Time {
+        // remove everything from the spawned builder states when view_num <= on_decide_view;
+        // if we don't have a highest view > decide, use highest view as cutoff.
+        let cutoff = std::cmp::min(self.highest_view_num_builder_id.1, on_decide_view);
         self.spawned_builder_states
-            .retain(|(_vid, view_num), _channel| {
-                *view_num >= self.highest_view_num_builder_id.1 || *view_num > on_decide_view
-            });
+            .retain(|(_vid, view_num), _channel| *view_num >= cutoff);
 
-        let cleanup_after_view = on_decide_view + self.buffer_view_num_count;
+        let cutoff_u64 = cutoff.u64();
+        let gc_view = if cutoff_u64 > 0 { cutoff_u64 - 1 } else { 0 };
 
-        let edit = self
-            .view_to_cleanup_targets
-            .entry(cleanup_after_view)
-            .or_default();
+        self.last_garbage_collected_view_num = Types::Time::new(gc_view);
 
-        edit.vid_commitments.push(*builder_vid_commitment);
-
-        for (parent_hash, block_hash, view_number_built_for) in block_hashes {
-            let proposed_block_id =
-                ProposedBlockId::new(parent_hash, block_hash.clone(), view_number_built_for);
-            edit.block_ids.push(proposed_block_id);
-            tracing::debug!(
-                "GC view_num {:?}: block_hash {:?}, deferred to view {:?} ",
-                view_number_built_for,
-                block_hash,
-                cleanup_after_view
-            );
-        }
-
-        tracing::debug!("GC for scheduled view {:?}", on_decide_view);
-
-        self.view_to_cleanup_targets.retain(
-            |view_num,
-             BuilderStatesInfo {
-                 vid_commitments: _vids,
-                 block_ids: parent_hash_block_hashes_view_num,
-             }| {
-                if *view_num == self.highest_view_num_builder_id.1 || *view_num > on_decide_view {
-                    true
-                } else {
-                    // go through the vids and remove from the builder_state_to_last_built_block
-                    // and block_hashes and remove the block_hashes from the block_hash_to_block
-
-                    parent_hash_block_hashes_view_num.iter().for_each(
-                        |ProposedBlockId {
-                             parent_commitment: parent_vid_commmitment,
-                             payload_commitment: block_hash,
-                             parent_view: view_number_built_for,
-                         }| {
-                            tracing::debug!(
-                                "on_decide_view: {:?}, Removing parent_hash {:?}, block_hash {:?}",
-                                on_decide_view,
-                                parent_vid_commmitment,
-                                block_hash
-                            );
-                            self.block_hash_to_block
-                                .remove(&(block_hash.clone(), *view_number_built_for));
-                        },
-                    );
-                    false
-                }
-            },
-        );
-        self.highest_view_num_builder_id.1
+        cutoff
     }
 
     // private mempool submit txn
@@ -345,6 +285,7 @@ where
         key: &(VidCommitment, Types::Time),
     ) -> Result<&BroadcastSender<MessageType<Types>>, BuildError> {
         if let Some(channel) = self.spawned_builder_states.get(key) {
+            tracing::info!("Got matching builder for parent {:?}@{:?}", key.0, key.1);
             Ok(channel)
         } else {
             tracing::warn!(
@@ -439,6 +380,8 @@ where
         sender: Types::SignatureKey,
         signature: &<Types::SignatureKey as SignatureKey>::PureAssembledSignatureType,
     ) -> Result<Vec<AvailableBlockInfo<Types>>, BuildError> {
+        let starting_time = Instant::now();
+
         // verify the signature
         if !sender.validate(signature, for_parent.as_ref()) {
             tracing::error!("Signature validation failed in get_available_blocks");
@@ -454,40 +397,81 @@ where
         );
 
         let view_num = <<Types as NodeType>::Time as ConsensusTime>::new(view_number);
-        // check in the local spawned builder states, if it doesn't exist it means there could be two cases
-        // it has been sent to garbed collected, or never exists, in later case let higest view num builder state build a block for it
-        let just_return_with_this = {
-            //let global_state = self.global_state.read_arc().await;
-            if self
-                .global_state
-                .read_arc()
-                .await
-                .spawned_builder_states
-                .contains_key(&(*for_parent, view_num))
+        // check in the local spawned builder states
+        // if it doesn't exist; there are three cases
+        // 1) it has already been garbage collected (view < decide) and we should return an error
+        // 2) it has not yet been created, and we should try to wait
+        // 3) we missed the triggering event, and should use the BuilderState with the highest available view
+
+        {
+            // 1st case: Decide event received, and not bootstrapping.
+            // If this `BlockBuilder` hasn't been reaped, it should have been.
+            let global_state = self.global_state.read_arc().await;
+            if view_num < global_state.last_garbage_collected_view_num
+                && global_state.highest_view_num_builder_id.1
+                    != global_state.last_garbage_collected_view_num
             {
-                None
-            } else {
-                self.global_state
-                    .read_arc()
-                    .await
-                    .builder_state_to_last_built_block
-                    .get(&(*for_parent, view_num))
-                    .cloned()
+                tracing::warn!(
+                    "Requesting for view {:?}, last decide-triggered cleanup on view {:?}, highest view num is {:?}",
+                    view_num,
+                    global_state.last_garbage_collected_view_num,
+                    global_state.highest_view_num_builder_id.1
+                );
+                return Err(BuildError::Error {
+                    message:
+                        "Request for available blocks for a view that has already been decided."
+                            .to_string(),
+                });
             }
-        };
+        }
+
         let (response_sender, response_receiver) = unbounded();
         let req_msg = RequestMessage {
             requested_vid_commitment: (*for_parent),
             requested_view_number: view_number,
             response_channel: response_sender,
         };
-        let response_received = if let Some(response_cached) = just_return_with_this {
-            Ok(response_cached)
-        } else {
-            let timeout_after = Instant::now() + self.max_api_waiting_time;
-            let check_duration = self.max_api_waiting_time / 10;
+        let timeout_after = starting_time + self.max_api_waiting_time;
+        let check_duration = self.max_api_waiting_time / 10;
 
-            // broadcast the request to the builder states
+        let time_to_wait_for_matching_builder = starting_time + self.max_api_waiting_time / 2;
+
+        let mut sent = false;
+        let key = (*for_parent, view_num);
+        while !sent && Instant::now() < time_to_wait_for_matching_builder {
+            // try to broadcast the request to the correct builder state
+            if let Some(builder) = self
+                .global_state
+                .read_arc()
+                .await
+                .spawned_builder_states
+                .get(&key)
+            {
+                tracing::info!(
+                    "Got matching BlockBuilder for {:?}@{view_number}, sending get_available_blocks request",
+                    req_msg.requested_vid_commitment
+                );
+                if let Err(e) = builder
+                    .broadcast(MessageType::RequestMessage(req_msg.clone()))
+                    .await
+                {
+                    tracing::warn!(
+                        "Error {e} sending get_available_blocks request for parent {:?}@{view_number}",
+                        req_msg.requested_vid_commitment
+                    );
+                }
+                sent = true;
+            } else {
+                tracing::info!(
+                    "Failed to get matching BlockBuilder for {:?}@{view_number}, will try again",
+                    req_msg.requested_vid_commitment
+                );
+                async_sleep(check_duration).await
+            }
+        }
+
+        if !sent {
+            // broadcast the request to the best fallback builder state
             if let Err(e) = self
                 .global_state
                 .read_arc()
@@ -501,48 +485,49 @@ where
                     req_msg.requested_vid_commitment
                 );
             }
+        }
 
-            tracing::debug!(
-                "Waiting for response for get_available_blocks with parent {:?}@{view_number}",
-                req_msg.requested_vid_commitment
-            );
+        tracing::debug!(
+            "Waiting for response for get_available_blocks with parent {:?}@{view_number}",
+            req_msg.requested_vid_commitment
+        );
 
-            loop {
-                match async_timeout(check_duration, response_receiver.recv()).await {
-                    Err(toe) => {
-                        if Instant::now() >= timeout_after {
-                            tracing::warn!(%toe, "Couldn't get available blocks in time for parent {:?}",  req_msg.requested_vid_commitment);
-                            // lookup into the builder_state_to_last_built_block, if it contains the result, return that otherwise return error
-                            if let Some(last_built_block) = self
-                                .global_state
-                                .read_arc()
-                                .await
-                                .builder_state_to_last_built_block
-                                .get(&(*for_parent, view_num))
-                            {
-                                tracing::info!(
-                                    "Returning last built block for parent {:?}",
-                                    req_msg.requested_vid_commitment
-                                );
-                                break Ok(last_built_block.clone());
-                            }
-                            break Err(BuildError::Error {
-                                message: "No blocks available".to_string(),
-                            });
+        let response_received = loop {
+            match async_timeout(check_duration, response_receiver.recv()).await {
+                Err(toe) => {
+                    if Instant::now() >= timeout_after {
+                        tracing::warn!(%toe, "Couldn't get available blocks in time for parent {:?}@{view_number}",  req_msg.requested_vid_commitment);
+                        // lookup into the builder_state_to_last_built_block, if it contains the result, return that otherwise return error
+                        if let Some(last_built_block) = self
+                            .global_state
+                            .read_arc()
+                            .await
+                            .builder_state_to_last_built_block
+                            .get(&(*for_parent, view_num))
+                        {
+                            tracing::info!(
+                                "Returning last built block for parent {:?}@{view_number}",
+                                req_msg.requested_vid_commitment
+                            );
+                            break Ok(last_built_block.clone());
                         }
-                        continue;
-                    }
-                    Ok(recv_attempt) => {
-                        if let Err(ref e) = recv_attempt {
-                            tracing::error!(%e, "Channel closed while getting available blocks for parent {:?}", req_msg.requested_vid_commitment);
-                        }
-                        break recv_attempt.map_err(|_| BuildError::Error {
-                            message: "channel unexpectedly closed".to_string(),
+                        break Err(BuildError::Error {
+                            message: "No blocks available".to_string(),
                         });
                     }
+                    continue;
+                }
+                Ok(recv_attempt) => {
+                    if let Err(ref e) = recv_attempt {
+                        tracing::error!(%e, "Channel closed while getting available blocks for parent {:?}@{view_number}", req_msg.requested_vid_commitment);
+                    }
+                    break recv_attempt.map_err(|_| BuildError::Error {
+                        message: "channel unexpectedly closed".to_string(),
+                    });
                 }
             }
         };
+        // };
 
         match response_received {
             Ok(response) => {
@@ -569,7 +554,7 @@ where
                     _phantom: Default::default(),
                 };
                 tracing::info!(
-                    "Sending available Block info response for (parent {:?}, view_num: {:?}) with block hash: {:?})",
+                    "Sending available Block info response for (parent {:?}, view_num: {:?}) with block hash: {:?}",
                     req_msg.requested_vid_commitment,
                     view_number,
                     response.builder_hash
@@ -580,7 +565,7 @@ where
             // We failed to get available blocks
             Err(e) => {
                 tracing::warn!(
-                    "Failed to get available blocks for parent {:?}",
+                    "Failed to get available blocks for parent {:?}@{view_number}",
                     req_msg.requested_vid_commitment
                 );
                 Err(e)
@@ -845,14 +830,14 @@ async fn connect_to_events_service<Types: NodeType>(
         BuilderEvent<Types>,
         surf_disco::socket::Unsupported,
         EventStreamError,
-        Base,
+        Types::Base,
     >,
     GeneralStaticCommittee<Types, <Types as NodeType>::SignatureKey>,
 )>
 where
     Types::Transaction: BuilderTransaction,
 {
-    let client = surf_disco::Client::<hotshot_events_service::events::Error, Base>::new(
+    let client = surf_disco::Client::<hotshot_events_service::events::Error, Types::Base>::new(
         hotshot_events_api_url.clone(),
     );
 
@@ -966,10 +951,9 @@ where
                     // decide event
                     BuilderEventType::HotshotDecide {
                         latest_decide_view_num,
-                        block_size,
+                        block_size: _,
                     } => {
-                        handle_decide_event(&decide_sender, latest_decide_view_num, block_size)
-                            .await;
+                        handle_decide_event(&decide_sender, latest_decide_view_num).await;
                     }
                     // DA proposal event
                     BuilderEventType::HotshotDaProposal { proposal, sender } => {
@@ -1071,14 +1055,10 @@ pub async fn run_permissioned_standalone_builder_service<
                         }
                     }
                     // decide event
-                    EventType::Decide {
-                        leaf_chain,
-                        block_size,
-                        ..
-                    } => {
+                    EventType::Decide { leaf_chain, .. } => {
                         let latest_decide_view_number = leaf_chain[0].leaf.view_number();
-                        handle_decide_event(&decide_sender, latest_decide_view_number, block_size)
-                            .await;
+
+                        handle_decide_event(&decide_sender, latest_decide_view_number).await;
                     }
                     // DA proposal event
                     EventType::DaProposal { proposal, sender } => {
@@ -1230,13 +1210,11 @@ async fn handle_qc_event<Types: NodeType>(
 async fn handle_decide_event<Types: NodeType>(
     decide_channel_sender: &BroadcastSender<MessageType<Types>>,
     latest_decide_view_number: Types::Time,
-    block_size: Option<u64>,
 ) where
     Types::Transaction: BuilderTransaction,
 {
     let decide_msg: DecideMessage<Types> = DecideMessage::<Types> {
         latest_decide_view_number,
-        block_size,
     };
     tracing::debug!(
         "Sending Decide event to builder states for view {:?}",
@@ -1247,7 +1225,7 @@ async fn handle_decide_event<Types: NodeType>(
         .await
     {
         tracing::warn!(
-            "Error {e}, failed to Decide event to builder states for view {:?}",
+            "Error {e}, failed to send Decide event to builder states for view {:?}",
             latest_decide_view_number
         );
     }

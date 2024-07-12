@@ -46,17 +46,10 @@ pub enum TransactionSource {
     HotShot,  // txn from the HotShot network i.e public mempool
 }
 
-/// Transaction Message to be put on the tx channel
-#[derive(Clone, Debug, PartialEq)]
-pub struct TransactionMessage<TYPES: NodeType> {
-    pub txns: Arc<Vec<TYPES::Transaction>>,
-    pub tx_type: TransactionSource,
-}
 /// Decide Message to be put on the decide channel
 #[derive(Clone, Debug)]
 pub struct DecideMessage<TYPES: NodeType> {
     pub latest_decide_view_number: TYPES::Time,
-    pub block_size: Option<u64>,
 }
 /// DA Proposal Message to be put on the da proposal channel
 #[derive(Debug, Clone)]
@@ -144,6 +137,9 @@ where
     /// Expiring txs to be garbage collected
     pub included_txns_expiring: HashSet<Commitment<TYPES::Transaction>>,
 
+    /// txns currently in the tx_queue
+    pub txns_in_queue: HashSet<Commitment<TYPES::Transaction>>,
+
     /// da_proposal_payload_commit to (da_proposal, node_count)
     #[allow(clippy::type_complexity)]
     pub da_proposal_payload_commit_to_da_proposal:
@@ -211,12 +207,6 @@ pub trait BuilderProgress<TYPES: NodeType>
 where
     TYPES::Transaction: BuilderTransaction,
 {
-    /// process the external transaction
-    // fn process_external_transaction(&mut self, txns: Arc<Vec<TYPES::Transaction>>);
-
-    /// process the hotshot transaction
-    // fn process_hotshot_transaction(&mut self, tx: Arc<Vec<TYPES::Transaction>>);
-
     /// process the DA proposal
     async fn process_da_proposal(&mut self, da_msg: Arc<DaProposalMessage<TYPES>>);
     /// process the quorum proposal
@@ -416,27 +406,29 @@ where
         // The only exception is that we want to keep the highest view number builder state active to ensure that
         // we have a builder state to handle the incoming DA and QC proposals
         let decide_view_number = decide_msg.latest_decide_view_number;
-        if self.built_from_proposed_block.view_number < decide_view_number {
+
+        let retained_view_cutoff = self
+            .global_state
+            .write_arc()
+            .await
+            .remove_handles(decide_view_number);
+        if self.built_from_proposed_block.view_number < retained_view_cutoff {
             tracing::info!(
-                "Task view is less than the currently decided leaf view {:?}; attempting to exit builder state for view {:?}",
-                decide_view_number.u64(), self.built_from_proposed_block.view_number.u64());
-            let highest_view = self.global_state.write_arc().await.remove_handles(
-                &self.built_from_proposed_block.vid_commitment,
-                self.builder_commitments.clone(),
-                decide_view_number,
+                "Decide@{:?}; Task@{:?} exiting; views < {:?} being reclaimed",
+                decide_view_number.u64(),
+                self.built_from_proposed_block.view_number.u64(),
+                retained_view_cutoff.u64(),
             );
-
-            if highest_view == self.built_from_proposed_block.view_number {
-                tracing::info!(
-                    "Task view {:?} is not exiting as it has the highest view",
-                    self.built_from_proposed_block.view_number.u64()
-                );
-            } else {
-                return Some(Status::ShouldExit);
-            }
+            return Some(Status::ShouldExit);
         }
+        tracing::info!(
+            "Decide@{:?}; Task@{:?} not exiting; views >= {:?} being retained",
+            decide_view_number.u64(),
+            self.built_from_proposed_block.view_number.u64(),
+            retained_view_cutoff.u64(),
+        );
 
-        return Some(Status::ShouldContinue);
+        Some(Status::ShouldContinue)
     }
 
     // spawn a clone of the builder state
@@ -461,8 +453,15 @@ where
 
         self.included_txns
             .extend(da_proposal_info.txn_commitments.iter());
+
+        for tx in da_proposal_info.txn_commitments.iter() {
+            self.txns_in_queue.remove(tx);
+        }
+        self.included_txns
+            .extend(da_proposal_info.txn_commitments.iter());
+
         self.tx_queue
-            .retain(|tx| !self.included_txns.contains(&tx.commit));
+            .retain(|tx| self.txns_in_queue.contains(&tx.commit));
 
         // register the spawned builder state to spawned_builder_states in the global state
         self.global_state.write_arc().await.register_builder_state(
@@ -619,7 +618,7 @@ where
                         }
                         Err(e) => {
                             tracing::warn!(
-                                "Builder {:?} failed to send response to the request{:?} with builder hash {:?}, ERRROR {:?}",
+                                "Builder {:?} failed to send response to {:?} with builder hash {:?}, Err: {:?}",
                                 self.built_from_proposed_block.view_number,
                                 req,
                                 builder_hash,
@@ -644,7 +643,7 @@ where
         let _builder_handle = async_spawn(async move {
             loop {
                 tracing::debug!(
-                    "Builder{:?} event loop",
+                    "Builder {:?} event loop",
                     self.built_from_proposed_block.view_number
                 );
                 futures::select! {
@@ -664,7 +663,7 @@ where
                                 }
                             }
                             None => {
-                                tracing::info!("No more request messages to consume");
+                                tracing::warn!("No more request messages to consume");
                             }
                         }
                     },
@@ -674,10 +673,12 @@ where
                                 if let MessageType::DaProposalMessage(rda_msg) = da {
                                     tracing::debug!("Received da proposal msg in builder {:?}:\n {:?}", self.built_from_proposed_block, rda_msg.view_number);
                                     self.process_da_proposal(rda_msg).await;
+                                } else {
+                                    tracing::warn!("Unexpected message on da proposals channel: {:?}", da);
                                 }
                             }
                             None => {
-                                tracing::info!("No more da proposal messages to consume");
+                                tracing::warn!("No more da proposal messages to consume");
                             }
                         }
                     },
@@ -685,12 +686,14 @@ where
                         match qc {
                             Some(qc) => {
                                 if let MessageType::QCMessage(rqc_msg) = qc {
-                                    tracing::debug!("Received qc msg in builder {:?}:\n {:?} for view ", self.built_from_proposed_block, rqc_msg.proposal.data.view_number);
+                                    tracing::debug!("Received quorum proposal msg in builder {:?}:\n {:?} for view ", self.built_from_proposed_block, rqc_msg.proposal.data.view_number);
                                     self.process_quorum_proposal(rqc_msg).await;
+                                } else {
+                                    tracing::warn!("Unexpected message on quorum proposals channel: {:?}", qc);
                                 }
                             }
                             None => {
-                                tracing::info!("No more qc messages to consume");
+                                tracing::warn!("No more quorum proposal messages to consume");
                             }
                         }
                     },
@@ -698,26 +701,35 @@ where
                         match decide {
                             Some(decide) => {
                                 if let MessageType::DecideMessage(rdecide_msg) = decide {
-                                    tracing::debug!("Received decide msg in builder {:?}:\n {:?} for view ", self.built_from_proposed_block, rdecide_msg.latest_decide_view_number);
+                                    let latest_decide_view_num = rdecide_msg.latest_decide_view_number;
+                                    tracing::debug!("Received decide msg view {:?} in builder {:?}",
+                                        &latest_decide_view_num,
+                                        self.built_from_proposed_block);
                                     let decide_status = self.process_decide_event(rdecide_msg).await;
                                     match decide_status{
                                         Some(Status::ShouldExit) => {
-                                            tracing::info!("Exiting the builder {:?}", self.built_from_proposed_block);
+                                            tracing::info!("Exiting builder {:?} with decide view {:?}",
+                                                self.built_from_proposed_block,
+                                                &latest_decide_view_num);
                                             return;
                                         }
                                         Some(Status::ShouldContinue) => {
-                                            tracing::debug!("continue the builder {:?}", self.built_from_proposed_block);
+                                            tracing::debug!("Continuing builder {:?}",
+                                                self.built_from_proposed_block);
                                             continue;
                                         }
                                         None => {
-                                            tracing::debug!("None type: continue the builder {:?}", self.built_from_proposed_block);
+                                            tracing::warn!("decide_status was None; Continuing builder {:?}",
+                                                self.built_from_proposed_block);
                                             continue;
                                         }
                                     }
+                                } else {
+                                    tracing::warn!("Unexpected message on decide channel: {:?}", decide);
                                 }
                             }
                             None => {
-                                tracing::info!("No more decide messages to consume");
+                                tracing::warn!("No more decide messages to consume");
                             }
                         }
                     },
@@ -732,7 +744,6 @@ pub enum MessageType<TYPES: NodeType>
 where
     TYPES::Transaction: BuilderTransaction,
 {
-    TransactionMessage(TransactionMessage<TYPES>),
     DecideMessage(DecideMessage<TYPES>),
     DaProposalMessage(Arc<DaProposalMessage<TYPES>>),
     QCMessage(QCMessage<TYPES>),
@@ -761,11 +772,13 @@ where
         txn_garbage_collect_duration: Duration,
         validated_state: Arc<TYPES::ValidatedState>,
     ) -> Self {
+        let txns_in_queue: HashSet<_> = tx_queue.iter().map(|tx| tx.commit).collect();
         BuilderState {
             namespace_id,
             included_txns: HashSet::new(),
             included_txns_old: HashSet::new(),
             included_txns_expiring: HashSet::new(),
+            txns_in_queue,
             built_from_proposed_block,
             decide_receiver,
             da_proposal_receiver,
@@ -814,6 +827,7 @@ where
             included_txns,
             included_txns_old,
             included_txns_expiring,
+            txns_in_queue: self.txns_in_queue.clone(),
             built_from_proposed_block: self.built_from_proposed_block.clone(),
             decide_receiver: self.decide_receiver.clone(),
             da_proposal_receiver: self.da_proposal_receiver.clone(),
@@ -843,9 +857,11 @@ where
                     if self.included_txns.contains(&tx.commit)
                         || self.included_txns_old.contains(&tx.commit)
                         || self.included_txns_expiring.contains(&tx.commit)
+                        || self.txns_in_queue.contains(&tx.commit)
                     {
                         continue;
                     }
+                    self.txns_in_queue.insert(tx.commit);
                     self.tx_queue.push(tx);
                 }
                 Err(async_broadcast::TryRecvError::Empty)

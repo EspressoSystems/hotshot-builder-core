@@ -48,6 +48,7 @@ mod tests {
     use committable::{Commitment, CommitmentBoundsArkless, Committable};
     use std::sync::Arc;
     use std::time::Duration;
+    use vbs::version::StaticVersion;
 
     use serde::{Deserialize, Serialize};
     /// This test simulates multiple builder states receiving messages from the channels and processing them
@@ -81,6 +82,12 @@ mod tests {
             type InstanceState = TestInstanceState;
             type Membership = GeneralStaticCommittee<TestTypes, Self::SignatureKey>;
             type BuilderSignatureKey = BuilderKey;
+            type Base = StaticVersion<0, 1>;
+            type Upgrade = StaticVersion<0, 2>;
+            const UPGRADE_HASH: [u8; 32] = [
+                1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0,
+                0, 0, 0, 0,
+            ];
         }
 
         #[derive(
@@ -303,7 +310,6 @@ mod tests {
 
             let sdecide_msg = DecideMessage::<TestTypes> {
                 latest_decide_view_number: leaf.view_number(),
-                block_size: Some(encoded_transactions.len() as u64),
             };
 
             // validate the signature before pushing the message to the builder_state channels
