@@ -451,9 +451,6 @@ where
 
         self.built_from_proposed_block.leaf_commit = leaf.commit();
 
-        self.included_txns
-            .extend(da_proposal_info.txn_commitments.iter());
-
         for tx in da_proposal_info.txn_commitments.iter() {
             self.txns_in_queue.remove(tx);
         }
