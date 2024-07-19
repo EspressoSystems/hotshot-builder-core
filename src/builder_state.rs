@@ -534,7 +534,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
         {
             let builder_hash = payload.builder_commitment(&metadata);
             // count the number of txns
-            let txn_count = payload.num_transactions(&metadata);
+            let txn_count = self.tx_queue.len();
 
             // insert the recently built block into the builder commitments
             self.builder_commitments.insert((
