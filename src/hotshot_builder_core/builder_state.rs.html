@@ -1432,7 +1432,7 @@
         </span>{
             <span class="kw">let </span>builder_hash = payload.builder_commitment(<span class="kw-2">&amp;</span>metadata);
             <span class="comment">// count the number of txns
-            </span><span class="kw">let </span>txn_count = payload.num_transactions(<span class="kw-2">&amp;</span>metadata);
+            </span><span class="kw">let </span>txn_count = <span class="self">self</span>.tx_queue.len();
 
             <span class="comment">// insert the recently built block into the builder commitments
             </span><span class="self">self</span>.builder_commitments.insert((
