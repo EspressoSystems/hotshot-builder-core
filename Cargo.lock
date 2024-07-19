@@ -3167,7 +3167,7 @@ dependencies = [
 [[package]]
 name = "hotshot-events-service"
 version = "0.1.33"
-source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?tag=rc-0.1.33#765c2fa5871d548a20f0aef8f6d15ed49e26dab5"
+source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?tag=rc-0.1.33#9826fb46d13ae74cc9353f455d54345a7ab5e7f4"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
