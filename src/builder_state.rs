@@ -21,7 +21,6 @@ use async_compatibility_layer::channel::{oneshot, unbounded, UnboundedSender};
 use async_compatibility_layer::{art::async_sleep, channel::OneShotSender};
 use async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
 use async_lock::RwLock;
-use async_trait::async_trait;
 use core::panic;
 use futures::StreamExt;
 
@@ -199,43 +198,7 @@ pub struct BuilderState<TYPES: NodeType> {
     pub next_txn_garbage_collect_time: Instant,
 }
 
-/// Trait to hold the helper functions for the builder
-#[async_trait]
-pub trait BuilderProgress<TYPES: NodeType> {
-    /// process the DA proposal
-    async fn process_da_proposal(&mut self, da_msg: DaProposalMessage<TYPES>);
-
-    /// process the quorum proposal
-    async fn process_quorum_proposal(&mut self, qc_msg: QCMessage<TYPES>);
-
-    /// process the decide event
-    async fn process_decide_event(&mut self, decide_msg: DecideMessage<TYPES>) -> Option<Status>;
-
-    /// spawn a clone of builder
-    async fn spawn_clone(
-        self,
-        da_proposal: DAProposalInfo<TYPES>,
-        quorum_proposal: Arc<Proposal<TYPES, QuorumProposal<TYPES>>>,
-        leader: TYPES::SignatureKey,
-        req_sender: BroadcastSender<MessageType<TYPES>>,
-    );
-
-    /// build a block
-    async fn build_block(
-        &mut self,
-        matching_builder_commitment: VidCommitment,
-        matching_view_number: TYPES::Time,
-    ) -> Option<BuildBlockInfo<TYPES>>;
-
-    /// Event Loop
-    fn event_loop(self);
-
-    /// process the block request
-    async fn process_block_request(&mut self, req: RequestMessage);
-}
-
-#[async_trait]
-impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
+impl<TYPES: NodeType> BuilderState<TYPES> {
     /// processing the DA proposal
     #[tracing::instrument(skip_all, name = "process da proposal",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
@@ -668,7 +631,7 @@ impl<TYPES: NodeType> BuilderProgress<TYPES> for BuilderState<TYPES> {
     }
     #[tracing::instrument(skip_all, name = "event loop",
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
-    fn event_loop(mut self) {
+    pub fn event_loop(mut self) {
         let _builder_handle = async_spawn(async move {
             loop {
                 tracing::debug!(

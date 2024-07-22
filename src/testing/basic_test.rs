@@ -10,7 +10,7 @@ pub use hotshot_types::{
     },
 };
 
-pub use crate::builder_state::{BuilderProgress, BuilderState, MessageType, ResponseMessage};
+pub use crate::builder_state::{BuilderState, MessageType, ResponseMessage};
 pub use async_broadcast::{
     broadcast, Receiver as BroadcastReceiver, RecvError, Sender as BroadcastSender, TryRecvError,
 };

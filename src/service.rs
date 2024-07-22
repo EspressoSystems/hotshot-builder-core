@@ -118,9 +118,6 @@ pub struct GlobalState<Types: NodeType> {
     // if the req channel times out during get_available_blocks
     pub builder_state_to_last_built_block: HashMap<(VidCommitment, Types::Time), ResponseMessage>,
 
-    // // scheduled GC by view number
-    // pub view_to_cleanup_targets: BTreeMap<Types::Time, BuilderStatesInfo<Types>>,
-
     // sending a transaction from the hotshot/private mempool to the builder states
     // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
     pub tx_sender: BroadcastSender<Arc<ReceivedTransaction<Types>>>,
