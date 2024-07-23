@@ -21,7 +21,7 @@ pub mod service;
 pub mod testing;
 
 use async_compatibility_layer::channel::UnboundedReceiver;
-use hotshot_builder_api::builder::BuildError;
+use hotshot_builder_api::v0_2::builder::BuildError;
 #[derive(Debug)]
 pub enum WaitAndKeep<T> {
     Keep(T),
