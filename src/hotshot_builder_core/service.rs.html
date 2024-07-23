@@ -1138,21 +1138,11 @@
 <a href="#1138" id="1138">1138</a>
 <a href="#1139" id="1139">1139</a>
 <a href="#1140" id="1140">1140</a>
-<a href="#1141" id="1141">1141</a>
-<a href="#1142" id="1142">1142</a>
-<a href="#1143" id="1143">1143</a>
-<a href="#1144" id="1144">1144</a>
-<a href="#1145" id="1145">1145</a>
-<a href="#1146" id="1146">1146</a>
-<a href="#1147" id="1147">1147</a>
-<a href="#1148" id="1148">1148</a>
-<a href="#1149" id="1149">1149</a>
-<a href="#1150" id="1150">1150</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
-    types::SystemContextHandle,
+    types::{Event, SystemContextHandle},
 };
-<span class="kw">use </span>hotshot_builder_api::{
+<span class="kw">use </span>hotshot_builder_api::v0_2::{
     block_info::{AvailableBlockData, AvailableBlockHeaderInput, AvailableBlockInfo},
     builder::BuildError,
     data_source::{AcceptsTxnSubmits, BuilderDataSource},
@@ -1191,10 +1181,7 @@
 <span class="kw">use </span>derivative::Derivative;
 <span class="kw">use </span>futures::future::BoxFuture;
 <span class="kw">use </span>futures::stream::StreamExt;
-<span class="kw">use </span>hotshot_events_service::{
-    events::Error <span class="kw">as </span>EventStreamError,
-    events_source::{BuilderEvent, BuilderEventType},
-};
+<span class="kw">use </span>hotshot_events_service::{events::Error <span class="kw">as </span>EventStreamError, events_source::StartupInfo};
 <span class="kw">use </span>sha2::{Digest, Sha256};
 <span class="kw">use </span>std::collections::HashMap;
 <span class="kw">use </span>std::num::NonZeroUsize;
@@ -1922,7 +1909,7 @@ Handling Builder API responses
     hotshot_events_api_url: Url,
 ) -&gt; <span class="prelude-ty">Option</span>&lt;(
     surf_disco::socket::Connection&lt;
-        BuilderEvent&lt;Types&gt;,
+        Event&lt;Types&gt;,
         surf_disco::socket::Unsupported,
         EventStreamError,
         Types::Base,
@@ -1940,40 +1927,35 @@ Handling Builder API responses
     <span class="macro">tracing::info!</span>(<span class="string">"Builder client connected to the hotshot events api"</span>);
 
     <span class="comment">// client subscrive to hotshot events
-    </span><span class="kw">let </span><span class="kw-2">mut </span>subscribed_events = client
+    </span><span class="kw">let </span>subscribed_events = client
         .socket(<span class="string">"hotshot-events/events"</span>)
-        .subscribe::&lt;BuilderEvent&lt;Types&gt;&gt;()
+        .subscribe::&lt;Event&lt;Types&gt;&gt;()
         .<span class="kw">await
         </span>.ok()<span class="question-mark">?</span>;
 
     <span class="comment">// handle the startup event at the start
-    </span><span class="kw">let </span>membership = <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(event)) = subscribed_events.next().<span class="kw">await </span>{
-        <span class="kw">match </span>event.event {
-            BuilderEventType::StartupInfo {
-                known_node_with_stake,
-                non_staked_node_count,
-            } =&gt; {
-                <span class="kw">let </span>membership: GeneralStaticCommittee&lt;Types, &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey&gt; = GeneralStaticCommittee::&lt;
-                        Types,
-                        &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey,
-                    &gt;::create_election(
-                        known_node_with_stake.clone(),
-                        known_node_with_stake.clone(),
-                        <span class="number">0
-                    </span>);
+    </span><span class="kw">let </span>membership = <span class="kw">if let </span><span class="prelude-val">Ok</span>(response) = client
+        .get::&lt;StartupInfo&lt;Types&gt;&gt;(<span class="string">"hotshot-events/startup_info"</span>)
+        .send()
+        .<span class="kw">await
+    </span>{
+        <span class="kw">let </span>StartupInfo {
+            known_node_with_stake,
+            non_staked_node_count,
+        } = response;
+        <span class="kw">let </span>membership: GeneralStaticCommittee&lt;Types, &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey&gt; =
+            GeneralStaticCommittee::&lt;Types, &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey&gt;::create_election(
+                known_node_with_stake.clone(),
+                known_node_with_stake.clone(),
+                <span class="number">0</span>,
+            );
 
-                <span class="macro">tracing::info!</span>(
-                    <span class="string">"Startup info: Known nodes with stake: {:?}, Non-staked node count: {:?}"</span>,
-                    known_node_with_stake,
-                    non_staked_node_count
-                );
-                <span class="prelude-val">Some</span>(membership)
-            }
-            <span class="kw">_ </span>=&gt; {
-                <span class="macro">tracing::error!</span>(<span class="string">"Startup info event not received as first event"</span>);
-                <span class="prelude-val">None
-            </span>}
-        }
+        <span class="macro">tracing::info!</span>(
+            <span class="string">"Startup info: Known nodes with stake: {:?}, Non-staked node count: {:?}"</span>,
+            known_node_with_stake,
+            non_staked_node_count
+        );
+        <span class="prelude-val">Some</span>(membership)
     } <span class="kw">else </span>{
         <span class="prelude-val">None
     </span>};
@@ -2014,15 +1996,11 @@ Running Non-Permissioned Builder Service
         </span><span class="kw">match </span>event {
             <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(event)) =&gt; {
                 <span class="kw">match </span>event.event {
-                    BuilderEventType::HotshotError { error } =&gt; {
+                    EventType::Error { error } =&gt; {
                         <span class="macro">tracing::error!</span>(<span class="string">"Error event in HotShot: {:?}"</span>, error);
                     }
-                    <span class="comment">// startup event
-                    </span>BuilderEventType::StartupInfo { .. } =&gt; {
-                        <span class="macro">tracing::warn!</span>(<span class="string">"Startup info event received again"</span>);
-                    }
                     <span class="comment">// tx event
-                    </span>BuilderEventType::HotshotTransactions { transactions } =&gt; {
+                    </span>EventType::Transactions { transactions } =&gt; {
                         <span class="kw">if let </span><span class="prelude-val">Err</span>(e) = handle_received_txns(
                             <span class="kw-2">&amp;</span>tx_sender,
                             transactions,
@@ -2034,14 +2012,16 @@ Running Non-Permissioned Builder Service
                         }
                     }
                     <span class="comment">// decide event
-                    </span>BuilderEventType::HotshotDecide {
-                        latest_decide_view_num,
+                    </span>EventType::Decide {
                         block_size: <span class="kw">_</span>,
+                        leaf_chain,
+                        qc: <span class="kw">_</span>,
                     } =&gt; {
+                        <span class="kw">let </span>latest_decide_view_num = leaf_chain[<span class="number">0</span>].leaf.view_number();
                         handle_decide_event(<span class="kw-2">&amp;</span>decide_sender, latest_decide_view_num).<span class="kw">await</span>;
                     }
                     <span class="comment">// DA proposal event
-                    </span>BuilderEventType::HotshotDaProposal { proposal, sender } =&gt; {
+                    </span>EventType::DaProposal { proposal, sender } =&gt; {
                         <span class="comment">// get the leader for current view
                         </span><span class="kw">let </span>leader = membership.leader(proposal.data.view_number);
                         <span class="comment">// get the committee mstatked node count
@@ -2057,7 +2037,7 @@ Running Non-Permissioned Builder Service
                         .<span class="kw">await</span>;
                     }
                     <span class="comment">// QC proposal event
-                    </span>BuilderEventType::HotshotQuorumProposal { proposal, sender } =&gt; {
+                    </span>EventType::QuorumProposal { proposal, sender } =&gt; {
                         <span class="comment">// get the leader for current view
                         </span><span class="kw">let </span>leader = membership.leader(proposal.data.view_number);
                         handle_qc_event(<span class="kw-2">&amp;</span>qc_sender, Arc::new(proposal), sender, leader).<span class="kw">await</span>;
