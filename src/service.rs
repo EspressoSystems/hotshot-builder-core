@@ -903,7 +903,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                         handle_qc_event(&qc_sender, Arc::new(proposal), sender, leader).await;
                     }
                     _ => {
-                        tracing::error!("Unhandled event from Builder");
+                        tracing::debug!("Unhandled event from Builder");
                     }
                 }
             }
