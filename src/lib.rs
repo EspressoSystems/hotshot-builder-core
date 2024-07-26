@@ -21,7 +21,11 @@ pub mod service;
 pub mod testing;
 
 use async_compatibility_layer::channel::UnboundedReceiver;
-use hotshot_builder_api::v0_2::builder::BuildError;
+use hotshot_builder_api::v0_1::builder::BuildError;
+use hotshot_types::{
+    traits::node_implementation::NodeType, utils::BuilderCommitment, vid::VidCommitment,
+};
+
 #[derive(Debug)]
 pub enum WaitAndKeep<T> {
     Keep(T),
@@ -43,5 +47,34 @@ impl<T: Clone> WaitAndKeep<T> {
                 got
             }
         }
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct BlockId<Types: NodeType> {
+    hash: BuilderCommitment,
+    view: Types::Time,
+}
+
+impl<Types: NodeType> std::fmt::Display for BlockId<Types> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Block({}@{})",
+            hex::encode(self.hash.as_ref()),
+            *self.view
+        )
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct BuilderStateId<Types: NodeType> {
+    parent_commitment: VidCommitment,
+    view: Types::Time,
+}
+
+impl<Types: NodeType> std::fmt::Display for BuilderStateId<Types> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BuilderState({}@{})", self.parent_commitment, *self.view)
     }
 }

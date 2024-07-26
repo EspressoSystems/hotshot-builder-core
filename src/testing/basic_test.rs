@@ -28,7 +28,6 @@ mod tests {
         simple_vote::QuorumData,
         traits::block_contents::{vid_commitment, BlockHeader},
         utils::BuilderCommitment,
-        vid::VidCommitment,
     };
 
     use hotshot_example_types::{
@@ -41,6 +40,7 @@ mod tests {
         TransactionSource,
     };
     use crate::service::{handle_received_txns, GlobalState, ReceivedTransaction};
+    use crate::BuilderStateId;
     use async_lock::RwLock;
     use async_std::task;
     use committable::{Commitment, CommitmentBoundsArkless, Committable};
@@ -127,7 +127,7 @@ mod tests {
         #[allow(clippy::type_complexity)]
         let mut sreq_msgs: Vec<(
             UnboundedReceiver<ResponseMessage>,
-            (VidCommitment, ViewNumber),
+            BuilderStateId<TestTypes>,
             MessageType<TestTypes>,
         )> = Vec::new();
         // storing response messages
@@ -324,8 +324,11 @@ mod tests {
 
             let (response_sender, response_receiver) = unbounded();
             let request_message = MessageType::<TestTypes>::RequestMessage(RequestMessage {
-                requested_vid_commitment,
-                requested_view_number: i as u64,
+                state_id: crate::BuilderStateId {
+                    parent_commitment: requested_vid_commitment,
+                    view: <TestTypes as NodeType>::Time::new(i as u64),
+                },
+
                 response_channel: response_sender,
             });
 
@@ -334,7 +337,10 @@ mod tests {
             sqc_msgs.push(sqc_msg);
             sreq_msgs.push((
                 response_receiver,
-                (requested_vid_commitment, ViewNumber::new(i as u64)),
+                BuilderStateId {
+                    parent_commitment: requested_vid_commitment,
+                    view: ViewNumber::new(i as u64),
+                },
                 request_message,
             ));
         }

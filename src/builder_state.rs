@@ -13,7 +13,10 @@ use hotshot_types::{
 
 use committable::{Commitment, Committable};
 
-use crate::service::{GlobalState, ReceivedTransaction};
+use crate::{
+    service::{GlobalState, ReceivedTransaction},
+    BlockId, BuilderStateId,
+};
 use async_broadcast::broadcast;
 use async_broadcast::Receiver as BroadcastReceiver;
 use async_broadcast::Sender as BroadcastSender;
@@ -65,9 +68,8 @@ pub struct QCMessage<TYPES: NodeType> {
 }
 /// Request Message to be put on the request channel
 #[derive(Clone, Debug)]
-pub struct RequestMessage {
-    pub requested_vid_commitment: VidCommitment,
-    pub requested_view_number: u64,
+pub struct RequestMessage<Types: NodeType> {
+    pub state_id: BuilderStateId<Types>,
     pub response_channel: UnboundedSender<ResponseMessage>,
 }
 pub enum TriggerStatus {
@@ -78,7 +80,7 @@ pub enum TriggerStatus {
 /// Response Message to be put on the response channel
 #[derive(Debug)]
 pub struct BuildBlockInfo<TYPES: NodeType> {
-    pub builder_hash: BuilderCommitment,
+    pub id: BlockId<TYPES>,
     pub block_size: u64,
     pub offered_fee: u64,
     pub block_payload: TYPES::BlockPayload,
@@ -457,8 +459,10 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
 
         // register the spawned builder state to spawned_builder_states in the global state
         self.global_state.write_arc().await.register_builder_state(
-            self.built_from_proposed_block.vid_commitment,
-            self.built_from_proposed_block.view_number,
+            BuilderStateId {
+                parent_commitment: self.built_from_proposed_block.vid_commitment,
+                view: self.built_from_proposed_block.view_number,
+            },
             req_sender,
         );
 
@@ -470,8 +474,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
                                     fields(builder_built_from_proposed_block = %self.built_from_proposed_block))]
     async fn build_block(
         &mut self,
-        matching_vid: VidCommitment,
-        requested_view_number: TYPES::Time,
+        state_id: BuilderStateId<TYPES>,
     ) -> Option<BuildBlockInfo<TYPES>> {
         let timeout_after = Instant::now() + self.maximize_txn_capture_timeout;
         let sleep_interval = self.maximize_txn_capture_timeout / 10;
@@ -501,9 +504,9 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
 
             // insert the recently built block into the builder commitments
             self.builder_commitments.insert((
-                matching_vid,
+                state_id.parent_commitment,
                 builder_hash.clone(),
-                requested_view_number,
+                state_id.view,
             ));
 
             let encoded_txns: Vec<u8> = payload.encode().to_vec();
@@ -541,7 +544,10 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             );
 
             Some(BuildBlockInfo {
-                builder_hash,
+                id: BlockId {
+                    view: self.built_from_proposed_block.view_number,
+                    hash: builder_hash,
+                },
                 block_size,
                 offered_fee,
                 block_payload: payload,
@@ -555,46 +561,39 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         }
     }
 
-    async fn process_block_request(&mut self, req: RequestMessage) {
-        let requested_vid_commitment = req.requested_vid_commitment;
-        let requested_view_number =
-            <<TYPES as NodeType>::Time as ConsensusTime>::new(req.requested_view_number);
+    async fn process_block_request(&mut self, req: RequestMessage<TYPES>) {
         // If a spawned clone is active then it will handle the request, otherwise the highest view num builder will handle
-        if (requested_vid_commitment == self.built_from_proposed_block.vid_commitment
-            && requested_view_number == self.built_from_proposed_block.view_number)
+        if (req.state_id.parent_commitment == self.built_from_proposed_block.vid_commitment
+            && req.state_id.view == self.built_from_proposed_block.view_number)
             || (self.built_from_proposed_block.view_number.u64()
                 == self
                     .global_state
                     .read_arc()
                     .await
                     .highest_view_num_builder_id
-                    .1
+                    .view
                     .u64())
         {
             tracing::info!(
-                "Request handled by builder with view {:?} for (parent {:?}, view_num: {:?})",
+                "Request for parent {} handled by builder with view {:?}",
+                req.state_id,
                 self.built_from_proposed_block.view_number,
-                requested_vid_commitment,
-                requested_view_number
             );
-            let response = self
-                .build_block(requested_vid_commitment, requested_view_number)
-                .await;
+            let response = self.build_block(req.state_id.clone()).await;
 
             match response {
                 Some(response) => {
                     // form the response message
                     let response_msg = ResponseMessage {
-                        builder_hash: response.builder_hash.clone(),
+                        builder_hash: response.id.hash.clone(),
                         block_size: response.block_size,
                         offered_fee: response.offered_fee,
                     };
 
-                    let builder_hash = response.builder_hash.clone();
+                    let builder_hash = response.id.hash.clone();
                     self.global_state.write_arc().await.update_global_state(
+                        req.state_id.clone(),
                         response,
-                        requested_vid_commitment,
-                        requested_view_number,
                         response_msg.clone(),
                     );
 
@@ -736,7 +735,7 @@ pub enum MessageType<TYPES: NodeType> {
     DecideMessage(DecideMessage<TYPES>),
     DaProposalMessage(DaProposalMessage<TYPES>),
     QCMessage(QCMessage<TYPES>),
-    RequestMessage(RequestMessage),
+    RequestMessage(RequestMessage<TYPES>),
 }
 
 #[allow(clippy::too_many_arguments)]
