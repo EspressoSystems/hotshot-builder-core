@@ -28,8 +28,8 @@ use crate::builder_state::{
 use crate::builder_state::{MessageType, RequestMessage, ResponseMessage};
 use crate::WaitAndKeep;
 use anyhow::{anyhow, Context};
-use async_broadcast::Sender as BroadcastSender;
 pub use async_broadcast::{broadcast, RecvError, TryRecvError};
+use async_broadcast::{Sender as BroadcastSender, TrySendError};
 use async_compatibility_layer::{
     art::async_sleep,
     art::async_timeout,
@@ -228,7 +228,7 @@ impl<Types: NodeType> GlobalState<Types> {
     pub async fn submit_client_txns(
         &self,
         txns: Vec<<Types as NodeType>::Transaction>,
-    ) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
+    ) -> Vec<Result<Commitment<<Types as NodeType>::Transaction>, BuildError>> {
         handle_received_txns(&self.tx_sender, txns, TransactionSource::External).await
     }
 
@@ -724,6 +724,7 @@ where
         Ok(self.builder_keys.0.clone())
     }
 }
+
 #[async_trait]
 impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
     async fn submit_txns(
@@ -747,7 +748,10 @@ impl<Types: NodeType> AcceptsTxnSubmits<Types> for ProxyGlobalState<Types> {
             response
         );
 
-        response
+        // NOTE: ideally we want to respond with original Vec<Result>
+        // instead of Result<Vec> not to loose any information,
+        //  but this requires changes to builder API
+        response.into_iter().collect()
     }
 }
 #[async_trait]
@@ -858,15 +862,8 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
                     }
                     // tx event
                     EventType::Transactions { transactions } => {
-                        if let Err(e) = handle_received_txns(
-                            &tx_sender,
-                            transactions,
-                            TransactionSource::HotShot,
-                        )
-                        .await
-                        {
-                            tracing::warn!("Failed to handle transactions; {:?}", e);
-                        }
+                        handle_received_txns(&tx_sender, transactions, TransactionSource::HotShot)
+                            .await;
                     }
                     // decide event
                     EventType::Decide {
@@ -959,15 +956,8 @@ pub async fn run_permissioned_standalone_builder_service<
                     }
                     // tx event
                     EventType::Transactions { transactions } => {
-                        if let Err(e) = handle_received_txns(
-                            &tx_sender,
-                            transactions,
-                            TransactionSource::HotShot,
-                        )
-                        .await
-                        {
-                            tracing::warn!("Failed to handle transactions; {:?}", e);
-                        }
+                        handle_received_txns(&tx_sender, transactions, TransactionSource::HotShot)
+                            .await;
                     }
                     // decide event
                     EventType::Decide { leaf_chain, .. } => {
@@ -1115,23 +1105,39 @@ pub(crate) async fn handle_received_txns<Types: NodeType>(
     tx_sender: &BroadcastSender<Arc<ReceivedTransaction<Types>>>,
     txns: Vec<Types::Transaction>,
     source: TransactionSource,
-) -> Result<Vec<Commitment<<Types as NodeType>::Transaction>>, BuildError> {
+) -> Vec<Result<Commitment<<Types as NodeType>::Transaction>, BuildError>> {
     let mut results = Vec::with_capacity(txns.len());
     let time_in = Instant::now();
     for tx in txns.into_iter() {
         let commit = tx.commit();
-        results.push(commit);
         let res = tx_sender
-            .broadcast(Arc::new(ReceivedTransaction {
+            .try_broadcast(Arc::new(ReceivedTransaction {
                 tx,
                 source: source.clone(),
                 commit,
                 time_in,
             }))
-            .await;
-        if res.is_err() {
-            tracing::warn!("failed to broadcast txn with commit {:?}", commit);
-        }
+            .inspect(|val| {
+                if let Some(evicted_txn) = val {
+                    tracing::warn!(
+                        "Overflow mode enabled, transaction {} evicted",
+                        evicted_txn.commit
+                    );
+                }
+            })
+            .map(|_| commit)
+            .inspect_err(|err| {
+                tracing::warn!("Failed to broadcast txn with commit {:?}: {}", commit, err);
+            })
+            .map_err(|err| match err {
+                TrySendError::Full(_) => BuildError::Error {
+                    message: "Too many transactions".to_owned(),
+                },
+                e => BuildError::Error {
+                    message: format!("Internal error when submitting transaction: {}", e),
+                },
+            });
+        results.push(res);
     }
-    Ok(results)
+    results
 }

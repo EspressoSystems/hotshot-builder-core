@@ -304,9 +304,11 @@ mod tests {
             // validate the signature before pushing the message to the builder_state channels
             // currently this step happens in the service.rs, wheneve we receiver an hotshot event
             tracing::debug!("Sending transaction message: {:?}", tx);
-            handle_received_txns(&tx_sender, vec![tx.clone()], TransactionSource::HotShot)
-                .await
-                .unwrap();
+            for res in
+                handle_received_txns(&tx_sender, vec![tx.clone()], TransactionSource::HotShot).await
+            {
+                res.unwrap();
+            }
             da_sender
                 .broadcast(MessageType::DaProposalMessage(sda_msg.clone()))
                 .await
