@@ -35,3 +35,6 @@ hex = "0.4.3"
 
 [dev-dependencies]
 hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "rc-0.5.64" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(async_executor_impl, values("async-std", "tokio"))'] }
