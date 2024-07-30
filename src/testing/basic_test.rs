@@ -376,7 +376,10 @@ mod tests {
             builder_state.event_loop();
         });
 
+        #[cfg(async_executor_impl = "tokio")]
         handle.await.unwrap();
+        #[cfg(async_executor_impl = "async-std")]
+        handle.await;
 
         // go through the request messages in sreq_msgs and send the request message
         for req_msg in sreq_msgs.iter() {
