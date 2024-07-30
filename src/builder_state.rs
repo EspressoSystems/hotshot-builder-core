@@ -178,7 +178,7 @@ pub struct BuilderState<TYPES: NodeType> {
     pub total_nodes: NonZeroUsize,
 
     /// locally spawned builder Commitements
-    pub builder_commitments: HashSet<(VidCommitment, BuilderCommitment, TYPES::Time)>,
+    pub builder_commitments: HashSet<(BuilderStateId<TYPES>, BuilderCommitment)>,
 
     /// timeout for maximising the txns in the block
     pub maximize_txn_capture_timeout: Duration,
@@ -504,9 +504,8 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
 
             // insert the recently built block into the builder commitments
             self.builder_commitments.insert((
-                state_id.parent_commitment,
+                state_id,
                 builder_hash.clone(),
-                state_id.view,
             ));
 
             let encoded_txns: Vec<u8> = payload.encode().to_vec();

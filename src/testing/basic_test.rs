@@ -376,7 +376,7 @@ mod tests {
             builder_state.event_loop();
         });
 
-        handle.await;
+        handle.await.unwrap();
 
         // go through the request messages in sreq_msgs and send the request message
         for req_msg in sreq_msgs.iter() {
