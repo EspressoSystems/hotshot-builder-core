@@ -15,6 +15,7 @@ use hotshot_types::{
         block_contents::BlockPayload,
         consensus_api::ConsensusApi,
         election::Membership,
+        network::Topic,
         node_implementation::{ConsensusTime, NodeType},
         signature_key::{BuilderSignatureKey, SignatureKey},
     },
@@ -807,6 +808,7 @@ async fn connect_to_events_service<Types: NodeType>(
             GeneralStaticCommittee::<Types, <Types as NodeType>::SignatureKey>::create_election(
                 known_node_with_stake.clone(),
                 known_node_with_stake.clone(),
+                Topic::Global,
                 0,
             );
 
