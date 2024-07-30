@@ -503,10 +503,8 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             let txn_count = self.tx_queue.len();
 
             // insert the recently built block into the builder commitments
-            self.builder_commitments.insert((
-                state_id,
-                builder_hash.clone(),
-            ));
+            self.builder_commitments
+                .insert((state_id, builder_hash.clone()));
 
             let encoded_txns: Vec<u8> = payload.encode().to_vec();
             let block_size: u64 = encoded_txns.len() as u64;
