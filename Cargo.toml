@@ -30,9 +30,11 @@ tide-disco = "0.9"
 tokio = "1"
 tracing = "0.1"
 vbs = "0.1"
+lru = "0.12.3"
+hex = "0.4.3"
 
 [dev-dependencies]
 hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.67" }
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(async_executor_impl, values("async-std"))', 'cfg(async_executor_impl, values("tokio"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(async_executor_impl, values("async-std", "tokio"))'] }
