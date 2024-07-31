@@ -855,47 +855,6 @@
 <a href="#855" id="855">855</a>
 <a href="#856" id="856">856</a>
 <a href="#857" id="857">857</a>
-<a href="#858" id="858">858</a>
-<a href="#859" id="859">859</a>
-<a href="#860" id="860">860</a>
-<a href="#861" id="861">861</a>
-<a href="#862" id="862">862</a>
-<a href="#863" id="863">863</a>
-<a href="#864" id="864">864</a>
-<a href="#865" id="865">865</a>
-<a href="#866" id="866">866</a>
-<a href="#867" id="867">867</a>
-<a href="#868" id="868">868</a>
-<a href="#869" id="869">869</a>
-<a href="#870" id="870">870</a>
-<a href="#871" id="871">871</a>
-<a href="#872" id="872">872</a>
-<a href="#873" id="873">873</a>
-<a href="#874" id="874">874</a>
-<a href="#875" id="875">875</a>
-<a href="#876" id="876">876</a>
-<a href="#877" id="877">877</a>
-<a href="#878" id="878">878</a>
-<a href="#879" id="879">879</a>
-<a href="#880" id="880">880</a>
-<a href="#881" id="881">881</a>
-<a href="#882" id="882">882</a>
-<a href="#883" id="883">883</a>
-<a href="#884" id="884">884</a>
-<a href="#885" id="885">885</a>
-<a href="#886" id="886">886</a>
-<a href="#887" id="887">887</a>
-<a href="#888" id="888">888</a>
-<a href="#889" id="889">889</a>
-<a href="#890" id="890">890</a>
-<a href="#891" id="891">891</a>
-<a href="#892" id="892">892</a>
-<a href="#893" id="893">893</a>
-<a href="#894" id="894">894</a>
-<a href="#895" id="895">895</a>
-<a href="#896" id="896">896</a>
-<a href="#897" id="897">897</a>
-<a href="#898" id="898">898</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DaProposal, Leaf, QuorumProposal},
     message::Proposal,
@@ -911,7 +870,10 @@
 
 <span class="kw">use </span>committable::{Commitment, Committable};
 
-<span class="kw">use </span><span class="kw">crate</span>::service::{GlobalState, ReceivedTransaction};
+<span class="kw">use crate</span>::{
+    service::{GlobalState, ReceivedTransaction},
+    BlockId, BuilderStateId,
+};
 <span class="kw">use </span>async_broadcast::broadcast;
 <span class="kw">use </span>async_broadcast::Receiver <span class="kw">as </span>BroadcastReceiver;
 <span class="kw">use </span>async_broadcast::Sender <span class="kw">as </span>BroadcastSender;
@@ -919,7 +881,6 @@
 <span class="kw">use </span>async_compatibility_layer::{art::async_sleep, channel::OneShotSender};
 <span class="kw">use </span>async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
 <span class="kw">use </span>async_lock::RwLock;
-<span class="kw">use </span>async_trait::async_trait;
 <span class="kw">use </span>core::panic;
 <span class="kw">use </span>futures::StreamExt;
 
@@ -964,9 +925,8 @@
 }
 <span class="doccomment">/// Request Message to be put on the request channel
 </span><span class="attr">#[derive(Clone, Debug)]
-</span><span class="kw">pub struct </span>RequestMessage {
-    <span class="kw">pub </span>requested_vid_commitment: VidCommitment,
-    <span class="kw">pub </span>requested_view_number: u64,
+</span><span class="kw">pub struct </span>RequestMessage&lt;Types: NodeType&gt; {
+    <span class="kw">pub </span>state_id: BuilderStateId&lt;Types&gt;,
     <span class="kw">pub </span>response_channel: UnboundedSender&lt;ResponseMessage&gt;,
 }
 <span class="kw">pub enum </span>TriggerStatus {
@@ -977,7 +937,7 @@
 <span class="doccomment">/// Response Message to be put on the response channel
 </span><span class="attr">#[derive(Debug)]
 </span><span class="kw">pub struct </span>BuildBlockInfo&lt;TYPES: NodeType&gt; {
-    <span class="kw">pub </span>builder_hash: BuilderCommitment,
+    <span class="kw">pub </span>id: BlockId&lt;TYPES&gt;,
     <span class="kw">pub </span>block_size: u64,
     <span class="kw">pub </span>offered_fee: u64,
     <span class="kw">pub </span>block_payload: TYPES::BlockPayload,
@@ -1075,7 +1035,7 @@
     </span><span class="kw">pub </span>total_nodes: NonZeroUsize,
 
     <span class="doccomment">/// locally spawned builder Commitements
-    </span><span class="kw">pub </span>builder_commitments: HashSet&lt;(VidCommitment, BuilderCommitment, TYPES::Time)&gt;,
+    </span><span class="kw">pub </span>builder_commitments: HashSet&lt;(BuilderStateId&lt;TYPES&gt;, BuilderCommitment)&gt;,
 
     <span class="doccomment">/// timeout for maximising the txns in the block
     </span><span class="kw">pub </span>maximize_txn_capture_timeout: Duration,
@@ -1097,43 +1057,7 @@
     </span><span class="kw">pub </span>next_txn_garbage_collect_time: Instant,
 }
 
-<span class="doccomment">/// Trait to hold the helper functions for the builder
-</span><span class="attr">#[async_trait]
-</span><span class="kw">pub trait </span>BuilderProgress&lt;TYPES: NodeType&gt; {
-    <span class="doccomment">/// process the DA proposal
-    </span><span class="kw">async fn </span>process_da_proposal(<span class="kw-2">&amp;mut </span><span class="self">self</span>, da_msg: DaProposalMessage&lt;TYPES&gt;);
-
-    <span class="doccomment">/// process the quorum proposal
-    </span><span class="kw">async fn </span>process_quorum_proposal(<span class="kw-2">&amp;mut </span><span class="self">self</span>, qc_msg: QCMessage&lt;TYPES&gt;);
-
-    <span class="doccomment">/// process the decide event
-    </span><span class="kw">async fn </span>process_decide_event(<span class="kw-2">&amp;mut </span><span class="self">self</span>, decide_msg: DecideMessage&lt;TYPES&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Status&gt;;
-
-    <span class="doccomment">/// spawn a clone of builder
-    </span><span class="kw">async fn </span>spawn_clone(
-        <span class="self">self</span>,
-        da_proposal: DAProposalInfo&lt;TYPES&gt;,
-        quorum_proposal: Arc&lt;Proposal&lt;TYPES, QuorumProposal&lt;TYPES&gt;&gt;&gt;,
-        leader: TYPES::SignatureKey,
-        req_sender: BroadcastSender&lt;MessageType&lt;TYPES&gt;&gt;,
-    );
-
-    <span class="doccomment">/// build a block
-    </span><span class="kw">async fn </span>build_block(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        matching_builder_commitment: VidCommitment,
-        matching_view_number: TYPES::Time,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;BuildBlockInfo&lt;TYPES&gt;&gt;;
-
-    <span class="doccomment">/// Event Loop
-    </span><span class="kw">fn </span>event_loop(<span class="self">self</span>);
-
-    <span class="doccomment">/// process the block request
-    </span><span class="kw">async fn </span>process_block_request(<span class="kw-2">&amp;mut </span><span class="self">self</span>, req: RequestMessage);
-}
-
-<span class="attr">#[async_trait]
-</span><span class="kw">impl</span>&lt;TYPES: NodeType&gt; BuilderProgress&lt;TYPES&gt; <span class="kw">for </span>BuilderState&lt;TYPES&gt; {
+<span class="kw">impl</span>&lt;TYPES: NodeType&gt; BuilderState&lt;TYPES&gt; {
     <span class="doccomment">/// processing the DA proposal
     </span><span class="attr">#[tracing::instrument(skip_all, name = <span class="string">"process da proposal"</span>,
                                     fields(builder_built_from_proposed_block = %<span class="self">self</span>.built_from_proposed_block))]
@@ -1392,8 +1316,10 @@
 
         <span class="comment">// register the spawned builder state to spawned_builder_states in the global state
         </span><span class="self">self</span>.global_state.write_arc().<span class="kw">await</span>.register_builder_state(
-            <span class="self">self</span>.built_from_proposed_block.vid_commitment,
-            <span class="self">self</span>.built_from_proposed_block.view_number,
+            BuilderStateId {
+                parent_commitment: <span class="self">self</span>.built_from_proposed_block.vid_commitment,
+                view: <span class="self">self</span>.built_from_proposed_block.view_number,
+            },
             req_sender,
         );
 
@@ -1405,8 +1331,7 @@
                                     fields(builder_built_from_proposed_block = %<span class="self">self</span>.built_from_proposed_block))]
     </span><span class="kw">async fn </span>build_block(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        matching_vid: VidCommitment,
-        requested_view_number: TYPES::Time,
+        state_id: BuilderStateId&lt;TYPES&gt;,
     ) -&gt; <span class="prelude-ty">Option</span>&lt;BuildBlockInfo&lt;TYPES&gt;&gt; {
         <span class="kw">let </span>timeout_after = Instant::now() + <span class="self">self</span>.maximize_txn_capture_timeout;
         <span class="kw">let </span>sleep_interval = <span class="self">self</span>.maximize_txn_capture_timeout / <span class="number">10</span>;
@@ -1435,11 +1360,8 @@
             </span><span class="kw">let </span>txn_count = <span class="self">self</span>.tx_queue.len();
 
             <span class="comment">// insert the recently built block into the builder commitments
-            </span><span class="self">self</span>.builder_commitments.insert((
-                matching_vid,
-                builder_hash.clone(),
-                requested_view_number,
-            ));
+            </span><span class="self">self</span>.builder_commitments
+                .insert((state_id, builder_hash.clone()));
 
             <span class="kw">let </span>encoded_txns: Vec&lt;u8&gt; = payload.encode().to_vec();
             <span class="kw">let </span>block_size: u64 = encoded_txns.len() <span class="kw">as </span>u64;
@@ -1476,7 +1398,10 @@
             );
 
             <span class="prelude-val">Some</span>(BuildBlockInfo {
-                builder_hash,
+                id: BlockId {
+                    view: <span class="self">self</span>.built_from_proposed_block.view_number,
+                    hash: builder_hash,
+                },
                 block_size,
                 offered_fee,
                 block_payload: payload,
@@ -1490,46 +1415,39 @@
         </span>}
     }
 
-    <span class="kw">async fn </span>process_block_request(<span class="kw-2">&amp;mut </span><span class="self">self</span>, req: RequestMessage) {
-        <span class="kw">let </span>requested_vid_commitment = req.requested_vid_commitment;
-        <span class="kw">let </span>requested_view_number =
-            &lt;&lt;TYPES <span class="kw">as </span>NodeType&gt;::Time <span class="kw">as </span>ConsensusTime&gt;::new(req.requested_view_number);
+    <span class="kw">async fn </span>process_block_request(<span class="kw-2">&amp;mut </span><span class="self">self</span>, req: RequestMessage&lt;TYPES&gt;) {
         <span class="comment">// If a spawned clone is active then it will handle the request, otherwise the highest view num builder will handle
-        </span><span class="kw">if </span>(requested_vid_commitment == <span class="self">self</span>.built_from_proposed_block.vid_commitment
-            &amp;&amp; requested_view_number == <span class="self">self</span>.built_from_proposed_block.view_number)
+        </span><span class="kw">if </span>(req.state_id.parent_commitment == <span class="self">self</span>.built_from_proposed_block.vid_commitment
+            &amp;&amp; req.state_id.view == <span class="self">self</span>.built_from_proposed_block.view_number)
             || (<span class="self">self</span>.built_from_proposed_block.view_number.u64()
                 == <span class="self">self
                     </span>.global_state
                     .read_arc()
                     .<span class="kw">await
                     </span>.highest_view_num_builder_id
-                    .<span class="number">1
-                    </span>.u64())
+                    .view
+                    .u64())
         {
             <span class="macro">tracing::info!</span>(
-                <span class="string">"Request handled by builder with view {:?} for (parent {:?}, view_num: {:?})"</span>,
+                <span class="string">"Request for parent {} handled by builder with view {:?}"</span>,
+                req.state_id,
                 <span class="self">self</span>.built_from_proposed_block.view_number,
-                requested_vid_commitment,
-                requested_view_number
             );
-            <span class="kw">let </span>response = <span class="self">self
-                </span>.build_block(requested_vid_commitment, requested_view_number)
-                .<span class="kw">await</span>;
+            <span class="kw">let </span>response = <span class="self">self</span>.build_block(req.state_id.clone()).<span class="kw">await</span>;
 
             <span class="kw">match </span>response {
                 <span class="prelude-val">Some</span>(response) =&gt; {
                     <span class="comment">// form the response message
                     </span><span class="kw">let </span>response_msg = ResponseMessage {
-                        builder_hash: response.builder_hash.clone(),
+                        builder_hash: response.id.hash.clone(),
                         block_size: response.block_size,
                         offered_fee: response.offered_fee,
                     };
 
-                    <span class="kw">let </span>builder_hash = response.builder_hash.clone();
+                    <span class="kw">let </span>builder_hash = response.id.hash.clone();
                     <span class="self">self</span>.global_state.write_arc().<span class="kw">await</span>.update_global_state(
+                        req.state_id.clone(),
                         response,
-                        requested_vid_commitment,
-                        requested_view_number,
                         response_msg.clone(),
                     );
 
@@ -1566,7 +1484,7 @@
     }
     <span class="attr">#[tracing::instrument(skip_all, name = <span class="string">"event loop"</span>,
                                     fields(builder_built_from_proposed_block = %<span class="self">self</span>.built_from_proposed_block))]
-    </span><span class="kw">fn </span>event_loop(<span class="kw-2">mut </span><span class="self">self</span>) {
+    </span><span class="kw">pub fn </span>event_loop(<span class="kw-2">mut </span><span class="self">self</span>) {
         <span class="kw">let </span>_builder_handle = async_spawn(<span class="kw">async move </span>{
             <span class="kw">loop </span>{
                 <span class="macro">tracing::debug!</span>(
@@ -1671,7 +1589,7 @@
     DecideMessage(DecideMessage&lt;TYPES&gt;),
     DaProposalMessage(DaProposalMessage&lt;TYPES&gt;),
     QCMessage(QCMessage&lt;TYPES&gt;),
-    RequestMessage(RequestMessage),
+    RequestMessage(RequestMessage&lt;TYPES&gt;),
 }
 
 <span class="attr">#[allow(clippy::too_many_arguments)]

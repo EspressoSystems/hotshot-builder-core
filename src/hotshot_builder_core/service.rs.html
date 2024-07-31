@@ -1091,60 +1091,11 @@
 <a href="#1091" id="1091">1091</a>
 <a href="#1092" id="1092">1092</a>
 <a href="#1093" id="1093">1093</a>
-<a href="#1094" id="1094">1094</a>
-<a href="#1095" id="1095">1095</a>
-<a href="#1096" id="1096">1096</a>
-<a href="#1097" id="1097">1097</a>
-<a href="#1098" id="1098">1098</a>
-<a href="#1099" id="1099">1099</a>
-<a href="#1100" id="1100">1100</a>
-<a href="#1101" id="1101">1101</a>
-<a href="#1102" id="1102">1102</a>
-<a href="#1103" id="1103">1103</a>
-<a href="#1104" id="1104">1104</a>
-<a href="#1105" id="1105">1105</a>
-<a href="#1106" id="1106">1106</a>
-<a href="#1107" id="1107">1107</a>
-<a href="#1108" id="1108">1108</a>
-<a href="#1109" id="1109">1109</a>
-<a href="#1110" id="1110">1110</a>
-<a href="#1111" id="1111">1111</a>
-<a href="#1112" id="1112">1112</a>
-<a href="#1113" id="1113">1113</a>
-<a href="#1114" id="1114">1114</a>
-<a href="#1115" id="1115">1115</a>
-<a href="#1116" id="1116">1116</a>
-<a href="#1117" id="1117">1117</a>
-<a href="#1118" id="1118">1118</a>
-<a href="#1119" id="1119">1119</a>
-<a href="#1120" id="1120">1120</a>
-<a href="#1121" id="1121">1121</a>
-<a href="#1122" id="1122">1122</a>
-<a href="#1123" id="1123">1123</a>
-<a href="#1124" id="1124">1124</a>
-<a href="#1125" id="1125">1125</a>
-<a href="#1126" id="1126">1126</a>
-<a href="#1127" id="1127">1127</a>
-<a href="#1128" id="1128">1128</a>
-<a href="#1129" id="1129">1129</a>
-<a href="#1130" id="1130">1130</a>
-<a href="#1131" id="1131">1131</a>
-<a href="#1132" id="1132">1132</a>
-<a href="#1133" id="1133">1133</a>
-<a href="#1134" id="1134">1134</a>
-<a href="#1135" id="1135">1135</a>
-<a href="#1136" id="1136">1136</a>
-<a href="#1137" id="1137">1137</a>
-<a href="#1138" id="1138">1138</a>
-<a href="#1139" id="1139">1139</a>
-<a href="#1140" id="1140">1140</a>
-<a href="#1141" id="1141">1141</a>
-<a href="#1142" id="1142">1142</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::{Event, SystemContextHandle},
 };
-<span class="kw">use </span>hotshot_builder_api::v0_2::{
+<span class="kw">use </span>hotshot_builder_api::v0_1::{
     block_info::{AvailableBlockData, AvailableBlockHeaderInput, AvailableBlockInfo},
     builder::BuildError,
     data_source::{AcceptsTxnSubmits, BuilderDataSource},
@@ -1164,15 +1115,23 @@
     utils::BuilderCommitment,
     vid::{VidCommitment, VidPrecomputeData},
 };
+<span class="kw">use </span>lru::LruCache;
 
-<span class="kw">use </span><span class="kw">crate</span>::builder_state::{
-    BuildBlockInfo, DaProposalMessage, DecideMessage, QCMessage, TransactionSource, TriggerStatus,
-};
-<span class="kw">use </span><span class="kw">crate</span>::builder_state::{MessageType, RequestMessage, ResponseMessage};
 <span class="kw">use </span><span class="kw">crate</span>::WaitAndKeep;
+<span class="kw">use crate</span>::{
+    builder_state::{
+        BuildBlockInfo, DaProposalMessage, DecideMessage, QCMessage, TransactionSource,
+        TriggerStatus,
+    },
+    BlockId,
+};
+<span class="kw">use crate</span>::{
+    builder_state::{MessageType, RequestMessage, ResponseMessage},
+    BuilderStateId,
+};
 <span class="kw">use </span>anyhow::{anyhow, Context};
-<span class="kw">use </span>async_broadcast::Sender <span class="kw">as </span>BroadcastSender;
 <span class="kw">pub use </span>async_broadcast::{broadcast, RecvError, TryRecvError};
+<span class="kw">use </span>async_broadcast::{Sender <span class="kw">as </span>BroadcastSender, TrySendError};
 <span class="kw">use </span>async_compatibility_layer::{
     art::async_sleep,
     art::async_timeout,
@@ -1251,20 +1210,16 @@
 #[derive(Debug)]
 </span><span class="kw">pub struct </span>GlobalState&lt;Types: NodeType&gt; {
     <span class="comment">// data store for the blocks
-    </span><span class="kw">pub </span>block_hash_to_block: HashMap&lt;(BuilderCommitment, Types::Time), BlockInfo&lt;Types&gt;&gt;,
+    </span><span class="kw">pub </span>blocks: lru::LruCache&lt;BlockId&lt;Types&gt;, BlockInfo&lt;Types&gt;&gt;,
 
     <span class="comment">// registered builder states
-    </span><span class="kw">pub </span>spawned_builder_states:
-        HashMap&lt;(VidCommitment, Types::Time), BroadcastSender&lt;MessageType&lt;Types&gt;&gt;&gt;,
+    </span><span class="kw">pub </span>spawned_builder_states: HashMap&lt;BuilderStateId&lt;Types&gt;, BroadcastSender&lt;MessageType&lt;Types&gt;&gt;&gt;,
 
     <span class="comment">// builder state -&gt; last built block , it is used to respond the client
     // if the req channel times out during get_available_blocks
-    </span><span class="kw">pub </span>builder_state_to_last_built_block: HashMap&lt;(VidCommitment, Types::Time), ResponseMessage&gt;,
+    </span><span class="kw">pub </span>builder_state_to_last_built_block: HashMap&lt;BuilderStateId&lt;Types&gt;, ResponseMessage&gt;,
 
-    <span class="comment">// // scheduled GC by view number
-    // pub view_to_cleanup_targets: BTreeMap&lt;Types::Time, BuilderStatesInfo&lt;Types&gt;&gt;,
-
-    // sending a transaction from the hotshot/private mempool to the builder states
+    <span class="comment">// sending a transaction from the hotshot/private mempool to the builder states
     // NOTE: Currently, we don't differentiate between the transactions from the hotshot and the private mempool
     </span><span class="kw">pub </span>tx_sender: BroadcastSender&lt;Arc&lt;ReceivedTransaction&lt;Types&gt;&gt;&gt;,
 
@@ -1272,7 +1227,7 @@
     </span><span class="kw">pub </span>last_garbage_collected_view_num: Types::Time,
 
     <span class="comment">// highest view running builder task
-    </span><span class="kw">pub </span>highest_view_num_builder_id: (VidCommitment, Types::Time),
+    </span><span class="kw">pub </span>highest_view_num_builder_id: BuilderStateId&lt;Types&gt;,
 }
 
 <span class="kw">impl</span>&lt;Types: NodeType&gt; GlobalState&lt;Types&gt; {
@@ -1286,80 +1241,77 @@
         _buffer_view_num_count: u64,
     ) -&gt; <span class="self">Self </span>{
         <span class="kw">let </span><span class="kw-2">mut </span>spawned_builder_states = HashMap::new();
-        spawned_builder_states.insert(
-            (bootstrapped_builder_state_id, bootstrapped_view_num),
-            bootstrap_sender.clone(),
-        );
+        <span class="kw">let </span>bootstrap_id = BuilderStateId {
+            parent_commitment: bootstrapped_builder_state_id,
+            view: bootstrapped_view_num,
+        };
+        spawned_builder_states.insert(bootstrap_id.clone(), bootstrap_sender.clone());
         GlobalState {
-            block_hash_to_block: Default::default(),
+            blocks: LruCache::new(NonZeroUsize::new(<span class="number">256</span>).unwrap()),
             spawned_builder_states,
             tx_sender,
             last_garbage_collected_view_num,
             builder_state_to_last_built_block: Default::default(),
-            highest_view_num_builder_id: (bootstrapped_builder_state_id, bootstrapped_view_num),
+            highest_view_num_builder_id: bootstrap_id,
         }
     }
 
     <span class="kw">pub fn </span>register_builder_state(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        vid_commmit: VidCommitment,
-        view_num: Types::Time,
+        parent_id: BuilderStateId&lt;Types&gt;,
         request_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
     ) {
         <span class="comment">// register the builder state
         </span><span class="self">self</span>.spawned_builder_states
-            .insert((vid_commmit, view_num), request_sender);
+            .insert(parent_id.clone(), request_sender);
 
         <span class="comment">// keep track of the max view number
-        </span><span class="kw">if </span>view_num &gt; <span class="self">self</span>.highest_view_num_builder_id.<span class="number">1 </span>{
-            <span class="macro">tracing::info!</span>(
-                <span class="string">"registering builder {:?}@{:?} as highest"</span>,
-                vid_commmit,
-                view_num
-            );
-            <span class="self">self</span>.highest_view_num_builder_id = (vid_commmit, view_num);
+        </span><span class="kw">if </span>parent_id.view &gt; <span class="self">self</span>.highest_view_num_builder_id.view {
+            <span class="macro">tracing::info!</span>(<span class="string">"registering builder {parent_id} as highest"</span>,);
+            <span class="self">self</span>.highest_view_num_builder_id = parent_id;
         } <span class="kw">else </span>{
             <span class="macro">tracing::warn!</span>(
-                <span class="string">"builder {:?}@{:?} created; highest registered is {:?}@{:?}"</span>,
-                vid_commmit,
-                view_num,
-                <span class="self">self</span>.highest_view_num_builder_id.<span class="number">0</span>,
-                <span class="self">self</span>.highest_view_num_builder_id.<span class="number">1
-            </span>);
+                <span class="string">"builder {parent_id} created; highest registered is {}"</span>,
+                <span class="self">self</span>.highest_view_num_builder_id,
+            );
         }
     }
 
     <span class="kw">pub fn </span>update_global_state(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        state_id: BuilderStateId&lt;Types&gt;,
         build_block_info: BuildBlockInfo&lt;Types&gt;,
-        builder_vid_commitment: VidCommitment,
-        view_num: Types::Time,
         response_msg: ResponseMessage,
     ) {
-        <span class="self">self</span>.block_hash_to_block
-            .entry((build_block_info.builder_hash, view_num))
-            .or_insert_with(|| BlockInfo {
-                block_payload: build_block_info.block_payload,
-                metadata: build_block_info.metadata,
-                vid_trigger: Arc::new(RwLock::new(<span class="prelude-val">Some</span>(build_block_info.vid_trigger))),
-                vid_receiver: Arc::new(RwLock::new(WaitAndKeep::Wait(
-                    build_block_info.vid_receiver,
-                ))),
-                offered_fee: build_block_info.offered_fee,
-            });
+        <span class="kw">if </span><span class="self">self</span>.blocks.contains(<span class="kw-2">&amp;</span>build_block_info.id) {
+            <span class="self">self</span>.blocks.promote(<span class="kw-2">&amp;</span>build_block_info.id)
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.blocks.push(
+                build_block_info.id,
+                BlockInfo {
+                    block_payload: build_block_info.block_payload,
+                    metadata: build_block_info.metadata,
+                    vid_trigger: Arc::new(RwLock::new(<span class="prelude-val">Some</span>(build_block_info.vid_trigger))),
+                    vid_receiver: Arc::new(RwLock::new(WaitAndKeep::Wait(
+                        build_block_info.vid_receiver,
+                    ))),
+                    offered_fee: build_block_info.offered_fee,
+                },
+            );
+        }
 
         <span class="comment">// update the builder state to last built block
         </span><span class="self">self</span>.builder_state_to_last_built_block
-            .insert((builder_vid_commitment, view_num), response_msg);
+            .insert(state_id, response_msg);
     }
 
     <span class="comment">// remove the builder state handles based on the decide event
     </span><span class="kw">pub fn </span>remove_handles(<span class="kw-2">&amp;mut </span><span class="self">self</span>, on_decide_view: Types::Time) -&gt; Types::Time {
         <span class="comment">// remove everything from the spawned builder states when view_num &lt;= on_decide_view;
         // if we don't have a highest view &gt; decide, use highest view as cutoff.
-        </span><span class="kw">let </span>cutoff = std::cmp::min(<span class="self">self</span>.highest_view_num_builder_id.<span class="number">1</span>, on_decide_view);
+        </span><span class="kw">let </span>cutoff = std::cmp::min(<span class="self">self</span>.highest_view_num_builder_id.view, on_decide_view);
         <span class="self">self</span>.spawned_builder_states
-            .retain(|(_vid, view_num), _channel| <span class="kw-2">*</span>view_num &gt;= cutoff);
+            .retain(|id, <span class="kw">_</span>| id.view &gt;= cutoff);
 
         <span class="kw">let </span>cutoff_u64 = cutoff.u64();
         <span class="kw">let </span>gc_view = <span class="kw">if </span>cutoff_u64 &gt; <span class="number">0 </span>{ cutoff_u64 - <span class="number">1 </span>} <span class="kw">else </span>{ <span class="number">0 </span>};
@@ -1374,25 +1326,23 @@
     </span><span class="kw">pub async fn </span>submit_client_txns(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         txns: Vec&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Transaction&gt;,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Commitment&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Transaction&gt;&gt;, BuildError&gt; {
+    ) -&gt; Vec&lt;<span class="prelude-ty">Result</span>&lt;Commitment&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Transaction&gt;, BuildError&gt;&gt; {
         handle_received_txns(<span class="kw-2">&amp;</span><span class="self">self</span>.tx_sender, txns, TransactionSource::External).<span class="kw">await
     </span>}
 
     <span class="kw">pub fn </span>get_channel_for_matching_builder_or_highest_view_buider(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        key: <span class="kw-2">&amp;</span>(VidCommitment, Types::Time),
+        key: <span class="kw-2">&amp;</span>BuilderStateId&lt;Types&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>BroadcastSender&lt;MessageType&lt;Types&gt;&gt;, BuildError&gt; {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(channel) = <span class="self">self</span>.spawned_builder_states.get(key) {
-            <span class="macro">tracing::info!</span>(<span class="string">"Got matching builder for parent {:?}@{:?}"</span>, key.<span class="number">0</span>, key.<span class="number">1</span>);
+            <span class="macro">tracing::info!</span>(<span class="string">"Got matching builder for parent {}"</span>, key);
             <span class="prelude-val">Ok</span>(channel)
         } <span class="kw">else </span>{
             <span class="macro">tracing::warn!</span>(
-                <span class="string">"failed to recover builder for parent {:?}@{:?}, using higest view num builder with {:?}@{:?}"</span>,
-                key.<span class="number">0</span>,
-                key.<span class="number">1</span>,
-                <span class="self">self</span>.highest_view_num_builder_id.<span class="number">0</span>,
-                <span class="self">self</span>.highest_view_num_builder_id.<span class="number">1
-            </span>);
+                <span class="string">"failed to recover builder for parent {}, using higest view num builder with {}"</span>,
+                key,
+                <span class="self">self</span>.highest_view_num_builder_id,
+            );
             <span class="comment">// get the sender for the highest view number builder
             </span><span class="self">self</span>.spawned_builder_states
                 .get(<span class="kw-2">&amp;</span><span class="self">self</span>.highest_view_num_builder_id)
@@ -1407,7 +1357,7 @@
         <span class="comment">// iterate over the spawned builder states and check if the view number exists
         </span><span class="self">self</span>.spawned_builder_states
             .iter()
-            .any(|((_vid, view_num), _sender)| view_num == key)
+            .any(|(id, <span class="kw">_</span>)| id.view == <span class="kw-2">*</span>key)
     }
 
     <span class="kw">pub fn </span>should_view_handle_other_proposals(
@@ -1415,8 +1365,8 @@
         builder_view: <span class="kw-2">&amp;</span>Types::Time,
         proposal_view: <span class="kw-2">&amp;</span>Types::Time,
     ) -&gt; bool {
-        <span class="kw-2">*</span>builder_view == <span class="self">self</span>.highest_view_num_builder_id.<span class="number">1
-            </span>&amp;&amp; !<span class="self">self</span>.check_builder_state_existence_for_a_view(proposal_view)
+        <span class="kw-2">*</span>builder_view == <span class="self">self</span>.highest_view_num_builder_id.view
+            &amp;&amp; !<span class="self">self</span>.check_builder_state_existence_for_a_view(proposal_view)
     }
 }
 
@@ -1473,21 +1423,22 @@ Handling Builder API responses
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;AvailableBlockInfo&lt;Types&gt;&gt;, BuildError&gt; {
         <span class="kw">let </span>starting_time = Instant::now();
 
+        <span class="kw">let </span>state_id = BuilderStateId {
+            parent_commitment: <span class="kw-2">*</span>for_parent,
+            view: Types::Time::new(view_number),
+        };
+
         <span class="comment">// verify the signature
-        </span><span class="kw">if </span>!sender.validate(signature, for_parent.as_ref()) {
+        </span><span class="kw">if </span>!sender.validate(signature, state_id.parent_commitment.as_ref()) {
             <span class="macro">tracing::error!</span>(<span class="string">"Signature validation failed in get_available_blocks"</span>);
             <span class="kw">return </span><span class="prelude-val">Err</span>(BuildError::Error {
                 message: <span class="string">"Signature validation failed in get_available_blocks"</span>.to_string(),
             });
         }
 
-        <span class="macro">tracing::info!</span>(
-            <span class="string">"Requesting available blocks for (parent {:?}, view_num: {:?})"</span>,
-            for_parent,
-            view_number
-        );
+        <span class="macro">tracing::info!</span>(<span class="string">"Requesting available blocks for {state_id}"</span>,);
 
-        <span class="kw">let </span>view_num = &lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Time <span class="kw">as </span>ConsensusTime&gt;::new(view_number);
+        <span class="kw">let </span>view_num = state_id.view;
         <span class="comment">// check in the local spawned builder states
         // if it doesn't exist; there are three cases
         // 1) it has already been garbage collected (view &lt; decide) and we should return an error
@@ -1499,15 +1450,15 @@ Handling Builder API responses
             // If this `BlockBuilder` hasn't been reaped, it should have been.
             </span><span class="kw">let </span>global_state = <span class="self">self</span>.global_state.read_arc().<span class="kw">await</span>;
             <span class="kw">if </span>view_num &lt; global_state.last_garbage_collected_view_num
-                &amp;&amp; global_state.highest_view_num_builder_id.<span class="number">1
-                    </span>!= global_state.last_garbage_collected_view_num
+                &amp;&amp; global_state.highest_view_num_builder_id.view
+                    != global_state.last_garbage_collected_view_num
             {
                 <span class="macro">tracing::warn!</span>(
                     <span class="string">"Requesting for view {:?}, last decide-triggered cleanup on view {:?}, highest view num is {:?}"</span>,
                     view_num,
                     global_state.last_garbage_collected_view_num,
-                    global_state.highest_view_num_builder_id.<span class="number">1
-                </span>);
+                    global_state.highest_view_num_builder_id.view
+                );
                 <span class="kw">return </span><span class="prelude-val">Err</span>(BuildError::Error {
                     message:
                         <span class="string">"Request for available blocks for a view that has already been decided."
@@ -1518,8 +1469,7 @@ Handling Builder API responses
 
         <span class="kw">let </span>(response_sender, response_receiver) = unbounded();
         <span class="kw">let </span>req_msg = RequestMessage {
-            requested_vid_commitment: (<span class="kw-2">*</span>for_parent),
-            requested_view_number: view_number,
+            state_id: state_id.clone(),
             response_channel: response_sender,
         };
         <span class="kw">let </span>timeout_after = starting_time + <span class="self">self</span>.max_api_waiting_time;
@@ -1528,7 +1478,6 @@ Handling Builder API responses
         <span class="kw">let </span>time_to_wait_for_matching_builder = starting_time + <span class="self">self</span>.max_api_waiting_time / <span class="number">2</span>;
 
         <span class="kw">let </span><span class="kw-2">mut </span>sent = <span class="bool-val">false</span>;
-        <span class="kw">let </span>key = (<span class="kw-2">*</span>for_parent, view_num);
         <span class="kw">while </span>!sent &amp;&amp; Instant::now() &lt; time_to_wait_for_matching_builder {
             <span class="comment">// try to broadcast the request to the correct builder state
             </span><span class="kw">if let </span><span class="prelude-val">Some</span>(builder) = <span class="self">self
@@ -1536,26 +1485,21 @@ Handling Builder API responses
                 .read_arc()
                 .<span class="kw">await
                 </span>.spawned_builder_states
-                .get(<span class="kw-2">&amp;</span>key)
+                .get(<span class="kw-2">&amp;</span>state_id)
             {
                 <span class="macro">tracing::info!</span>(
-                    <span class="string">"Got matching BlockBuilder for {:?}@{view_number}, sending get_available_blocks request"</span>,
-                    req_msg.requested_vid_commitment
+                    <span class="string">"Got matching BlockBuilder for {state_id}, sending get_available_blocks request"</span>,
                 );
                 <span class="kw">if let </span><span class="prelude-val">Err</span>(e) = builder
                     .broadcast(MessageType::RequestMessage(req_msg.clone()))
                     .<span class="kw">await
                 </span>{
-                    <span class="macro">tracing::warn!</span>(
-                        <span class="string">"Error {e} sending get_available_blocks request for parent {:?}@{view_number}"</span>,
-                        req_msg.requested_vid_commitment
-                    );
+                    <span class="macro">tracing::warn!</span>(<span class="string">"Error {e} sending get_available_blocks request for {state_id}"</span>,);
                 }
                 sent = <span class="bool-val">true</span>;
             } <span class="kw">else </span>{
                 <span class="macro">tracing::info!</span>(
-                    <span class="string">"Failed to get matching BlockBuilder for {:?}@{view_number}, will try again"</span>,
-                    req_msg.requested_vid_commitment
+                    <span class="string">"Failed to get matching BlockBuilder for {state_id}, will try again"</span>,
                 );
                 async_sleep(check_duration).<span class="kw">await
             </span>}
@@ -1567,39 +1511,32 @@ Handling Builder API responses
                 </span>.global_state
                 .read_arc()
                 .<span class="kw">await
-                </span>.get_channel_for_matching_builder_or_highest_view_buider(<span class="kw-2">&amp;</span>(<span class="kw-2">*</span>for_parent, view_num))<span class="question-mark">?
+                </span>.get_channel_for_matching_builder_or_highest_view_buider(<span class="kw-2">&amp;</span>state_id)<span class="question-mark">?
                 </span>.broadcast(MessageType::RequestMessage(req_msg.clone()))
                 .<span class="kw">await
             </span>{
                 <span class="macro">tracing::warn!</span>(
-                    <span class="string">"Error {e} sending get_available_blocks request for parent {:?}@{view_number}"</span>,
-                    req_msg.requested_vid_commitment
+                    <span class="string">"Error {e} sending get_available_blocks request for parent {state_id}"</span>,
                 );
             }
         }
 
-        <span class="macro">tracing::debug!</span>(
-            <span class="string">"Waiting for response for get_available_blocks with parent {:?}@{view_number}"</span>,
-            req_msg.requested_vid_commitment
-        );
+        <span class="macro">tracing::debug!</span>(<span class="string">"Waiting for response for get_available_blocks with parent {state_id}"</span>,);
 
         <span class="kw">let </span>response_received = <span class="kw">loop </span>{
             <span class="kw">match </span>async_timeout(check_duration, response_receiver.recv()).<span class="kw">await </span>{
                 <span class="prelude-val">Err</span>(toe) =&gt; {
                     <span class="kw">if </span>Instant::now() &gt;= timeout_after {
-                        <span class="macro">tracing::warn!</span>(%toe, <span class="string">"Couldn't get available blocks in time for parent {:?}@{view_number}"</span>,  req_msg.requested_vid_commitment);
+                        <span class="macro">tracing::warn!</span>(%toe, <span class="string">"Couldn't get available blocks in time for parent {state_id}"</span>);
                         <span class="comment">// lookup into the builder_state_to_last_built_block, if it contains the result, return that otherwise return error
                         </span><span class="kw">if let </span><span class="prelude-val">Some</span>(last_built_block) = <span class="self">self
                             </span>.global_state
                             .read_arc()
                             .<span class="kw">await
                             </span>.builder_state_to_last_built_block
-                            .get(<span class="kw-2">&amp;</span>(<span class="kw-2">*</span>for_parent, view_num))
+                            .get(<span class="kw-2">&amp;</span>state_id)
                         {
-                            <span class="macro">tracing::info!</span>(
-                                <span class="string">"Returning last built block for parent {:?}@{view_number}"</span>,
-                                req_msg.requested_vid_commitment
-                            );
+                            <span class="macro">tracing::info!</span>(<span class="string">"Returning last built block for parent {state_id}"</span>,);
                             <span class="kw">break </span><span class="prelude-val">Ok</span>(last_built_block.clone());
                         }
                         <span class="kw">break </span><span class="prelude-val">Err</span>(BuildError::Error {
@@ -1610,7 +1547,7 @@ Handling Builder API responses
                 }
                 <span class="prelude-val">Ok</span>(recv_attempt) =&gt; {
                     <span class="kw">if let </span><span class="prelude-val">Err</span>(<span class="kw-2">ref </span>e) = recv_attempt {
-                        <span class="macro">tracing::error!</span>(%e, <span class="string">"Channel closed while getting available blocks for parent {:?}@{view_number}"</span>, req_msg.requested_vid_commitment);
+                        <span class="macro">tracing::error!</span>(%e, <span class="string">"Channel closed while getting available blocks for parent {state_id}"</span>);
                     }
                     <span class="kw">break </span>recv_attempt.map_err(|<span class="kw">_</span>| BuildError::Error {
                         message: <span class="string">"channel unexpectedly closed"</span>.to_string(),
@@ -1645,9 +1582,7 @@ Handling Builder API responses
                     _phantom: Default::default(),
                 };
                 <span class="macro">tracing::info!</span>(
-                    <span class="string">"Sending available Block info response for (parent {:?}, view_num: {:?}) with block hash: {:?}"</span>,
-                    req_msg.requested_vid_commitment,
-                    view_number,
+                    <span class="string">"Sending available Block info response for {state_id} with block hash: {:?}"</span>,
                     response.builder_hash
                 );
                 <span class="prelude-val">Ok</span>(<span class="macro">vec!</span>[initial_block_info])
@@ -1655,10 +1590,7 @@ Handling Builder API responses
 
             <span class="comment">// We failed to get available blocks
             </span><span class="prelude-val">Err</span>(e) =&gt; {
-                <span class="macro">tracing::warn!</span>(
-                    <span class="string">"Failed to get available blocks for parent {:?}@{view_number}"</span>,
-                    req_msg.requested_vid_commitment
-                );
+                <span class="macro">tracing::warn!</span>(<span class="string">"Failed to get available blocks for parent {state_id}"</span>,);
                 <span class="prelude-val">Err</span>(e)
             }
         }
@@ -1666,49 +1598,35 @@ Handling Builder API responses
 
     <span class="kw">async fn </span>claim_block(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        block_hash: <span class="kw-2">&amp;</span>BuilderCommitment,
-        view_number: u64,
+        _block_hash: <span class="kw-2">&amp;</span>BuilderCommitment,
+        _view_number: u64,
         sender: Types::SignatureKey,
         signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;AvailableBlockData&lt;Types&gt;, BuildError&gt; {
-        <span class="macro">tracing::info!</span>(
-            <span class="string">"Received request for claiming block for (block_hash {:?}, view_num: {:?})"</span>,
-            block_hash,
-            view_number
-        );
+        <span class="kw">let </span>block_id = BlockId {
+            hash: _block_hash.clone(),
+            view: Types::Time::new(_view_number),
+        };
+
+        <span class="macro">tracing::info!</span>(<span class="string">"Received request for claiming block {block_id}"</span>,);
         <span class="comment">// verify the signature
-        </span><span class="kw">if </span>!sender.validate(signature, block_hash.as_ref()) {
+        </span><span class="kw">if </span>!sender.validate(signature, block_id.hash.as_ref()) {
             <span class="macro">tracing::error!</span>(<span class="string">"Signature validation failed in claim block"</span>);
             <span class="kw">return </span><span class="prelude-val">Err</span>(BuildError::Error {
                 message: <span class="string">"Signature validation failed in claim block"</span>.to_string(),
             });
         }
         <span class="kw">let </span>(pub_key, sign_key) = <span class="self">self</span>.builder_keys.clone();
-        <span class="kw">let </span>view_num = &lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Time <span class="kw">as </span>ConsensusTime&gt;::new(view_number);
 
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(block_info) = <span class="self">self
-            </span>.global_state
-            .read_arc()
-            .<span class="kw">await
-            </span>.block_hash_to_block
-            .get(<span class="kw-2">&amp;</span>(block_hash.clone(), view_num))
-        {
-            <span class="macro">tracing::info!</span>(
-                <span class="string">"Trying sending vid trigger info for {:?}@{:?}"</span>,
-                block_hash,
-                view_num
-            );
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(block_info) = <span class="self">self</span>.global_state.write_arc().<span class="kw">await</span>.blocks.get(<span class="kw-2">&amp;</span>block_id) {
+            <span class="macro">tracing::info!</span>(<span class="string">"Trying sending vid trigger info for {block_id}"</span>,);
 
             <span class="kw">if let </span><span class="prelude-val">Some</span>(trigger_writer) = block_info.vid_trigger.write().<span class="kw">await</span>.take() {
-                <span class="macro">tracing::info!</span>(<span class="string">"Sending vid trigger for {:?}@{:?}"</span>, block_hash, view_num);
+                <span class="macro">tracing::info!</span>(<span class="string">"Sending vid trigger for {block_id}"</span>);
                 trigger_writer.send(TriggerStatus::Start);
-                <span class="macro">tracing::info!</span>(<span class="string">"Sent vid trigger for {:?}@{:?}"</span>, block_hash, view_num);
+                <span class="macro">tracing::info!</span>(<span class="string">"Sent vid trigger for {block_id}"</span>);
             }
-            <span class="macro">tracing::info!</span>(
-                <span class="string">"Done Trying sending vid trigger info for {:?}@{:?}"</span>,
-                block_hash,
-                view_num
-            );
+            <span class="macro">tracing::info!</span>(<span class="string">"Done Trying sending vid trigger info for {block_id}"</span>,);
 
             <span class="comment">// sign over the builder commitment, as the proposer can computer it based on provide block_payload
             // and the metata data
@@ -1730,11 +1648,7 @@ Handling Builder API responses
                 signature: signature_over_builder_commitment,
                 sender: pub_key.clone(),
             };
-            <span class="macro">tracing::info!</span>(
-                <span class="string">"Sending Claim Block data for (block_hash {:?}, view_num: {:?})"</span>,
-                block_hash,
-                view_number
-            );
+            <span class="macro">tracing::info!</span>(<span class="string">"Sending Claim Block data for {block_id}"</span>,);
             <span class="prelude-val">Ok</span>(block_data)
         } <span class="kw">else </span>{
             <span class="macro">tracing::warn!</span>(<span class="string">"Claim Block not found"</span>);
@@ -1746,33 +1660,27 @@ Handling Builder API responses
 
     <span class="kw">async fn </span>claim_block_header_input(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        block_hash: <span class="kw-2">&amp;</span>BuilderCommitment,
-        view_number: u64,
+        _block_hash: <span class="kw-2">&amp;</span>BuilderCommitment,
+        _view_number: u64,
         sender: Types::SignatureKey,
         signature: <span class="kw-2">&amp;</span>&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey <span class="kw">as </span>SignatureKey&gt;::PureAssembledSignatureType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;AvailableBlockHeaderInput&lt;Types&gt;, BuildError&gt; {
-        <span class="macro">tracing::info!</span>(
-            <span class="string">"Received request for claiming block header input for (block_hash {:?}, view_num: {:?})"</span>,
-            block_hash,
-            view_number
-        );
+        <span class="kw">let </span>id = BlockId {
+            hash: _block_hash.clone(),
+            view: Types::Time::new(_view_number),
+        };
+
+        <span class="macro">tracing::info!</span>(<span class="string">"Received request for claiming block header input for block {id}"</span>);
         <span class="comment">// verify the signature
-        </span><span class="kw">if </span>!sender.validate(signature, block_hash.as_ref()) {
+        </span><span class="kw">if </span>!sender.validate(signature, id.hash.as_ref()) {
             <span class="macro">tracing::error!</span>(<span class="string">"Signature validation failed in claim block header input"</span>);
             <span class="kw">return </span><span class="prelude-val">Err</span>(BuildError::Error {
                 message: <span class="string">"Signature validation failed in claim block header input"</span>.to_string(),
             });
         }
         <span class="kw">let </span>(pub_key, sign_key) = <span class="self">self</span>.builder_keys.clone();
-        <span class="kw">let </span>view_num = &lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Time <span class="kw">as </span>ConsensusTime&gt;::new(view_number);
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(block_info) = <span class="self">self
-            </span>.global_state
-            .read_arc()
-            .<span class="kw">await
-            </span>.block_hash_to_block
-            .get(<span class="kw-2">&amp;</span>(block_hash.clone(), view_num))
-        {
-            <span class="macro">tracing::info!</span>(<span class="string">"Waiting for vid commitment for block {:?}"</span>, block_hash);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(block_info) = <span class="self">self</span>.global_state.write_arc().<span class="kw">await</span>.blocks.get(<span class="kw-2">&amp;</span>id) {
+            <span class="macro">tracing::info!</span>(<span class="string">"Waiting for vid commitment for block {id}"</span>);
 
             <span class="kw">let </span>timeout_after = Instant::now() + <span class="self">self</span>.max_api_waiting_time;
             <span class="kw">let </span>check_duration = <span class="self">self</span>.max_api_waiting_time / <span class="number">10</span>;
@@ -1783,10 +1691,7 @@ Handling Builder API responses
                 </span>{
                     <span class="prelude-val">Err</span>(_toe) =&gt; {
                         <span class="kw">if </span>Instant::now() &gt;= timeout_after {
-                            <span class="macro">tracing::warn!</span>(
-                                <span class="string">"Couldn't get vid commitment in time for block {:?}"</span>,
-                                block_hash
-                            );
+                            <span class="macro">tracing::warn!</span>(<span class="string">"Couldn't get vid commitment in time for block {id}"</span>,);
                             <span class="kw">break </span><span class="prelude-val">Err</span>(BuildError::Error {
                                 message: <span class="string">"Couldn't get vid commitment in time"</span>.to_string(),
                             });
@@ -1796,8 +1701,7 @@ Handling Builder API responses
                     <span class="prelude-val">Ok</span>(recv_attempt) =&gt; {
                         <span class="kw">if let </span><span class="prelude-val">Err</span>(<span class="kw-2">ref </span>_e) = recv_attempt {
                             <span class="macro">tracing::error!</span>(
-                                <span class="string">"Channel closed while getting vid commitment for block {:?}"</span>,
-                                block_hash
+                                <span class="string">"Channel closed while getting vid commitment for block {id}"</span>,
                             );
                         }
                         <span class="kw">break </span>recv_attempt.map_err(|<span class="kw">_</span>| BuildError::Error {
@@ -1807,11 +1711,7 @@ Handling Builder API responses
                 }
             };
 
-            <span class="macro">tracing::info!</span>(
-                <span class="string">"Got vid commitment for block {:?}@{:?}"</span>,
-                block_hash,
-                view_number
-            );
+            <span class="macro">tracing::info!</span>(<span class="string">"Got vid commitment for block {id}"</span>,);
             <span class="kw">if </span>response_received.is_ok() {
                 <span class="kw">let </span>(vid_commitment, vid_precompute_data) =
                     response_received.map_err(|err| BuildError::Error {
@@ -1845,11 +1745,7 @@ Handling Builder API responses
                     message_signature: signature_over_vid_commitment,
                     sender: pub_key.clone(),
                 };
-                <span class="macro">tracing::info!</span>(
-                <span class="string">"Sending Claim Block Header Input response for (block_hash {:?}, view_num: {:?})"</span>,
-                block_hash,
-                view_number
-            );
+                <span class="macro">tracing::info!</span>(<span class="string">"Sending Claim Block Header Input response for {id}"</span>,);
                 <span class="prelude-val">Ok</span>(response)
             } <span class="kw">else </span>{
                 <span class="macro">tracing::warn!</span>(<span class="string">"Claim Block Header Input not found"</span>);
@@ -1870,6 +1766,7 @@ Handling Builder API responses
         <span class="prelude-val">Ok</span>(<span class="self">self</span>.builder_keys.<span class="number">0</span>.clone())
     }
 }
+
 <span class="attr">#[async_trait]
 </span><span class="kw">impl</span>&lt;Types: NodeType&gt; AcceptsTxnSubmits&lt;Types&gt; <span class="kw">for </span>ProxyGlobalState&lt;Types&gt; {
     <span class="kw">async fn </span>submit_txns(
@@ -1893,7 +1790,10 @@ Handling Builder API responses
             response
         );
 
-        response
+        <span class="comment">// NOTE: ideally we want to respond with original Vec&lt;Result&gt;
+        // instead of Result&lt;Vec&gt; not to loose any information,
+        //  but this requires changes to builder API
+        </span>response.into_iter().collect()
     }
 }
 <span class="attr">#[async_trait]
@@ -2005,15 +1905,8 @@ Running Non-Permissioned Builder Service
                     }
                     <span class="comment">// tx event
                     </span>EventType::Transactions { transactions } =&gt; {
-                        <span class="kw">if let </span><span class="prelude-val">Err</span>(e) = handle_received_txns(
-                            <span class="kw-2">&amp;</span>tx_sender,
-                            transactions,
-                            TransactionSource::HotShot,
-                        )
-                        .<span class="kw">await
-                        </span>{
-                            <span class="macro">tracing::warn!</span>(<span class="string">"Failed to handle transactions; {:?}"</span>, e);
-                        }
+                        handle_received_txns(<span class="kw-2">&amp;</span>tx_sender, transactions, TransactionSource::HotShot)
+                            .<span class="kw">await</span>;
                     }
                     <span class="comment">// decide event
                     </span>EventType::Decide {
@@ -2106,15 +1999,8 @@ Running Permissioned Builder Service
                     }
                     <span class="comment">// tx event
                     </span>EventType::Transactions { transactions } =&gt; {
-                        <span class="kw">if let </span><span class="prelude-val">Err</span>(e) = handle_received_txns(
-                            <span class="kw-2">&amp;</span>tx_sender,
-                            transactions,
-                            TransactionSource::HotShot,
-                        )
-                        .<span class="kw">await
-                        </span>{
-                            <span class="macro">tracing::warn!</span>(<span class="string">"Failed to handle transactions; {:?}"</span>, e);
-                        }
+                        handle_received_txns(<span class="kw-2">&amp;</span>tx_sender, transactions, TransactionSource::HotShot)
+                            .<span class="kw">await</span>;
                     }
                     <span class="comment">// decide event
                     </span>EventType::Decide { leaf_chain, .. } =&gt; {
@@ -2262,24 +2148,40 @@ Utility functions to handle the hotshot events
     tx_sender: <span class="kw-2">&amp;</span>BroadcastSender&lt;Arc&lt;ReceivedTransaction&lt;Types&gt;&gt;&gt;,
     txns: Vec&lt;Types::Transaction&gt;,
     source: TransactionSource,
-) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Commitment&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Transaction&gt;&gt;, BuildError&gt; {
+) -&gt; Vec&lt;<span class="prelude-ty">Result</span>&lt;Commitment&lt;&lt;Types <span class="kw">as </span>NodeType&gt;::Transaction&gt;, BuildError&gt;&gt; {
     <span class="kw">let </span><span class="kw-2">mut </span>results = Vec::with_capacity(txns.len());
     <span class="kw">let </span>time_in = Instant::now();
     <span class="kw">for </span>tx <span class="kw">in </span>txns.into_iter() {
         <span class="kw">let </span>commit = tx.commit();
-        results.push(commit);
         <span class="kw">let </span>res = tx_sender
-            .broadcast(Arc::new(ReceivedTransaction {
+            .try_broadcast(Arc::new(ReceivedTransaction {
                 tx,
                 source: source.clone(),
                 commit,
                 time_in,
             }))
-            .<span class="kw">await</span>;
-        <span class="kw">if </span>res.is_err() {
-            <span class="macro">tracing::warn!</span>(<span class="string">"failed to broadcast txn with commit {:?}"</span>, commit);
-        }
+            .inspect(|val| {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(evicted_txn) = val {
+                    <span class="macro">tracing::warn!</span>(
+                        <span class="string">"Overflow mode enabled, transaction {} evicted"</span>,
+                        evicted_txn.commit
+                    );
+                }
+            })
+            .map(|<span class="kw">_</span>| commit)
+            .inspect_err(|err| {
+                <span class="macro">tracing::warn!</span>(<span class="string">"Failed to broadcast txn with commit {:?}: {}"</span>, commit, err);
+            })
+            .map_err(|err| <span class="kw">match </span>err {
+                TrySendError::Full(<span class="kw">_</span>) =&gt; BuildError::Error {
+                    message: <span class="string">"Too many transactions"</span>.to_owned(),
+                },
+                e =&gt; BuildError::Error {
+                    message: <span class="macro">format!</span>(<span class="string">"Internal error when submitting transaction: {}"</span>, e),
+                },
+            });
+        results.push(res);
     }
-    <span class="prelude-val">Ok</span>(results)
+    results
 }
 </code></pre></div></section></main></body></html>
