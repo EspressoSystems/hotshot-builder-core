@@ -23,6 +23,7 @@ mod tests {
     use async_compatibility_layer::channel::unbounded;
     use async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
     use hotshot::types::SignatureKey;
+    use hotshot_example_types::auction_results_provider_types::TestAuctionResult;
     use hotshot_types::{
         signature_key::BuilderKey,
         simple_vote::QuorumData,
@@ -87,6 +88,7 @@ mod tests {
                 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0,
                 0, 0, 0, 0,
             ];
+            type AuctionResult = TestAuctionResult;
         }
         // no of test messages to send
         let num_test_messages = 5;
