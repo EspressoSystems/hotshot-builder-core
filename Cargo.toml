@@ -30,7 +30,7 @@ tide-disco = "0.9"
 tokio = "1"
 tracing = "0.1"
 vbs = "0.1"
-lru = "0.12.3"
+lru = "0.12.4"
 hex = "0.4.3"
 
 [dev-dependencies]
