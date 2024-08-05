@@ -413,6 +413,8 @@
 <a href="#413" id="413">413</a>
 <a href="#414" id="414">414</a>
 <a href="#415" id="415">415</a>
+<a href="#416" id="416">416</a>
+<a href="#417" id="417">417</a>
 </pre></div><pre class="rust"><code><span class="kw">pub use </span>hotshot::traits::election::static_committee::GeneralStaticCommittee;
 <span class="kw">pub use </span>hotshot_types::{
     data::{DaProposal, Leaf, QuorumProposal, ViewNumber},
@@ -438,6 +440,7 @@
     <span class="kw">use </span>async_compatibility_layer::channel::unbounded;
     <span class="kw">use </span>async_compatibility_layer::{art::async_spawn, channel::UnboundedReceiver};
     <span class="kw">use </span>hotshot::types::SignatureKey;
+    <span class="kw">use </span>hotshot_example_types::auction_results_provider_types::TestAuctionResult;
     <span class="kw">use </span>hotshot_types::{
         signature_key::BuilderKey,
         simple_vote::QuorumData,
@@ -502,6 +505,7 @@
                 <span class="number">1</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>,
                 <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>,
             ];
+            <span class="kw">type </span>AuctionResult = TestAuctionResult;
         }
         <span class="comment">// no of test messages to send
         </span><span class="kw">let </span>num_test_messages = <span class="number">5</span>;
