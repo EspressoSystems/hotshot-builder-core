@@ -16,7 +16,7 @@ use hotshot_types::{
         consensus_api::ConsensusApi,
         election::Membership,
         network::Topic,
-        node_implementation::{ConsensusTime, NodeType},
+        node_implementation::{ConsensusTime, NodeType, Versions},
         signature_key::{BuilderSignatureKey, SignatureKey},
     },
     utils::BuilderCommitment,
@@ -715,18 +715,18 @@ impl<Types: NodeType> ReadState for ProxyGlobalState<Types> {
     }
 }
 
-async fn connect_to_events_service<Types: NodeType>(
+async fn connect_to_events_service<Types: NodeType, V: Versions>(
     hotshot_events_api_url: Url,
 ) -> Option<(
     surf_disco::socket::Connection<
         Event<Types>,
         surf_disco::socket::Unsupported,
         EventStreamError,
-        Types::Base,
+        V::Base,
     >,
     GeneralStaticCommittee<Types, <Types as NodeType>::SignatureKey>,
 )> {
-    let client = surf_disco::Client::<hotshot_events_service::events::Error, Types::Base>::new(
+    let client = surf_disco::Client::<hotshot_events_service::events::Error, V::Base>::new(
         hotshot_events_api_url.clone(),
     );
 
@@ -775,7 +775,7 @@ async fn connect_to_events_service<Types: NodeType>(
 /*
 Running Non-Permissioned Builder Service
 */
-pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
+pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType, V: Versions>(
     // sending a DA proposal from the hotshot to the builder states
     da_sender: BroadcastSender<MessageType<Types>>,
 
@@ -792,7 +792,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
     hotshot_events_api_url: Url,
 ) -> Result<(), anyhow::Error> {
     // connection to the events stream
-    let connected = connect_to_events_service(hotshot_events_api_url.clone()).await;
+    let connected = connect_to_events_service::<_, V>(hotshot_events_api_url.clone()).await;
     if connected.is_none() {
         return Err(anyhow!(
             "failed to connect to API at {hotshot_events_api_url}"
@@ -856,7 +856,8 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType>(
             }
             None => {
                 tracing::error!("Event stream ended");
-                let connected = connect_to_events_service(hotshot_events_api_url.clone()).await;
+                let connected =
+                    connect_to_events_service::<_, V>(hotshot_events_api_url.clone()).await;
                 if connected.is_none() {
                     return Err(anyhow!(
                         "failed to reconnect to API at {hotshot_events_api_url}"
@@ -875,6 +876,7 @@ Running Permissioned Builder Service
 pub async fn run_permissioned_standalone_builder_service<
     Types: NodeType,
     I: NodeImplementation<Types>,
+    V: Versions,
 >(
     // sending received transactions
     tx_sender: BroadcastSender<Arc<ReceivedTransaction<Types>>>,
@@ -889,7 +891,7 @@ pub async fn run_permissioned_standalone_builder_service<
     decide_sender: BroadcastSender<MessageType<Types>>,
 
     // hotshot context handle
-    hotshot_handle: Arc<SystemContextHandle<Types, I>>,
+    hotshot_handle: Arc<SystemContextHandle<Types, I, V>>,
 ) {
     let mut event_stream = hotshot_handle.event_stream();
     loop {
