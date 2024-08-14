@@ -34,7 +34,7 @@ lru = "0.12.3"
 hex = "0.4.3"
 
 [dev-dependencies]
-hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.69" }
+hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.70" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(async_executor_impl, values("async-std", "tokio"))'] }
