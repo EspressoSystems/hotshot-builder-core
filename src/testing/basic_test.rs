@@ -18,6 +18,7 @@ pub use async_broadcast::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
 
     use async_compatibility_layer::channel::unbounded;
@@ -100,7 +101,7 @@ mod tests {
         let (tx_sender, tx_receiver) = broadcast::<Arc<ReceivedTransaction<TestTypes>>>(
             num_test_messages * multiplication_factor,
         );
-        let tx_queue = Vec::new();
+        let tx_queue = VecDeque::new();
         // generate the keys for the buidler
         let seed = [201_u8; 32];
         let (_builder_pub_key, _builder_private_key) =

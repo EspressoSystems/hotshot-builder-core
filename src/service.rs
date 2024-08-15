@@ -60,6 +60,11 @@ use std::{fmt::Display, time::Instant};
 use tagged_base64::TaggedBase64;
 use tide_disco::{method::ReadState, Url};
 
+// Start assuming we're fine calculatig VID for 100 kilobyte blocks
+const INITIAL_MAX_BLOCK_SIZE: u64 = 100_000;
+// Never go lower than 10 kilobytes
+const MAX_BLOCK_SIZE_FLOOR: u64 = 10_000;
+
 // It holds all the necessary information for a block
 #[derive(Debug)]
 pub struct BlockInfo<Types: NodeType> {
@@ -68,6 +73,8 @@ pub struct BlockInfo<Types: NodeType> {
     pub vid_trigger: Arc<RwLock<Option<OneShotSender<TriggerStatus>>>>,
     pub vid_receiver: Arc<RwLock<WaitAndKeep<(VidCommitment, VidPrecomputeData)>>>,
     pub offered_fee: u64,
+    // Could we have included more transactions with this block, but chose not to?
+    pub truncated: bool,
 }
 
 // It holds the information for the proposed block
@@ -105,9 +112,11 @@ pub struct BuilderStatesInfo<Types: NodeType> {
 pub struct ReceivedTransaction<Types: NodeType> {
     // the transaction
     pub tx: Types::Transaction,
-    // its hash
+    // transaction's hash
     pub commit: Commitment<Types::Transaction>,
-    // its source
+    // transaction's esitmated length
+    pub len: u64,
+    // transaction's source
     pub source: TransactionSource,
     // received time
     pub time_in: Instant,
@@ -135,6 +144,9 @@ pub struct GlobalState<Types: NodeType> {
 
     // highest view running builder task
     pub highest_view_num_builder_id: BuilderStateId<Types>,
+
+    // estimated maximum block size we can build in time
+    pub max_block_size: u64,
 }
 
 impl<Types: NodeType> GlobalState<Types> {
@@ -160,6 +172,7 @@ impl<Types: NodeType> GlobalState<Types> {
             last_garbage_collected_view_num,
             builder_state_to_last_built_block: Default::default(),
             highest_view_num_builder_id: bootstrap_id,
+            max_block_size: INITIAL_MAX_BLOCK_SIZE,
         }
     }
 
@@ -203,6 +216,7 @@ impl<Types: NodeType> GlobalState<Types> {
                         build_block_info.vid_receiver,
                     ))),
                     offered_fee: build_block_info.offered_fee,
+                    truncated: build_block_info.truncated,
                 },
             );
         }
@@ -599,6 +613,15 @@ where
                     Err(_toe) => {
                         if Instant::now() >= timeout_after {
                             tracing::warn!("Couldn't get vid commitment in time for block {id}",);
+                            {
+                                // we can't keep up with this block size, reduce max block size by 10%
+                                let mut global_state = self.global_state.write_arc().await;
+                                global_state.max_block_size = std::cmp::min(
+                                    global_state.max_block_size
+                                        - global_state.max_block_size.div_ceil(10),
+                                    MAX_BLOCK_SIZE_FLOOR,
+                                );
+                            }
                             break Err(BuildError::Error {
                                 message: "Couldn't get vid commitment in time".to_string(),
                             });
@@ -619,6 +642,18 @@ where
             };
 
             tracing::info!("Got vid commitment for block {id}",);
+
+            // This block was truncated, but we got VID in time.
+            // Maybe we can handle bigger blocks?
+            if block_info.truncated {
+                // Increase max block size by 10%
+                let mut global_state = self.global_state.write_arc().await;
+                global_state.max_block_size = std::cmp::min(
+                    global_state.max_block_size + global_state.max_block_size.div_ceil(10),
+                    MAX_BLOCK_SIZE_FLOOR,
+                );
+            }
+
             if response_received.is_ok() {
                 let (vid_commitment, vid_precompute_data) =
                     response_received.map_err(|err| BuildError::Error {
@@ -1062,12 +1097,14 @@ pub(crate) async fn handle_received_txns<Types: NodeType>(
     let time_in = Instant::now();
     for tx in txns.into_iter() {
         let commit = tx.commit();
+        let len = bincode::serialized_size(&tx).unwrap_or_default();
         let res = tx_sender
             .try_broadcast(Arc::new(ReceivedTransaction {
                 tx,
                 source: source.clone(),
                 commit,
                 time_in,
+                len,
             }))
             .inspect(|val| {
                 if let Some(evicted_txn) = val {
