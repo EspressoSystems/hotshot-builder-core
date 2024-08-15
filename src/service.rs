@@ -64,6 +64,13 @@ use tide_disco::{method::ReadState, Url};
 const INITIAL_MAX_BLOCK_SIZE: u64 = 100_000;
 // Never go lower than 10 kilobytes
 const MAX_BLOCK_SIZE_FLOOR: u64 = 10_000;
+// When adjusting max block size, we it will be decremented or incremented
+// by current value / [`MAX_BLOCK_SIZE_CHANGE_DIVISOR`]
+const MAX_BLOCK_SIZE_CHANGE_DIVISOR: u64 = 10;
+// We will not increment max block value if we aren't able to serve a response
+// with a margin below [`ProxyGlobalState::max_api_waiting_time`]
+// more than [`ProxyGlobalState::max_api_waiting_time`] / `VID_RESPONSE_TARGET_MARGIN_DIVISOR`
+const VID_RESPONSE_TARGET_MARGIN_DIVISOR: u32 = 10;
 
 // It holds all the necessary information for a block
 #[derive(Debug)]
@@ -614,11 +621,13 @@ where
                         if Instant::now() >= timeout_after {
                             tracing::warn!("Couldn't get vid commitment in time for block {id}",);
                             {
-                                // we can't keep up with this block size, reduce max block size by 10%
+                                // we can't keep up with this block size, reduce max block size
                                 let mut global_state = self.global_state.write_arc().await;
                                 global_state.max_block_size = std::cmp::min(
                                     global_state.max_block_size
-                                        - global_state.max_block_size.div_ceil(10),
+                                        - global_state
+                                            .max_block_size
+                                            .div_ceil(MAX_BLOCK_SIZE_CHANGE_DIVISOR),
                                     MAX_BLOCK_SIZE_FLOOR,
                                 );
                             }
@@ -643,13 +652,19 @@ where
 
             tracing::info!("Got vid commitment for block {id}",);
 
-            // This block was truncated, but we got VID in time.
+            // This block was truncated, but we got VID in time with margin left.
             // Maybe we can handle bigger blocks?
-            if block_info.truncated {
-                // Increase max block size by 10%
+            if block_info.truncated
+                && timeout_after.duration_since(Instant::now())
+                    > self.max_api_waiting_time / VID_RESPONSE_TARGET_MARGIN_DIVISOR
+            {
+                // Increase max block size
                 let mut global_state = self.global_state.write_arc().await;
                 global_state.max_block_size = std::cmp::min(
-                    global_state.max_block_size + global_state.max_block_size.div_ceil(10),
+                    global_state.max_block_size
+                        + global_state
+                            .max_block_size
+                            .div_ceil(MAX_BLOCK_SIZE_CHANGE_DIVISOR),
                     MAX_BLOCK_SIZE_FLOOR,
                 );
             }
