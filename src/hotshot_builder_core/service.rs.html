@@ -1091,6 +1091,8 @@
 <a href="#1091" id="1091">1091</a>
 <a href="#1092" id="1092">1092</a>
 <a href="#1093" id="1093">1093</a>
+<a href="#1094" id="1094">1094</a>
+<a href="#1095" id="1095">1095</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::{Event, SystemContextHandle},
@@ -1109,7 +1111,7 @@
         consensus_api::ConsensusApi,
         election::Membership,
         network::Topic,
-        node_implementation::{ConsensusTime, NodeType},
+        node_implementation::{ConsensusTime, NodeType, Versions},
         signature_key::{BuilderSignatureKey, SignatureKey},
     },
     utils::BuilderCommitment,
@@ -1808,18 +1810,18 @@ Handling Builder API responses
     </span>}
 }
 
-<span class="kw">async fn </span>connect_to_events_service&lt;Types: NodeType&gt;(
+<span class="kw">async fn </span>connect_to_events_service&lt;Types: NodeType, V: Versions&gt;(
     hotshot_events_api_url: Url,
 ) -&gt; <span class="prelude-ty">Option</span>&lt;(
     surf_disco::socket::Connection&lt;
         Event&lt;Types&gt;,
         surf_disco::socket::Unsupported,
         EventStreamError,
-        Types::Base,
+        V::Base,
     &gt;,
     GeneralStaticCommittee&lt;Types, &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey&gt;,
 )&gt; {
-    <span class="kw">let </span>client = surf_disco::Client::&lt;hotshot_events_service::events::Error, Types::Base&gt;::new(
+    <span class="kw">let </span>client = surf_disco::Client::&lt;hotshot_events_service::events::Error, V::Base&gt;::new(
         hotshot_events_api_url.clone(),
     );
 
@@ -1868,7 +1870,7 @@ Handling Builder API responses
 <span class="comment">/*
 Running Non-Permissioned Builder Service
 */
-</span><span class="kw">pub async fn </span>run_non_permissioned_standalone_builder_service&lt;Types: NodeType&gt;(
+</span><span class="kw">pub async fn </span>run_non_permissioned_standalone_builder_service&lt;Types: NodeType, V: Versions&gt;(
     <span class="comment">// sending a DA proposal from the hotshot to the builder states
     </span>da_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
 
@@ -1885,7 +1887,7 @@ Running Non-Permissioned Builder Service
     </span>hotshot_events_api_url: Url,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), anyhow::Error&gt; {
     <span class="comment">// connection to the events stream
-    </span><span class="kw">let </span>connected = connect_to_events_service(hotshot_events_api_url.clone()).<span class="kw">await</span>;
+    </span><span class="kw">let </span>connected = connect_to_events_service::&lt;Types, V&gt;(hotshot_events_api_url.clone()).<span class="kw">await</span>;
     <span class="kw">if </span>connected.is_none() {
         <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">anyhow!</span>(
             <span class="string">"failed to connect to API at {hotshot_events_api_url}"
@@ -1949,7 +1951,8 @@ Running Non-Permissioned Builder Service
             }
             <span class="prelude-val">None </span>=&gt; {
                 <span class="macro">tracing::error!</span>(<span class="string">"Event stream ended"</span>);
-                <span class="kw">let </span>connected = connect_to_events_service(hotshot_events_api_url.clone()).<span class="kw">await</span>;
+                <span class="kw">let </span>connected =
+                    connect_to_events_service::&lt;Types, V&gt;(hotshot_events_api_url.clone()).<span class="kw">await</span>;
                 <span class="kw">if </span>connected.is_none() {
                     <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">anyhow!</span>(
                         <span class="string">"failed to reconnect to API at {hotshot_events_api_url}"
@@ -1968,6 +1971,7 @@ Running Permissioned Builder Service
 </span><span class="kw">pub async fn </span>run_permissioned_standalone_builder_service&lt;
     Types: NodeType,
     I: NodeImplementation&lt;Types&gt;,
+    V: Versions,
 &gt;(
     <span class="comment">// sending received transactions
     </span>tx_sender: BroadcastSender&lt;Arc&lt;ReceivedTransaction&lt;Types&gt;&gt;&gt;,
@@ -1982,7 +1986,7 @@ Running Permissioned Builder Service
     </span>decide_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
 
     <span class="comment">// hotshot context handle
-    </span>hotshot_handle: Arc&lt;SystemContextHandle&lt;Types, I&gt;&gt;,
+    </span>hotshot_handle: Arc&lt;SystemContextHandle&lt;Types, I, V&gt;&gt;,
 ) {
     <span class="kw">let </span><span class="kw-2">mut </span>event_stream = hotshot_handle.event_stream();
     <span class="kw">loop </span>{
