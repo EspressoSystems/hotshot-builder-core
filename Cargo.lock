@@ -2969,7 +2969,7 @@ dependencies = [
 [[package]]
 name = "hotshot"
 version = "0.5.71"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#4cc37458dfacfcdff340ef5e0bbbe6183367fb77"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#2d391be364524b585c50f3b83f5ad238b4cb3360"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -2994,7 +2994,7 @@ dependencies = [
  "hotshot-orchestrator",
  "hotshot-task",
  "hotshot-task-impls",
- "hotshot-types 0.1.11 (git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71)",
+ "hotshot-types",
  "jf-signature",
  "libp2p-identity",
  "libp2p-networking",
@@ -3016,14 +3016,14 @@ dependencies = [
 [[package]]
 name = "hotshot-builder-api"
 version = "0.1.7"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#4cc37458dfacfcdff340ef5e0bbbe6183367fb77"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#2d391be364524b585c50f3b83f5ad238b4cb3360"
 dependencies = [
  "async-trait",
  "clap",
  "committable",
  "derive_more 1.0.0",
  "futures",
- "hotshot-types 0.1.11 (git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71)",
+ "hotshot-types",
  "serde",
  "snafu",
  "tagged-base64",
@@ -3051,7 +3051,7 @@ dependencies = [
  "hotshot-builder-api",
  "hotshot-events-service",
  "hotshot-example-types",
- "hotshot-types 0.1.11 (git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71)",
+ "hotshot-types",
  "lru 0.12.4",
  "serde",
  "sha2 0.10.8",
@@ -3067,7 +3067,7 @@ dependencies = [
 [[package]]
 name = "hotshot-events-service"
 version = "0.1.38"
-source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?branch=hotshot/rc-0.5.71#8a00f4a3221b4796b6e5af9cb8b37b8e72bf93a3"
+source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?branch=hotshot/rc-0.5.71#31cda1ad1d61fa8d2371f6d711f0adb81f986643"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
@@ -3079,7 +3079,7 @@ dependencies = [
  "derive_more 0.99.18",
  "either",
  "futures",
- "hotshot-types 0.1.11 (git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.71)",
+ "hotshot-types",
  "rand 0.8.5",
  "serde",
  "snafu",
@@ -3093,7 +3093,7 @@ dependencies = [
 [[package]]
 name = "hotshot-example-types"
 version = "0.5.71"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#4cc37458dfacfcdff340ef5e0bbbe6183367fb77"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#2d391be364524b585c50f3b83f5ad238b4cb3360"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3109,7 +3109,7 @@ dependencies = [
  "hotshot",
  "hotshot-task",
  "hotshot-task-impls",
- "hotshot-types 0.1.11 (git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71)",
+ "hotshot-types",
  "rand 0.8.5",
  "reqwest",
  "serde",
@@ -3126,7 +3126,7 @@ dependencies = [
 [[package]]
 name = "hotshot-orchestrator"
 version = "0.5.71"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#4cc37458dfacfcdff340ef5e0bbbe6183367fb77"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#2d391be364524b585c50f3b83f5ad238b4cb3360"
 dependencies = [
  "anyhow",
  "async-compatibility-layer",
@@ -3137,7 +3137,7 @@ dependencies = [
  "clap",
  "csv",
  "futures",
- "hotshot-types 0.1.11 (git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71)",
+ "hotshot-types",
  "libp2p",
  "multiaddr",
  "serde",
@@ -3156,7 +3156,7 @@ dependencies = [
 [[package]]
 name = "hotshot-task"
 version = "0.5.71"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#4cc37458dfacfcdff340ef5e0bbbe6183367fb77"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#2d391be364524b585c50f3b83f5ad238b4cb3360"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3171,7 +3171,7 @@ dependencies = [
 [[package]]
 name = "hotshot-task-impls"
 version = "0.5.71"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#4cc37458dfacfcdff340ef5e0bbbe6183367fb77"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#2d391be364524b585c50f3b83f5ad238b4cb3360"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3188,7 +3188,7 @@ dependencies = [
  "futures",
  "hotshot-builder-api",
  "hotshot-task",
- "hotshot-types 0.1.11 (git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71)",
+ "hotshot-types",
  "jf-signature",
  "jf-vid",
  "rand 0.8.5",
@@ -3208,62 +3208,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.11"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.71#56e3f2c663aad796c3d831c77ca47e5648a209be"
-dependencies = [
- "anyhow",
- "ark-bn254",
- "ark-ed-on-bn254",
- "ark-ff",
- "ark-serialize",
- "ark-srs",
- "ark-std",
- "async-compatibility-layer",
- "async-lock 2.8.0",
- "async-std",
- "async-trait",
- "bincode",
- "bitvec",
- "blake3",
- "cdn-proto",
- "committable",
- "custom_debug",
- "derivative",
- "digest 0.10.7",
- "displaydoc",
- "dyn-clone 1.0.17 (git+https://github.com/dtolnay/dyn-clone?tag=1.0.17)",
- "either",
- "espresso-systems-common",
- "ethereum-types",
- "futures",
- "generic-array",
- "jf-pcs",
- "jf-signature",
- "jf-utils",
- "jf-vid",
- "lazy_static",
- "libp2p",
- "memoize",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "reqwest",
- "serde",
- "serde_bytes",
- "sha2 0.10.8",
- "snafu",
- "tagged-base64",
- "time 0.3.36",
- "tokio",
- "tracing",
- "typenum",
- "url",
- "vbs",
- "vec1",
-]
-
-[[package]]
-name = "hotshot-types"
-version = "0.1.11"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#4cc37458dfacfcdff340ef5e0bbbe6183367fb77"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#2d391be364524b585c50f3b83f5ad238b4cb3360"
 dependencies = [
  "anyhow",
  "ark-bn254",
@@ -4427,7 +4372,7 @@ dependencies = [
 [[package]]
 name = "libp2p-networking"
 version = "0.5.71"
-source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#4cc37458dfacfcdff340ef5e0bbbe6183367fb77"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71#2d391be364524b585c50f3b83f5ad238b4cb3360"
 dependencies = [
  "anyhow",
  "async-compatibility-layer",
@@ -4441,7 +4386,7 @@ dependencies = [
  "derive_builder",
  "either",
  "futures",
- "hotshot-types 0.1.11 (git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.71)",
+ "hotshot-types",
  "lazy_static",
  "libp2p",
  "libp2p-identity",
