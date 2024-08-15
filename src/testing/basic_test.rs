@@ -48,7 +48,6 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::sync::Arc;
     use std::time::Duration;
-    use vbs::version::StaticVersion;
 
     use serde::{Deserialize, Serialize};
     /// This test simulates multiple builder states receiving messages from the channels and processing them
@@ -82,12 +81,6 @@ mod tests {
             type InstanceState = TestInstanceState;
             type Membership = GeneralStaticCommittee<TestTypes, Self::SignatureKey>;
             type BuilderSignatureKey = BuilderKey;
-            type Base = StaticVersion<0, 1>;
-            type Upgrade = StaticVersion<0, 2>;
-            const UPGRADE_HASH: [u8; 32] = [
-                1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0,
-                0, 0, 0, 0,
-            ];
             type AuctionResult = TestAuctionResult;
         }
         // no of test messages to send
@@ -175,7 +168,9 @@ mod tests {
                 <TestBlockPayload as BlockPayload<TestTypes>>::from_transactions(
                     vec![tx.clone()],
                     &TestValidatedState::default(),
-                    &TestInstanceState {},
+                    &TestInstanceState {
+                        ..Default::default()
+                    },
                 )
                 .await
                 .unwrap();
@@ -210,7 +205,9 @@ mod tests {
                 0 => {
                     QuorumCertificate::<TestTypes>::genesis(
                         &TestValidatedState::default(),
-                        &TestInstanceState {},
+                        &TestInstanceState {
+                            ..Default::default()
+                        },
                     )
                     .await
                 }
@@ -283,7 +280,15 @@ mod tests {
             // Prepare the decide message
             // let qc = QuorumCertificate::<TestTypes>::genesis();
             let leaf = match i {
-                0 => Leaf::genesis(&TestValidatedState::default(), &TestInstanceState {}).await,
+                0 => {
+                    Leaf::genesis(
+                        &TestValidatedState::default(),
+                        &TestInstanceState {
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                }
                 _ => {
                     let block_payload = BlockPayload::<TestTypes>::from_bytes(
                         &encoded_transactions,
@@ -369,7 +374,9 @@ mod tests {
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
                 Duration::from_millis(10), // max time to wait for non-zero txn block
                 0,                         // base fee
-                Arc::new(TestInstanceState {}),
+                Arc::new(TestInstanceState {
+                    ..Default::default()
+                }),
                 Duration::from_secs(3600), // duration for txn garbage collection
                 Arc::new(TestValidatedState::default()),
             );
