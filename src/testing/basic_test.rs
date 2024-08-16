@@ -19,7 +19,6 @@ pub use async_broadcast::{
 mod tests {
     use super::*;
     use std::collections::VecDeque;
-    use std::u64;
     use std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
 
     use async_compatibility_layer::channel::unbounded;
