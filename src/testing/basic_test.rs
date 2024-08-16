@@ -19,6 +19,7 @@ pub use async_broadcast::{
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+    use std::u64;
     use std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
 
     use async_compatibility_layer::channel::unbounded;
@@ -312,8 +313,13 @@ mod tests {
             // validate the signature before pushing the message to the builder_state channels
             // currently this step happens in the service.rs, wheneve we receiver an hotshot event
             tracing::debug!("Sending transaction message: {:?}", tx);
-            for res in
-                handle_received_txns(&tx_sender, vec![tx.clone()], TransactionSource::HotShot).await
+            for res in handle_received_txns(
+                &tx_sender,
+                vec![tx.clone()],
+                TransactionSource::HotShot,
+                u64::MAX,
+            )
+            .await
             {
                 res.unwrap();
             }

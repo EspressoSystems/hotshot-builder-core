@@ -525,9 +525,16 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             let actual_txn_count = payload.num_transactions(&metadata);
 
             // Payload is empty despite us checking that tx_queue isn't empty earlier.
-            // This indicates that the block was truncated due to sequencer block length
-            // limits and we have a transaction too big to ever be included in the head of
-            // our queue. We need to drop it and mark as "included" so that if we receive
+            //
+            // This means that the block was truncated due to *sequencer* block length
+            // limits, which are different from our `max_block_size`. There's no good way
+            // for us to check for this in advance, so we detect transactions too big for
+            // the sequencer indirectly, by observing that we passed some transactions
+            // to `<TYPES::BlockPayload as BlockPayload<TYPES>>::from_transactions`, but
+            // it returned an empty block.
+            // Thus we deduce that the first transaction in our queue is too big to *ever*
+            // be included, because it alone goes over sequencer's block size limit.
+            // We need to drop it and mark as "included" so that if we receive
             // it again we don't even bother with it.
             if actual_txn_count == 0 {
                 if let Some(txn) = self.tx_queue.pop_front() {
