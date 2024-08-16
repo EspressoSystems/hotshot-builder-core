@@ -422,6 +422,12 @@
 <a href="#422" id="422">422</a>
 <a href="#423" id="423">423</a>
 <a href="#424" id="424">424</a>
+<a href="#425" id="425">425</a>
+<a href="#426" id="426">426</a>
+<a href="#427" id="427">427</a>
+<a href="#428" id="428">428</a>
+<a href="#429" id="429">429</a>
+<a href="#430" id="430">430</a>
 </pre></div><pre class="rust"><code><span class="kw">pub use </span>hotshot::traits::election::static_committee::GeneralStaticCommittee;
 <span class="kw">pub use </span>hotshot_types::{
     data::{DaProposal, Leaf, QuorumProposal, ViewNumber},
@@ -442,6 +448,7 @@
 </span><span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
     <span class="kw">use super</span>::<span class="kw-2">*</span>;
+    <span class="kw">use </span>std::collections::VecDeque;
     <span class="kw">use </span>std::{hash::Hash, marker::PhantomData, num::NonZeroUsize};
 
     <span class="kw">use </span>async_compatibility_layer::channel::unbounded;
@@ -524,7 +531,7 @@
         <span class="kw">let </span>(tx_sender, tx_receiver) = broadcast::&lt;Arc&lt;ReceivedTransaction&lt;TestTypes&gt;&gt;&gt;(
             num_test_messages * multiplication_factor,
         );
-        <span class="kw">let </span>tx_queue = Vec::new();
+        <span class="kw">let </span>tx_queue = VecDeque::new();
         <span class="comment">// generate the keys for the buidler
         </span><span class="kw">let </span>seed = [<span class="number">201_u8</span>; <span class="number">32</span>];
         <span class="kw">let </span>(_builder_pub_key, _builder_private_key) =
@@ -735,8 +742,13 @@
             <span class="comment">// validate the signature before pushing the message to the builder_state channels
             // currently this step happens in the service.rs, wheneve we receiver an hotshot event
             </span><span class="macro">tracing::debug!</span>(<span class="string">"Sending transaction message: {:?}"</span>, tx);
-            <span class="kw">for </span>res <span class="kw">in
-                </span>handle_received_txns(<span class="kw-2">&amp;</span>tx_sender, <span class="macro">vec!</span>[tx.clone()], TransactionSource::HotShot).<span class="kw">await
+            <span class="kw">for </span>res <span class="kw">in </span>handle_received_txns(
+                <span class="kw-2">&amp;</span>tx_sender,
+                <span class="macro">vec!</span>[tx.clone()],
+                TransactionSource::HotShot,
+                u64::MAX,
+            )
+            .<span class="kw">await
             </span>{
                 res.unwrap();
             }

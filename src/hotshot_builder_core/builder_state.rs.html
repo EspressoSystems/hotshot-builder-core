@@ -855,6 +855,50 @@
 <a href="#855" id="855">855</a>
 <a href="#856" id="856">856</a>
 <a href="#857" id="857">857</a>
+<a href="#858" id="858">858</a>
+<a href="#859" id="859">859</a>
+<a href="#860" id="860">860</a>
+<a href="#861" id="861">861</a>
+<a href="#862" id="862">862</a>
+<a href="#863" id="863">863</a>
+<a href="#864" id="864">864</a>
+<a href="#865" id="865">865</a>
+<a href="#866" id="866">866</a>
+<a href="#867" id="867">867</a>
+<a href="#868" id="868">868</a>
+<a href="#869" id="869">869</a>
+<a href="#870" id="870">870</a>
+<a href="#871" id="871">871</a>
+<a href="#872" id="872">872</a>
+<a href="#873" id="873">873</a>
+<a href="#874" id="874">874</a>
+<a href="#875" id="875">875</a>
+<a href="#876" id="876">876</a>
+<a href="#877" id="877">877</a>
+<a href="#878" id="878">878</a>
+<a href="#879" id="879">879</a>
+<a href="#880" id="880">880</a>
+<a href="#881" id="881">881</a>
+<a href="#882" id="882">882</a>
+<a href="#883" id="883">883</a>
+<a href="#884" id="884">884</a>
+<a href="#885" id="885">885</a>
+<a href="#886" id="886">886</a>
+<a href="#887" id="887">887</a>
+<a href="#888" id="888">888</a>
+<a href="#889" id="889">889</a>
+<a href="#890" id="890">890</a>
+<a href="#891" id="891">891</a>
+<a href="#892" id="892">892</a>
+<a href="#893" id="893">893</a>
+<a href="#894" id="894">894</a>
+<a href="#895" id="895">895</a>
+<a href="#896" id="896">896</a>
+<a href="#897" id="897">897</a>
+<a href="#898" id="898">898</a>
+<a href="#899" id="899">899</a>
+<a href="#900" id="900">900</a>
+<a href="#901" id="901">901</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot_types::{
     data::{DaProposal, Leaf, QuorumProposal},
     message::Proposal,
@@ -889,7 +933,7 @@
 <span class="attr">#[cfg(async_executor_impl = <span class="string">"tokio"</span>)]
 </span><span class="kw">use </span>tokio::task::spawn_blocking;
 
-<span class="kw">use </span>std::collections::{HashMap, HashSet};
+<span class="kw">use </span>std::collections::{HashMap, HashSet, VecDeque};
 <span class="kw">use </span>std::fmt::Debug;
 <span class="kw">use </span>std::sync::Arc;
 <span class="kw">use </span>std::time::Instant;
@@ -944,6 +988,8 @@
     <span class="kw">pub </span>metadata: &lt;&lt;TYPES <span class="kw">as </span>NodeType&gt;::BlockPayload <span class="kw">as </span>BlockPayload&lt;TYPES&gt;&gt;::Metadata,
     <span class="kw">pub </span>vid_trigger: OneShotSender&lt;TriggerStatus&gt;,
     <span class="kw">pub </span>vid_receiver: UnboundedReceiver&lt;(VidCommitment, VidPrecomputeData)&gt;,
+    <span class="comment">// Could we have included more transactions, but chose not to?
+    </span><span class="kw">pub </span>truncated: bool,
 }
 
 <span class="doccomment">/// Response Message to be put on the response channel
@@ -1026,7 +1072,7 @@
     </span><span class="kw">pub </span>tx_receiver: BroadcastReceiver&lt;Arc&lt;ReceivedTransaction&lt;TYPES&gt;&gt;&gt;,
 
     <span class="doccomment">/// filtered queue of available transactions, taken from tx_receiver
-    </span><span class="kw">pub </span>tx_queue: Vec&lt;Arc&lt;ReceivedTransaction&lt;TYPES&gt;&gt;&gt;,
+    </span><span class="kw">pub </span>tx_queue: VecDeque&lt;Arc&lt;ReceivedTransaction&lt;TYPES&gt;&gt;&gt;,
 
     <span class="doccomment">/// global state handle, defined in the service.rs
     </span><span class="kw">pub </span>global_state: Arc&lt;RwLock&lt;GlobalState&lt;TYPES&gt;&gt;&gt;,
@@ -1347,9 +1393,30 @@
 
             async_sleep(sleep_interval).<span class="kw">await
         </span>}
+
+        <span class="comment">// Don't build an empty block
+        </span><span class="kw">if </span><span class="self">self</span>.tx_queue.is_empty() {
+            <span class="kw">return </span><span class="prelude-val">None</span>;
+        }
+
+        <span class="kw">let </span>max_block_size = <span class="self">self</span>.global_state.read_arc().<span class="kw">await</span>.max_block_size;
+        <span class="kw">let </span>transactions_to_include = <span class="self">self</span>.tx_queue.iter().scan(<span class="number">0</span>, |total_size, tx| {
+            <span class="kw">let </span>prev_size = <span class="kw-2">*</span>total_size;
+            <span class="kw-2">*</span>total_size += tx.len;
+            <span class="comment">// We will include one transaction over our target block length
+            // if it's the first transaction in queue, otherwise we'd have a possible failure
+            // state where a single transaction larger than target block state is stuck in
+            // queue and we just build empty blocks forever
+            </span><span class="kw">if </span><span class="kw-2">*</span>total_size &gt;= max_block_size &amp;&amp; prev_size != <span class="number">0 </span>{
+                <span class="prelude-val">None
+            </span>} <span class="kw">else </span>{
+                <span class="prelude-val">Some</span>(tx.tx.clone())
+            }
+        });
+
         <span class="kw">if let </span><span class="prelude-val">Ok</span>((payload, metadata)) =
             &lt;TYPES::BlockPayload <span class="kw">as </span>BlockPayload&lt;TYPES&gt;&gt;::from_transactions(
-                <span class="self">self</span>.tx_queue.iter().map(|tx| tx.tx.clone()),
+                transactions_to_include,
                 <span class="kw-2">&amp;</span><span class="self">self</span>.validated_state,
                 <span class="kw-2">&amp;</span><span class="self">self</span>.instance_state,
             )
@@ -1357,7 +1424,27 @@
         </span>{
             <span class="kw">let </span>builder_hash = payload.builder_commitment(<span class="kw-2">&amp;</span>metadata);
             <span class="comment">// count the number of txns
-            </span><span class="kw">let </span>txn_count = <span class="self">self</span>.tx_queue.len();
+            </span><span class="kw">let </span>actual_txn_count = payload.num_transactions(<span class="kw-2">&amp;</span>metadata);
+
+            <span class="comment">// Payload is empty despite us checking that tx_queue isn't empty earlier.
+            //
+            // This means that the block was truncated due to *sequencer* block length
+            // limits, which are different from our `max_block_size`. There's no good way
+            // for us to check for this in advance, so we detect transactions too big for
+            // the sequencer indirectly, by observing that we passed some transactions
+            // to `&lt;TYPES::BlockPayload as BlockPayload&lt;TYPES&gt;&gt;::from_transactions`, but
+            // it returned an empty block.
+            // Thus we deduce that the first transaction in our queue is too big to *ever*
+            // be included, because it alone goes over sequencer's block size limit.
+            // We need to drop it and mark as "included" so that if we receive
+            // it again we don't even bother with it.
+            </span><span class="kw">if </span>actual_txn_count == <span class="number">0 </span>{
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(txn) = <span class="self">self</span>.tx_queue.pop_front() {
+                    <span class="self">self</span>.txns_in_queue.remove(<span class="kw-2">&amp;</span>txn.commit);
+                    <span class="self">self</span>.included_txns.insert(txn.commit);
+                };
+                <span class="kw">return </span><span class="prelude-val">None</span>;
+            }
 
             <span class="comment">// insert the recently built block into the builder commitments
             </span><span class="self">self</span>.builder_commitments
@@ -1393,7 +1480,7 @@
             <span class="macro">tracing::info!</span>(
                 <span class="string">"Builder view num {:?}, building block with {:?} txns, with builder hash {:?}"</span>,
                 <span class="self">self</span>.built_from_proposed_block.view_number,
-                txn_count,
+                actual_txn_count,
                 builder_hash
             );
 
@@ -1408,6 +1495,7 @@
                 metadata,
                 vid_trigger: trigger_send,
                 vid_receiver: unbounded_receiver,
+                truncated: actual_txn_count &lt; <span class="self">self</span>.tx_queue.len(),
             })
         } <span class="kw">else </span>{
             <span class="macro">tracing::warn!</span>(<span class="string">"build block, returning None"</span>);
@@ -1601,7 +1689,7 @@
         qc_receiver: BroadcastReceiver&lt;MessageType&lt;TYPES&gt;&gt;,
         req_receiver: BroadcastReceiver&lt;MessageType&lt;TYPES&gt;&gt;,
         tx_receiver: BroadcastReceiver&lt;Arc&lt;ReceivedTransaction&lt;TYPES&gt;&gt;&gt;,
-        tx_queue: Vec&lt;Arc&lt;ReceivedTransaction&lt;TYPES&gt;&gt;&gt;,
+        tx_queue: VecDeque&lt;Arc&lt;ReceivedTransaction&lt;TYPES&gt;&gt;&gt;,
         global_state: Arc&lt;RwLock&lt;GlobalState&lt;TYPES&gt;&gt;&gt;,
         num_nodes: NonZeroUsize,
         maximize_txn_capture_timeout: Duration,
@@ -1698,7 +1786,7 @@
                         <span class="kw">continue</span>;
                     }
                     <span class="self">self</span>.txns_in_queue.insert(tx.commit);
-                    <span class="self">self</span>.tx_queue.push(tx);
+                    <span class="self">self</span>.tx_queue.push_back(tx);
                 }
                 <span class="prelude-val">Err</span>(async_broadcast::TryRecvError::Empty)
                 | <span class="prelude-val">Err</span>(async_broadcast::TryRecvError::Closed) =&gt; {
