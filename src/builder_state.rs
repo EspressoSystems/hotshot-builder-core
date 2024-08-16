@@ -500,14 +500,15 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
 
         let max_block_size = self.global_state.read_arc().await.max_block_size;
         let transactions_to_include = self.tx_queue.iter().scan(0, |total_size, tx| {
-            if *total_size >= max_block_size {
+            let prev_size = *total_size;
+            *total_size += tx.len;
+            // We will include one transaction over our target block length
+            // if it's the first transaction in queue, otherwise we'd have a possible failure
+            // state where a single transaction larger than target block state is stuck in
+            // queue and we just build empty blocks forever
+            if *total_size >= max_block_size && prev_size != 0 {
                 None
             } else {
-                // This way we will include one transaction over our target block length.
-                // This is done on purpose, otherwise we'd have a possible failure state
-                // where a single transaction larger than target block state is stuck in
-                // queue and we just build empty blocks
-                *total_size += tx.len;
                 Some(tx.tx.clone())
             }
         });
