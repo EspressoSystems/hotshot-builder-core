@@ -32,7 +32,7 @@ use async_std::task::spawn_blocking;
 #[cfg(async_executor_impl = "tokio")]
 use tokio::task::spawn_blocking;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
@@ -87,6 +87,8 @@ pub struct BuildBlockInfo<TYPES: NodeType> {
     pub metadata: <<TYPES as NodeType>::BlockPayload as BlockPayload<TYPES>>::Metadata,
     pub vid_trigger: OneShotSender<TriggerStatus>,
     pub vid_receiver: UnboundedReceiver<(VidCommitment, VidPrecomputeData)>,
+    // Could we have included more transactions, but chose not to?
+    pub truncated: bool,
 }
 
 /// Response Message to be put on the response channel
@@ -169,7 +171,7 @@ pub struct BuilderState<TYPES: NodeType> {
     pub tx_receiver: BroadcastReceiver<Arc<ReceivedTransaction<TYPES>>>,
 
     /// filtered queue of available transactions, taken from tx_receiver
-    pub tx_queue: Vec<Arc<ReceivedTransaction<TYPES>>>,
+    pub tx_queue: VecDeque<Arc<ReceivedTransaction<TYPES>>>,
 
     /// global state handle, defined in the service.rs
     pub global_state: Arc<RwLock<GlobalState<TYPES>>>,
@@ -490,9 +492,30 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
 
             async_sleep(sleep_interval).await
         }
+
+        // Don't build an empty block
+        if self.tx_queue.is_empty() {
+            return None;
+        }
+
+        let max_block_size = self.global_state.read_arc().await.max_block_size;
+        let transactions_to_include = self.tx_queue.iter().scan(0, |total_size, tx| {
+            let prev_size = *total_size;
+            *total_size += tx.len;
+            // We will include one transaction over our target block length
+            // if it's the first transaction in queue, otherwise we'd have a possible failure
+            // state where a single transaction larger than target block state is stuck in
+            // queue and we just build empty blocks forever
+            if *total_size >= max_block_size && prev_size != 0 {
+                None
+            } else {
+                Some(tx.tx.clone())
+            }
+        });
+
         if let Ok((payload, metadata)) =
             <TYPES::BlockPayload as BlockPayload<TYPES>>::from_transactions(
-                self.tx_queue.iter().map(|tx| tx.tx.clone()),
+                transactions_to_include,
                 &self.validated_state,
                 &self.instance_state,
             )
@@ -500,7 +523,27 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         {
             let builder_hash = payload.builder_commitment(&metadata);
             // count the number of txns
-            let txn_count = self.tx_queue.len();
+            let actual_txn_count = payload.num_transactions(&metadata);
+
+            // Payload is empty despite us checking that tx_queue isn't empty earlier.
+            //
+            // This means that the block was truncated due to *sequencer* block length
+            // limits, which are different from our `max_block_size`. There's no good way
+            // for us to check for this in advance, so we detect transactions too big for
+            // the sequencer indirectly, by observing that we passed some transactions
+            // to `<TYPES::BlockPayload as BlockPayload<TYPES>>::from_transactions`, but
+            // it returned an empty block.
+            // Thus we deduce that the first transaction in our queue is too big to *ever*
+            // be included, because it alone goes over sequencer's block size limit.
+            // We need to drop it and mark as "included" so that if we receive
+            // it again we don't even bother with it.
+            if actual_txn_count == 0 {
+                if let Some(txn) = self.tx_queue.pop_front() {
+                    self.txns_in_queue.remove(&txn.commit);
+                    self.included_txns.insert(txn.commit);
+                };
+                return None;
+            }
 
             // insert the recently built block into the builder commitments
             self.builder_commitments
@@ -536,7 +579,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
             tracing::info!(
                 "Builder view num {:?}, building block with {:?} txns, with builder hash {:?}",
                 self.built_from_proposed_block.view_number,
-                txn_count,
+                actual_txn_count,
                 builder_hash
             );
 
@@ -551,6 +594,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
                 metadata,
                 vid_trigger: trigger_send,
                 vid_receiver: unbounded_receiver,
+                truncated: actual_txn_count < self.tx_queue.len(),
             })
         } else {
             tracing::warn!("build block, returning None");
@@ -744,7 +788,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
         qc_receiver: BroadcastReceiver<MessageType<TYPES>>,
         req_receiver: BroadcastReceiver<MessageType<TYPES>>,
         tx_receiver: BroadcastReceiver<Arc<ReceivedTransaction<TYPES>>>,
-        tx_queue: Vec<Arc<ReceivedTransaction<TYPES>>>,
+        tx_queue: VecDeque<Arc<ReceivedTransaction<TYPES>>>,
         global_state: Arc<RwLock<GlobalState<TYPES>>>,
         num_nodes: NonZeroUsize,
         maximize_txn_capture_timeout: Duration,
@@ -841,7 +885,7 @@ impl<TYPES: NodeType> BuilderState<TYPES> {
                         continue;
                     }
                     self.txns_in_queue.insert(tx.commit);
-                    self.tx_queue.push(tx);
+                    self.tx_queue.push_back(tx);
                 }
                 Err(async_broadcast::TryRecvError::Empty)
                 | Err(async_broadcast::TryRecvError::Closed) => {

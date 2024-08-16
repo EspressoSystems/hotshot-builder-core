@@ -60,6 +60,18 @@ use std::{fmt::Display, time::Instant};
 use tagged_base64::TaggedBase64;
 use tide_disco::{method::ReadState, Url};
 
+// Start assuming we're fine calculatig VID for 100 kilobyte blocks
+const INITIAL_MAX_BLOCK_SIZE: u64 = 100_000;
+// Never go lower than 10 kilobytes
+const MAX_BLOCK_SIZE_FLOOR: u64 = 10_000;
+// When adjusting max block size, we it will be decremented or incremented
+// by current value / [`MAX_BLOCK_SIZE_CHANGE_DIVISOR`]
+const MAX_BLOCK_SIZE_CHANGE_DIVISOR: u64 = 10;
+// We will not increment max block value if we aren't able to serve a response
+// with a margin below [`ProxyGlobalState::max_api_waiting_time`]
+// more than [`ProxyGlobalState::max_api_waiting_time`] / `VID_RESPONSE_TARGET_MARGIN_DIVISOR`
+const VID_RESPONSE_TARGET_MARGIN_DIVISOR: u32 = 10;
+
 // It holds all the necessary information for a block
 #[derive(Debug)]
 pub struct BlockInfo<Types: NodeType> {
@@ -68,6 +80,8 @@ pub struct BlockInfo<Types: NodeType> {
     pub vid_trigger: Arc<RwLock<Option<OneShotSender<TriggerStatus>>>>,
     pub vid_receiver: Arc<RwLock<WaitAndKeep<(VidCommitment, VidPrecomputeData)>>>,
     pub offered_fee: u64,
+    // Could we have included more transactions with this block, but chose not to?
+    pub truncated: bool,
 }
 
 // It holds the information for the proposed block
@@ -105,9 +119,11 @@ pub struct BuilderStatesInfo<Types: NodeType> {
 pub struct ReceivedTransaction<Types: NodeType> {
     // the transaction
     pub tx: Types::Transaction,
-    // its hash
+    // transaction's hash
     pub commit: Commitment<Types::Transaction>,
-    // its source
+    // transaction's esitmated length
+    pub len: u64,
+    // transaction's source
     pub source: TransactionSource,
     // received time
     pub time_in: Instant,
@@ -135,6 +151,9 @@ pub struct GlobalState<Types: NodeType> {
 
     // highest view running builder task
     pub highest_view_num_builder_id: BuilderStateId<Types>,
+
+    // estimated maximum block size we can build in time
+    pub max_block_size: u64,
 }
 
 impl<Types: NodeType> GlobalState<Types> {
@@ -160,6 +179,7 @@ impl<Types: NodeType> GlobalState<Types> {
             last_garbage_collected_view_num,
             builder_state_to_last_built_block: Default::default(),
             highest_view_num_builder_id: bootstrap_id,
+            max_block_size: INITIAL_MAX_BLOCK_SIZE,
         }
     }
 
@@ -203,6 +223,7 @@ impl<Types: NodeType> GlobalState<Types> {
                         build_block_info.vid_receiver,
                     ))),
                     offered_fee: build_block_info.offered_fee,
+                    truncated: build_block_info.truncated,
                 },
             );
         }
@@ -234,7 +255,13 @@ impl<Types: NodeType> GlobalState<Types> {
         &self,
         txns: Vec<<Types as NodeType>::Transaction>,
     ) -> Vec<Result<Commitment<<Types as NodeType>::Transaction>, BuildError>> {
-        handle_received_txns(&self.tx_sender, txns, TransactionSource::External).await
+        handle_received_txns(
+            &self.tx_sender,
+            txns,
+            TransactionSource::External,
+            self.max_block_size,
+        )
+        .await
     }
 
     pub fn get_channel_for_matching_builder_or_highest_view_buider(
@@ -599,6 +626,17 @@ where
                     Err(_toe) => {
                         if Instant::now() >= timeout_after {
                             tracing::warn!("Couldn't get vid commitment in time for block {id}",);
+                            {
+                                // we can't keep up with this block size, reduce max block size
+                                let mut global_state = self.global_state.write_arc().await;
+                                global_state.max_block_size = std::cmp::min(
+                                    global_state.max_block_size
+                                        - global_state
+                                            .max_block_size
+                                            .div_ceil(MAX_BLOCK_SIZE_CHANGE_DIVISOR),
+                                    MAX_BLOCK_SIZE_FLOOR,
+                                );
+                            }
                             break Err(BuildError::Error {
                                 message: "Couldn't get vid commitment in time".to_string(),
                             });
@@ -619,6 +657,21 @@ where
             };
 
             tracing::info!("Got vid commitment for block {id}",);
+
+            // This block was truncated, but we got VID in time with margin left.
+            // Maybe we can handle bigger blocks?
+            if block_info.truncated
+                && timeout_after.duration_since(Instant::now())
+                    > self.max_api_waiting_time / VID_RESPONSE_TARGET_MARGIN_DIVISOR
+            {
+                // Increase max block size
+                let mut global_state = self.global_state.write_arc().await;
+                global_state.max_block_size = global_state.max_block_size
+                    + global_state
+                        .max_block_size
+                        .div_ceil(MAX_BLOCK_SIZE_CHANGE_DIVISOR);
+            }
+
             if response_received.is_ok() {
                 let (vid_commitment, vid_precompute_data) =
                     response_received.map_err(|err| BuildError::Error {
@@ -785,11 +838,11 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType, V:
     // sending a Decide event from the hotshot to the builder states
     decide_sender: BroadcastSender<MessageType<Types>>,
 
-    // shared accumulated transactions handle
-    tx_sender: BroadcastSender<Arc<ReceivedTransaction<Types>>>,
-
     // Url to (re)connect to for the events stream
     hotshot_events_api_url: Url,
+
+    // Global state
+    global_state: Arc<RwLock<GlobalState<Types>>>,
 ) -> Result<(), anyhow::Error> {
     // connection to the events stream
     let connected = connect_to_events_service::<Types, V>(hotshot_events_api_url.clone()).await;
@@ -800,6 +853,8 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType, V:
     }
     let (mut subscribed_events, mut membership) =
         connected.context("Failed to connect to events service")?;
+
+    let tx_sender = global_state.read_arc().await.tx_sender.clone();
 
     loop {
         let event = subscribed_events.next().await;
@@ -812,8 +867,14 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType, V:
                     }
                     // tx event
                     EventType::Transactions { transactions } => {
-                        handle_received_txns(&tx_sender, transactions, TransactionSource::HotShot)
-                            .await;
+                        let max_block_size = global_state.read_arc().await.max_block_size;
+                        handle_received_txns(
+                            &tx_sender,
+                            transactions,
+                            TransactionSource::HotShot,
+                            max_block_size,
+                        )
+                        .await;
                     }
                     // decide event
                     EventType::Decide {
@@ -878,9 +939,6 @@ pub async fn run_permissioned_standalone_builder_service<
     I: NodeImplementation<Types>,
     V: Versions,
 >(
-    // sending received transactions
-    tx_sender: BroadcastSender<Arc<ReceivedTransaction<Types>>>,
-
     // sending a DA proposal from the hotshot to the builder states
     da_sender: BroadcastSender<MessageType<Types>>,
 
@@ -892,8 +950,12 @@ pub async fn run_permissioned_standalone_builder_service<
 
     // hotshot context handle
     hotshot_handle: Arc<SystemContextHandle<Types, I, V>>,
+
+    // Global state
+    global_state: Arc<RwLock<GlobalState<Types>>>,
 ) {
     let mut event_stream = hotshot_handle.event_stream();
+    let tx_sender = global_state.read_arc().await.tx_sender.clone();
     loop {
         tracing::debug!("Waiting for events from HotShot");
         match event_stream.next().await {
@@ -908,8 +970,14 @@ pub async fn run_permissioned_standalone_builder_service<
                     }
                     // tx event
                     EventType::Transactions { transactions } => {
-                        handle_received_txns(&tx_sender, transactions, TransactionSource::HotShot)
-                            .await;
+                        let max_block_size = global_state.read_arc().await.max_block_size;
+                        handle_received_txns(
+                            &tx_sender,
+                            transactions,
+                            TransactionSource::HotShot,
+                            max_block_size,
+                        )
+                        .await;
                     }
                     // decide event
                     EventType::Decide { leaf_chain, .. } => {
@@ -1057,17 +1125,30 @@ pub(crate) async fn handle_received_txns<Types: NodeType>(
     tx_sender: &BroadcastSender<Arc<ReceivedTransaction<Types>>>,
     txns: Vec<Types::Transaction>,
     source: TransactionSource,
+    max_txn_len: u64,
 ) -> Vec<Result<Commitment<<Types as NodeType>::Transaction>, BuildError>> {
     let mut results = Vec::with_capacity(txns.len());
     let time_in = Instant::now();
     for tx in txns.into_iter() {
         let commit = tx.commit();
+        // This is a rough estimate, but we don't have any other way to get real
+        // encoded transaction length. Luckily, this being roughly proportional
+        // to encoded length is enough, because we only use this value to estimate
+        // our limitations on computing the VID in time.
+        let len = bincode::serialized_size(&tx).unwrap_or_default();
+        if len > max_txn_len {
+            results.push(Err(BuildError::Error {
+                message: format!("Transaction too big (estimated length {len}, currently accepting <= {max_txn_len})"),
+            }));
+            continue;
+        }
         let res = tx_sender
             .try_broadcast(Arc::new(ReceivedTransaction {
                 tx,
                 source: source.clone(),
                 commit,
                 time_in,
+                len,
             }))
             .inspect(|val| {
                 if let Some(evicted_txn) = val {
