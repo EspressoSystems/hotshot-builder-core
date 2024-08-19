@@ -412,7 +412,7 @@ where
         let time_to_wait_for_matching_builder = starting_time + self.max_api_waiting_time / 2;
 
         let mut sent = false;
-        while !sent && Instant::now() < time_to_wait_for_matching_builder {
+        while Instant::now() < time_to_wait_for_matching_builder {
             // try to broadcast the request to the correct builder state
             if let Some(builder) = self
                 .global_state
@@ -431,12 +431,11 @@ where
                     tracing::warn!("Error {e} sending get_available_blocks request for {state_id}",);
                 }
                 sent = true;
-            } else {
-                tracing::info!(
-                    "Failed to get matching BlockBuilder for {state_id}, will try again",
-                );
-                async_sleep(check_duration).await
+                break;
             }
+
+            tracing::info!("Failed to get matching BlockBuilder for {state_id}, will try again",);
+            async_sleep(check_duration).await;
         }
 
         if !sent {
