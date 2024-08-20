@@ -169,9 +169,7 @@ mod tests {
                 <TestBlockPayload as BlockPayload<TestTypes>>::from_transactions(
                     vec![tx.clone()],
                     &TestValidatedState::default(),
-                    &TestInstanceState {
-                        ..Default::default()
-                    },
+                    &TestInstanceState::default(),
                 )
                 .await
                 .unwrap();
@@ -206,9 +204,7 @@ mod tests {
                 0 => {
                     QuorumCertificate::<TestTypes>::genesis(
                         &TestValidatedState::default(),
-                        &TestInstanceState {
-                            ..Default::default()
-                        },
+                        &TestInstanceState::default(),
                     )
                     .await
                 }
@@ -284,9 +280,7 @@ mod tests {
                 0 => {
                     Leaf::genesis(
                         &TestValidatedState::default(),
-                        &TestInstanceState {
-                            ..Default::default()
-                        },
+                        &TestInstanceState::default(),
                     )
                     .await
                 }
@@ -380,9 +374,7 @@ mod tests {
                 NonZeroUsize::new(TEST_NUM_NODES_IN_VID_COMPUTATION).unwrap(),
                 Duration::from_millis(10), // max time to wait for non-zero txn block
                 0,                         // base fee
-                Arc::new(TestInstanceState {
-                    ..Default::default()
-                }),
+                Arc::new(TestInstanceState::default()),
                 Duration::from_secs(3600), // duration for txn garbage collection
                 Arc::new(TestValidatedState::default()),
             );

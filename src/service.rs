@@ -844,7 +844,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType, V:
     global_state: Arc<RwLock<GlobalState<Types>>>,
 ) -> Result<(), anyhow::Error> {
     // connection to the events stream
-    let connected = connect_to_events_service::<Types, V>(hotshot_events_api_url.clone()).await;
+    let connected = connect_to_events_service::<_, V>(hotshot_events_api_url.clone()).await;
     if connected.is_none() {
         return Err(anyhow!(
             "failed to connect to API at {hotshot_events_api_url}"
@@ -917,7 +917,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType, V:
             None => {
                 tracing::error!("Event stream ended");
                 let connected =
-                    connect_to_events_service::<Types, V>(hotshot_events_api_url.clone()).await;
+                    connect_to_events_service::<_, V>(hotshot_events_api_url.clone()).await;
                 if connected.is_none() {
                     return Err(anyhow!(
                         "failed to reconnect to API at {hotshot_events_api_url}"
