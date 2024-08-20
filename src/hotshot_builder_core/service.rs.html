@@ -1173,7 +1173,6 @@
 <a href="#1173" id="1173">1173</a>
 <a href="#1174" id="1174">1174</a>
 <a href="#1175" id="1175">1175</a>
-<a href="#1176" id="1176">1176</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::{Event, SystemContextHandle},
@@ -1588,7 +1587,7 @@ Handling Builder API responses
         <span class="kw">let </span>time_to_wait_for_matching_builder = starting_time + <span class="self">self</span>.max_api_waiting_time / <span class="number">2</span>;
 
         <span class="kw">let </span><span class="kw-2">mut </span>sent = <span class="bool-val">false</span>;
-        <span class="kw">while </span>!sent &amp;&amp; Instant::now() &lt; time_to_wait_for_matching_builder {
+        <span class="kw">while </span>Instant::now() &lt; time_to_wait_for_matching_builder {
             <span class="comment">// try to broadcast the request to the correct builder state
             </span><span class="kw">if let </span><span class="prelude-val">Some</span>(builder) = <span class="self">self
                 </span>.global_state
@@ -1607,12 +1606,11 @@ Handling Builder API responses
                     <span class="macro">tracing::warn!</span>(<span class="string">"Error {e} sending get_available_blocks request for {state_id}"</span>,);
                 }
                 sent = <span class="bool-val">true</span>;
-            } <span class="kw">else </span>{
-                <span class="macro">tracing::info!</span>(
-                    <span class="string">"Failed to get matching BlockBuilder for {state_id}, will try again"</span>,
-                );
-                async_sleep(check_duration).<span class="kw">await
-            </span>}
+                <span class="kw">break</span>;
+            }
+
+            <span class="macro">tracing::info!</span>(<span class="string">"Failed to get matching BlockBuilder for {state_id}, will try again"</span>,);
+            async_sleep(check_duration).<span class="kw">await</span>;
         }
 
         <span class="kw">if </span>!sent {
