@@ -17,10 +17,10 @@ clap = { version = "4.5", features = ["derive", "env"] }
 committable = "0.2"
 derivative = "2.2"
 futures = "0.3"
-hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.70" }
-hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.70" }
-hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", tag = "0.1.41" }
-hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.70" }
+hotshot = { git = "https://github.com/EspressoSystems/HotShot.git", branch = "jp/revert-3535" }
+hotshot-builder-api = { git = "https://github.com/EspressoSystems/HotShot.git", branch = "jp/revert-3535" }
+hotshot-events-service = { git = "https://github.com/EspressoSystems/hotshot-events-service.git", branch = "jp/debug-restart" }
+hotshot-types = { git = "https://github.com/EspressoSystems/HotShot.git", branch = "jp/revert-3535" }
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
 snafu = "0.8"
@@ -34,7 +34,7 @@ lru = "0.12.3"
 hex = "0.4.3"
 
 [dev-dependencies]
-hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git", tag = "0.5.70" }
+hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git", branch = "jp/revert-3535" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(async_executor_impl, values("async-std", "tokio"))'] }
