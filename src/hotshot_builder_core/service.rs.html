@@ -2019,7 +2019,7 @@ Running Non-Permissioned Builder Service
     </span>global_state: Arc&lt;RwLock&lt;GlobalState&lt;Types&gt;&gt;&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), anyhow::Error&gt; {
     <span class="comment">// connection to the events stream
-    </span><span class="kw">let </span>connected = connect_to_events_service::&lt;Types, V&gt;(hotshot_events_api_url.clone()).<span class="kw">await</span>;
+    </span><span class="kw">let </span>connected = connect_to_events_service::&lt;<span class="kw">_</span>, V&gt;(hotshot_events_api_url.clone()).<span class="kw">await</span>;
     <span class="kw">if </span>connected.is_none() {
         <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">anyhow!</span>(
             <span class="string">"failed to connect to API at {hotshot_events_api_url}"
@@ -2092,7 +2092,7 @@ Running Non-Permissioned Builder Service
             <span class="prelude-val">None </span>=&gt; {
                 <span class="macro">tracing::error!</span>(<span class="string">"Event stream ended"</span>);
                 <span class="kw">let </span>connected =
-                    connect_to_events_service::&lt;Types, V&gt;(hotshot_events_api_url.clone()).<span class="kw">await</span>;
+                    connect_to_events_service::&lt;<span class="kw">_</span>, V&gt;(hotshot_events_api_url.clone()).<span class="kw">await</span>;
                 <span class="kw">if </span>connected.is_none() {
                     <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">anyhow!</span>(
                         <span class="string">"failed to reconnect to API at {hotshot_events_api_url}"
