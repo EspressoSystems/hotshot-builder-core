@@ -41,3 +41,12 @@ hotshot-example-types = { git = "https://github.com/EspressoSystems/HotShot.git"
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(async_executor_impl, values("async-std", "tokio"))',
 ] }
+
+[patch."https://github.com/EspressoSystems/HotShot.git"]
+hotshot = { git = "https://github.com/EspressoSystems//HotShot.git", branch = "bump/rc-0.5.72" }
+hotshot-builder-api = { git = "https://github.com/EspressoSystems//HotShot.git", branch = "bump/rc-0.5.72" }
+hotshot-example-types = { git = "https://github.com/EspressoSystems//HotShot.git", branch = "bump/rc-0.5.72" }
+hotshot-types = { git = "https://github.com/EspressoSystems//HotShot.git", branch = "bump/rc-0.5.72" }
+
+[patch."https://github.com/EspressoSystems/hotshot-events-service.git"]
+hotshot-events-service = { git = "https://github.com/EspressoSystems//hotshot-events-service.git", branch = "hotshot/rc-0.5.72" }
