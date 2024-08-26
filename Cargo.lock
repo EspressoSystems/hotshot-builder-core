@@ -3039,7 +3039,7 @@ dependencies = [
 
 [[package]]
 name = "hotshot-builder-core"
-version = "0.1.39"
+version = "0.1.43"
 dependencies = [
  "anyhow",
  "async-broadcast",

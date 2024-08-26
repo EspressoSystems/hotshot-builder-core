@@ -23,20 +23,13 @@
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
 
   inputs.pre-commit-hooks.url = "github:cachix/pre-commit-hooks.nix";
-  inputs.pre-commit-hooks.inputs.flake-utils.follows = "flake-utils";
   inputs.pre-commit-hooks.inputs.nixpkgs.follows = "nixpkgs";
 
-  inputs.poetry2nixFlake = {
-    url = "github:nix-community/poetry2nix";
-    inputs.nixpkgs.follows = "nixpkgs";
-  };
-
-  outputs = { self, nixpkgs, flake-utils, rust-overlay, pre-commit-hooks, poetry2nixFlake, ... }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay, pre-commit-hooks, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-        poetry2nix = poetry2nixFlake.lib.mkPoetry2Nix { inherit pkgs; };
         rustToolchain = pkgs.rust-bin.stable.latest.minimal.override {
           extensions = [ "rustfmt" "clippy" "llvm-tools-preview" "rust-src" ];
         };
@@ -96,8 +89,6 @@
             license = with licenses; [ mit asl20 ];
           };
         };
-        pythonEnv = poetry2nix.mkPoetryEnv { projectDir = ./.; };
-        myPython = with pkgs; [ poetry pythonEnv ];
         shellHook  = ''
           # Prevent cargo aliases from using programs in `~/.cargo` to avoid conflicts with rustup
           # installations.
@@ -132,33 +123,6 @@
                 entry = "cargo clippy --workspace --all-features --all-targets -- -D clippy::dbg-macro";
                 pass_filenames = false;
               };
-              license-header-c-style = {
-                enable = true;
-                description =
-                  "Ensure files with c-style comments have license header";
-                entry = ''
-                  insert_license --license-filepath .license-header.txt  --comment-style "//"'';
-                types_or = [ "rust" ];
-                pass_filenames = true;
-              };
-              license-header-hash = {
-                enable = true;
-                description =
-                  "Ensure files with hash style comments have license header";
-                entry = ''
-                  insert_license --license-filepath .license-header.txt --comment-style "#"'';
-                types_or = [ "bash" "python" "toml" "nix" ];
-                excludes = [ "poetry.lock" ];
-                pass_filenames = true;
-              };
-              license-header-html = {
-                enable = true;
-                description = "Ensure markdown files have license header";
-                entry = ''
-                  insert_license --license-filepath .license-header.txt --comment-style "<!--| ~| -->"'';
-                types_or = [ "markdown" ];
-                pass_filenames = true;
-              };
             };
           };
         };
@@ -175,7 +139,7 @@
               mdbook # make-doc, documentation generation
               protobuf
               rustToolchain
-            ] ++ myPython ++ rustDeps;
+            ] ++ rustDeps;
 
           inherit RUST_SRC_PATH RUST_BACKTRACE RUST_LOG RUSTFLAGS;
         };
