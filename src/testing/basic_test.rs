@@ -232,13 +232,13 @@ mod tests {
                         ViewNumber::new(1 + previous_justify_qc.view_number.u64())
                     };
                     // form a justify qc
-                    SimpleCertificate::<TestTypes, QuorumData<TestTypes>, SuccessThreshold> {
-                        data: q_data.clone(),
-                        vote_commitment: q_data.commit(),
+                    SimpleCertificate::<TestTypes, QuorumData<TestTypes>, SuccessThreshold>::new(
+                        q_data.clone(),
+                        q_data.commit(),
                         view_number,
-                        signatures: previous_justify_qc.signatures.clone(),
-                        _pd: PhantomData,
-                    }
+                        previous_justify_qc.signatures.clone(),
+                        PhantomData,
+                    )
                 }
             };
             tracing::debug!("Iteration: {} justify_qc: {:?}", i, justify_qc);
