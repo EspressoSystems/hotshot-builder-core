@@ -654,13 +654,13 @@
                         ViewNumber::new(<span class="number">1 </span>+ previous_justify_qc.view_number.u64())
                     };
                     <span class="comment">// form a justify qc
-                    </span>SimpleCertificate::&lt;TestTypes, QuorumData&lt;TestTypes&gt;, SuccessThreshold&gt; {
-                        data: q_data.clone(),
-                        vote_commitment: q_data.commit(),
+                    </span>SimpleCertificate::&lt;TestTypes, QuorumData&lt;TestTypes&gt;, SuccessThreshold&gt;::new(
+                        q_data.clone(),
+                        q_data.commit(),
                         view_number,
-                        signatures: previous_justify_qc.signatures.clone(),
-                        _pd: PhantomData,
-                    }
+                        previous_justify_qc.signatures.clone(),
+                        PhantomData,
+                    )
                 }
             };
             <span class="macro">tracing::debug!</span>(<span class="string">"Iteration: {} justify_qc: {:?}"</span>, i, justify_qc);
