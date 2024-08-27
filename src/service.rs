@@ -23,6 +23,7 @@ use hotshot_types::{
     vid::{VidCommitment, VidPrecomputeData},
 };
 use lru::LruCache;
+use vbs::version::StaticVersionType;
 
 use crate::WaitAndKeep;
 use crate::{
@@ -814,18 +815,18 @@ impl<Types: NodeType> ReadState for ProxyGlobalState<Types> {
     }
 }
 
-async fn connect_to_events_service<Types: NodeType, V: Versions>(
+async fn connect_to_events_service<Types: NodeType, ApiVer: StaticVersionType>(
     hotshot_events_api_url: Url,
 ) -> Option<(
     surf_disco::socket::Connection<
         Event<Types>,
         surf_disco::socket::Unsupported,
         EventStreamError,
-        V::Base,
+        ApiVer,
     >,
     GeneralStaticCommittee<Types, <Types as NodeType>::SignatureKey>,
 )> {
-    let client = surf_disco::Client::<hotshot_events_service::events::Error, V::Base>::new(
+    let client = surf_disco::Client::<hotshot_events_service::events::Error, ApiVer>::new(
         hotshot_events_api_url.clone(),
     );
 
@@ -874,7 +875,10 @@ async fn connect_to_events_service<Types: NodeType, V: Versions>(
 /*
 Running Non-Permissioned Builder Service
 */
-pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType, V: Versions>(
+pub async fn run_non_permissioned_standalone_builder_service<
+    Types: NodeType,
+    ApiVer: StaticVersionType,
+>(
     // sending a DA proposal from the hotshot to the builder states
     da_sender: BroadcastSender<MessageType<Types>>,
 
@@ -891,7 +895,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType, V:
     global_state: Arc<RwLock<GlobalState<Types>>>,
 ) -> Result<(), anyhow::Error> {
     // connection to the events stream
-    let connected = connect_to_events_service::<_, V>(hotshot_events_api_url.clone()).await;
+    let connected = connect_to_events_service::<_, ApiVer>(hotshot_events_api_url.clone()).await;
     if connected.is_none() {
         return Err(anyhow!(
             "failed to connect to API at {hotshot_events_api_url}"
@@ -975,7 +979,7 @@ pub async fn run_non_permissioned_standalone_builder_service<Types: NodeType, V:
             None => {
                 tracing::error!("Event stream ended");
                 let connected =
-                    connect_to_events_service::<_, V>(hotshot_events_api_url.clone()).await;
+                    connect_to_events_service::<_, ApiVer>(hotshot_events_api_url.clone()).await;
                 if connected.is_none() {
                     return Err(anyhow!(
                         "failed to reconnect to API at {hotshot_events_api_url}"
