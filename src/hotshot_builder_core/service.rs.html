@@ -1243,6 +1243,10 @@
 <a href="#1243" id="1243">1243</a>
 <a href="#1244" id="1244">1244</a>
 <a href="#1245" id="1245">1245</a>
+<a href="#1246" id="1246">1246</a>
+<a href="#1247" id="1247">1247</a>
+<a href="#1248" id="1248">1248</a>
+<a href="#1249" id="1249">1249</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>hotshot::{
     traits::{election::static_committee::GeneralStaticCommittee, NodeImplementation},
     types::{Event, SystemContextHandle},
@@ -1268,6 +1272,7 @@
     vid::{VidCommitment, VidPrecomputeData},
 };
 <span class="kw">use </span>lru::LruCache;
+<span class="kw">use </span>vbs::version::StaticVersionType;
 
 <span class="kw">use </span><span class="kw">crate</span>::WaitAndKeep;
 <span class="kw">use crate</span>::{
@@ -2059,18 +2064,18 @@ Handling Builder API responses
     </span>}
 }
 
-<span class="kw">async fn </span>connect_to_events_service&lt;Types: NodeType, V: Versions&gt;(
+<span class="kw">async fn </span>connect_to_events_service&lt;Types: NodeType, ApiVer: StaticVersionType&gt;(
     hotshot_events_api_url: Url,
 ) -&gt; <span class="prelude-ty">Option</span>&lt;(
     surf_disco::socket::Connection&lt;
         Event&lt;Types&gt;,
         surf_disco::socket::Unsupported,
         EventStreamError,
-        V::Base,
+        ApiVer,
     &gt;,
     GeneralStaticCommittee&lt;Types, &lt;Types <span class="kw">as </span>NodeType&gt;::SignatureKey&gt;,
 )&gt; {
-    <span class="kw">let </span>client = surf_disco::Client::&lt;hotshot_events_service::events::Error, V::Base&gt;::new(
+    <span class="kw">let </span>client = surf_disco::Client::&lt;hotshot_events_service::events::Error, ApiVer&gt;::new(
         hotshot_events_api_url.clone(),
     );
 
@@ -2119,7 +2124,10 @@ Handling Builder API responses
 <span class="comment">/*
 Running Non-Permissioned Builder Service
 */
-</span><span class="kw">pub async fn </span>run_non_permissioned_standalone_builder_service&lt;Types: NodeType, V: Versions&gt;(
+</span><span class="kw">pub async fn </span>run_non_permissioned_standalone_builder_service&lt;
+    Types: NodeType,
+    ApiVer: StaticVersionType,
+&gt;(
     <span class="comment">// sending a DA proposal from the hotshot to the builder states
     </span>da_sender: BroadcastSender&lt;MessageType&lt;Types&gt;&gt;,
 
@@ -2136,7 +2144,7 @@ Running Non-Permissioned Builder Service
     </span>global_state: Arc&lt;RwLock&lt;GlobalState&lt;Types&gt;&gt;&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;(), anyhow::Error&gt; {
     <span class="comment">// connection to the events stream
-    </span><span class="kw">let </span>connected = connect_to_events_service::&lt;<span class="kw">_</span>, V&gt;(hotshot_events_api_url.clone()).<span class="kw">await</span>;
+    </span><span class="kw">let </span>connected = connect_to_events_service::&lt;<span class="kw">_</span>, ApiVer&gt;(hotshot_events_api_url.clone()).<span class="kw">await</span>;
     <span class="kw">if </span>connected.is_none() {
         <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">anyhow!</span>(
             <span class="string">"failed to connect to API at {hotshot_events_api_url}"
@@ -2220,7 +2228,7 @@ Running Non-Permissioned Builder Service
             <span class="prelude-val">None </span>=&gt; {
                 <span class="macro">tracing::error!</span>(<span class="string">"Event stream ended"</span>);
                 <span class="kw">let </span>connected =
-                    connect_to_events_service::&lt;<span class="kw">_</span>, V&gt;(hotshot_events_api_url.clone()).<span class="kw">await</span>;
+                    connect_to_events_service::&lt;<span class="kw">_</span>, ApiVer&gt;(hotshot_events_api_url.clone()).<span class="kw">await</span>;
                 <span class="kw">if </span>connected.is_none() {
                     <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">anyhow!</span>(
                         <span class="string">"failed to reconnect to API at {hotshot_events_api_url}"
