@@ -1253,7 +1253,7 @@ dependencies = [
 [[package]]
 name = "cdn-broker"
 version = "0.4.0"
-source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.4.6#69df01c790f26ce16214ac560dc7fed5166ba9f5"
+source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.4.7#5406fde54e61058428a7b55e1a98b699f0f606f1"
 dependencies = [
  "async-std",
  "cdn-proto",
@@ -1277,12 +1277,13 @@ dependencies = [
 [[package]]
 name = "cdn-client"
 version = "0.4.0"
-source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.4.6#69df01c790f26ce16214ac560dc7fed5166ba9f5"
+source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.4.7#5406fde54e61058428a7b55e1a98b699f0f606f1"
 dependencies = [
  "async-std",
  "cdn-proto",
  "clap",
  "jf-signature",
+ "parking_lot",
  "rand 0.8.5",
  "tokio",
  "tracing",
@@ -1292,7 +1293,7 @@ dependencies = [
 [[package]]
 name = "cdn-marshal"
 version = "0.4.0"
-source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.4.6#69df01c790f26ce16214ac560dc7fed5166ba9f5"
+source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.4.7#5406fde54e61058428a7b55e1a98b699f0f606f1"
 dependencies = [
  "async-std",
  "cdn-proto",
@@ -1306,7 +1307,7 @@ dependencies = [
 [[package]]
 name = "cdn-proto"
 version = "0.4.0"
-source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.4.6#69df01c790f26ce16214ac560dc7fed5166ba9f5"
+source = "git+https://github.com/EspressoSystems/Push-CDN?tag=0.4.7#5406fde54e61058428a7b55e1a98b699f0f606f1"
 dependencies = [
  "anyhow",
  "ark-serialize",
@@ -2973,8 +2974,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot"
-version = "0.5.73"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.74#f532baa295b2230969cbd5fb0b78e8930bf0a03b"
+version = "0.5.76"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.76#b715bd4976daccfda8087a050cad152c3415f6ab"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3005,6 +3006,7 @@ dependencies = [
  "libp2p-networking",
  "lru 0.12.4",
  "num_enum",
+ "parking_lot",
  "portpicker",
  "rand 0.8.5",
  "serde",
@@ -3021,7 +3023,7 @@ dependencies = [
 [[package]]
 name = "hotshot-builder-api"
 version = "0.1.7"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.74#f532baa295b2230969cbd5fb0b78e8930bf0a03b"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.76#b715bd4976daccfda8087a050cad152c3415f6ab"
 dependencies = [
  "async-trait",
  "clap",
@@ -3039,7 +3041,7 @@ dependencies = [
 
 [[package]]
 name = "hotshot-builder-core"
-version = "0.1.45"
+version = "0.1.46"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3072,8 +3074,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot-events-service"
-version = "0.1.40"
-source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?branch=hotshot/rc-0.5.74#e9e11a15c4b931e62689142348afe38777c98854"
+version = "0.1.48"
+source = "git+https://github.com/EspressoSystems/hotshot-events-service.git?branch=hotshot/rc-0.5.76#bc00475222bc949a673e46822d670671cf1b45f4"
 dependencies = [
  "async-broadcast",
  "async-compatibility-layer",
@@ -3098,8 +3100,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot-example-types"
-version = "0.5.73"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.74#f532baa295b2230969cbd5fb0b78e8930bf0a03b"
+version = "0.5.76"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.76#b715bd4976daccfda8087a050cad152c3415f6ab"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3131,8 +3133,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot-orchestrator"
-version = "0.5.73"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.74#f532baa295b2230969cbd5fb0b78e8930bf0a03b"
+version = "0.5.76"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.76#b715bd4976daccfda8087a050cad152c3415f6ab"
 dependencies = [
  "anyhow",
  "async-compatibility-layer",
@@ -3161,8 +3163,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot-task"
-version = "0.5.73"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.74#f532baa295b2230969cbd5fb0b78e8930bf0a03b"
+version = "0.5.76"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.76#b715bd4976daccfda8087a050cad152c3415f6ab"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3176,8 +3178,8 @@ dependencies = [
 
 [[package]]
 name = "hotshot-task-impls"
-version = "0.5.73"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.74#f532baa295b2230969cbd5fb0b78e8930bf0a03b"
+version = "0.5.76"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.76#b715bd4976daccfda8087a050cad152c3415f6ab"
 dependencies = [
  "anyhow",
  "async-broadcast",
@@ -3214,7 +3216,7 @@ dependencies = [
 [[package]]
 name = "hotshot-types"
 version = "0.1.11"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.74#f532baa295b2230969cbd5fb0b78e8930bf0a03b"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.76#b715bd4976daccfda8087a050cad152c3415f6ab"
 dependencies = [
  "anyhow",
  "ark-bn254",
@@ -3241,7 +3243,6 @@ dependencies = [
  "espresso-systems-common",
  "ethereum-types",
  "futures",
- "generic-array",
  "jf-pcs",
  "jf-signature",
  "jf-utils",
@@ -4266,8 +4267,8 @@ dependencies = [
 
 [[package]]
 name = "libp2p-networking"
-version = "0.5.73"
-source = "git+https://github.com/EspressoSystems/HotShot.git?tag=rc-0.5.74#f532baa295b2230969cbd5fb0b78e8930bf0a03b"
+version = "0.5.76"
+source = "git+https://github.com/EspressoSystems/HotShot.git?branch=bump/rc-0.5.76#b715bd4976daccfda8087a050cad152c3415f6ab"
 dependencies = [
  "anyhow",
  "async-compatibility-layer",
@@ -5784,9 +5785,9 @@ dependencies = [
 
 [[package]]
 name = "redis"
-version = "0.25.4"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0d7a6955c7511f60f3ba9e86c6d02b3c3f144f8c24b288d1f4e18074ab8bbec"
+checksum = "e902a69d09078829137b4a5d9d082e0490393537badd7c91a3d69d14639e115f"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -5795,6 +5796,7 @@ dependencies = [
  "futures",
  "futures-util",
  "itoa",
+ "num-bigint",
  "percent-encoding",
  "pin-project-lite 0.2.14",
  "ryu",
