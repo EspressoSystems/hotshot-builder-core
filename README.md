@@ -1,3 +1,1 @@
-# hotshot-builder-core
-
-Builder support library for hotshot
+# DEPRECATED: all builder code can now be found at [marketplace-builder-core](https://github.com/EspressoSystems/marketplace-builder-core)
